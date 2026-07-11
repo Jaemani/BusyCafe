@@ -56,6 +56,16 @@ Neon 또는 Supabase에서 production DB를 만들고 다음을 확인한다.
 
 Vercel을 DB에 연결하기 전에 운영자 로컬 환경에서 bootstrap한다. 먼저 migration을 적용한다.
 
+원격 production은 `bootstrap-production.yml`을 기본 dry-run으로 먼저 실행한다.
+
+```bash
+gh workflow run bootstrap-production.yml -f apply=false
+```
+
+이 run은 migration을 적용하고 hotspot·카페 seed 예상 건수, Overture release와 cache hash를
+출력하지만 seed와 외부 서울 API 수집은 적용하지 않는다. 로그 검수와 명시적 HUMAN 승인
+뒤에만 `apply=true` run을 실행한다.
+
 ```bash
 cd backend
 uv sync --frozen

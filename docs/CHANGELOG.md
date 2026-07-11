@@ -23,6 +23,7 @@
 - 세 개 고도화 트랙 및 유니버설 확장 로드맵 문서화
 - Phase 6 지역 혼잡/매장 효용 이중 라벨 evaluator와 거리대별 24곳 현장 후보
 - 전체 수집 cycle 상태, production freshness monitor와 백업·복구 runbook
+- Production environment secret을 사용하는 fail-closed DB bootstrap dry-run/apply workflow
 
 ### Changed
 
