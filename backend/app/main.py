@@ -25,6 +25,7 @@ def create_app() -> FastAPI:
             "/api/cafes",
             "/api/hotspots",
             "/api/health",
+            "/api/sources",
         }:
             response.headers["Cache-Control"] = "public, max-age=30, s-maxage=60, stale-while-revalidate=300"
         return response

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.config import SCORING_MODEL_VERSION
+from app.config import OVERTURE_RELEASE, SCORING_MODEL_VERSION
 from app.database import get_db
 from app.main import create_app
 from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot
@@ -127,6 +127,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert [item["name"] for item in payload] == ["정확한 카페"]
     assert payload[0]["coverage"] == "covered"
     assert payload[0]["model_version"] == SCORING_MODEL_VERSION
+    assert payload[0]["license_manifest_url"] == "/api/sources"
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert payload[0]["evidence"]["observed_at"] is not None
     assert payload[0]["evidence"]["observed_at"].endswith("Z")
@@ -176,3 +177,24 @@ def test_health_counts_only_active_cafes(api_client) -> None:
     assert response.status_code == 200
     assert response.json()["cafes_count"] == 1
     assert response.json()["snapshots_last_hour"] == 1
+
+
+def test_sources_returns_static_license_manifest(api_client) -> None:
+    response = api_client.get("/api/sources")
+
+    assert response.status_code == 200
+    assert "s-maxage=60" in response.headers["cache-control"]
+    payload = response.json()
+    sources = {item["id"]: item for item in payload["sources"]}
+    assert set(sources) == {"seoul-citydata", "overture-places", "openfreemap"}
+    assert sources["overture-places"]["release"] == OVERTURE_RELEASE
+    assert sources["seoul-citydata"]["licenses"] == [
+        {
+            "name": "공공누리 제1유형",
+            "url": "https://www.kogl.or.kr/info/licenseType1.do",
+        }
+    ]
+    assert any(
+        license_link["name"] == "OpenStreetMap ODbL"
+        for license_link in sources["openfreemap"]["licenses"]
+    )

@@ -13,17 +13,20 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.config import MAX_CAFES_PER_VIEWPORT
+from app.config import MAX_CAFES_PER_VIEWPORT, OVERTURE_RELEASE
 from app.database import get_db
 from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot
 from app.schemas import (
     CafeDetailResponse,
     CafeMapResponse,
     ContributorResponse,
+    DataSourceManifestItem,
     EvidenceResponse,
     ExternalLinksResponse,
     HealthResponse,
     HotspotStatusResponse,
+    LicenseLink,
+    SourceManifestResponse,
     TrendPointResponse,
 )
 
@@ -35,6 +38,70 @@ _DIRECT_LINK_HOSTS = {
     "kakao": {"place.map.kakao.com"},
     "google": {"www.google.com", "maps.google.com", "google.com"},
 }
+_SOURCE_MANIFEST = SourceManifestResponse(
+    sources=[
+        DataSourceManifestItem(
+            id="seoul-citydata",
+            role="crowd_observation",
+            name="서울시 실시간 도시데이터",
+            attribution=(
+                "서울특별시 서울시 실시간 도시데이터(OA-21285), "
+                "공공누리 제1유형"
+            ),
+            source_url=(
+                "https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do"
+            ),
+            licenses=[
+                LicenseLink(
+                    name="공공누리 제1유형",
+                    url="https://www.kogl.or.kr/info/licenseType1.do",
+                )
+            ],
+        ),
+        DataSourceManifestItem(
+            id="overture-places",
+            role="place_catalog",
+            name="Overture Places",
+            attribution="Overture Maps Foundation",
+            source_url="https://docs.overturemaps.org/attribution/",
+            release=OVERTURE_RELEASE,
+            licenses=[
+                LicenseLink(
+                    name="CDLA-Permissive-2.0",
+                    url="https://cdla.dev/permissive-2-0/",
+                ),
+                LicenseLink(
+                    name="CC0-1.0",
+                    url="https://creativecommons.org/publicdomain/zero/1.0/",
+                ),
+            ],
+        ),
+        DataSourceManifestItem(
+            id="openfreemap",
+            role="basemap",
+            name="OpenFreeMap",
+            attribution="OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
+            source_url="https://openfreemap.org/",
+            licenses=[
+                LicenseLink(
+                    name="OpenFreeMap Terms of Service",
+                    url="https://openfreemap.org/tos/",
+                ),
+                LicenseLink(
+                    name="OpenMapTiles BSD-3-Clause / CC-BY 4.0",
+                    url=(
+                        "https://github.com/openmaptiles/openmaptiles/"
+                        "blob/master/LICENSE.md"
+                    ),
+                ),
+                LicenseLink(
+                    name="OpenStreetMap ODbL",
+                    url="https://www.openstreetmap.org/copyright",
+                ),
+            ],
+        ),
+    ]
+)
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -127,6 +194,11 @@ def _cafe_response(
 
 def _set_cache_headers(response: Response) -> None:
     response.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
+
+
+@router.get("/sources", response_model=SourceManifestResponse)
+def sources() -> SourceManifestResponse:
+    return _SOURCE_MANIFEST
 
 
 @router.get("/cafes", response_model=list[CafeMapResponse])

@@ -114,6 +114,25 @@ class ExternalLinksResponse(BaseModel):
     google: str | None = None
 
 
+class LicenseLink(BaseModel):
+    name: str
+    url: str
+
+
+class DataSourceManifestItem(BaseModel):
+    id: str
+    role: str
+    name: str
+    attribution: str
+    source_url: str
+    release: str | None = None
+    licenses: list[LicenseLink]
+
+
+class SourceManifestResponse(BaseModel):
+    sources: list[DataSourceManifestItem]
+
+
 class CafeMapResponse(BaseModel):
     id: int
     name: str
@@ -123,6 +142,7 @@ class CafeMapResponse(BaseModel):
     phone: str | None = None
     website: str | None = None
     source_label: str
+    license_manifest_url: str = "/api/sources"
     model_version: str | None = None
     level: int | None = None
     score: float | None = None

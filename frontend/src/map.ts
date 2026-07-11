@@ -251,11 +251,6 @@ export async function initializeCafeMap(
   map.addControl(geolocateControl, "bottom-right");
   const attributionControl = new maplibregl.AttributionControl({ compact: true });
   map.addControl(attributionControl, "bottom-right");
-  const attributionElement = map
-    .getContainer()
-    .querySelector<HTMLDetailsElement>(".maplibregl-ctrl-attrib");
-  attributionElement?.classList.remove("maplibregl-compact-show");
-  attributionElement?.removeAttribute("open");
 
   const cafeProvider = provider ?? new CachedApiCafeProvider();
 
