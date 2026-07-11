@@ -41,6 +41,7 @@
 ### Security
 
 - 경로형 서울 API 키가 HTTP client INFO 로그에 노출되지 않도록 `httpx/httpcore` 로그 차단
+- 서울 API 키 교체 후 121개 전체 full-cycle을 secret-safe logging으로 재검증
 
 ## 릴리스 템플릿
 

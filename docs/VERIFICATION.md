@@ -7,7 +7,7 @@
 | Phase | 상태 | 완료일 | 근거 |
 |---|---|---|---|
 | Phase 0 | 완료 | 2026-07-11 | 실 API/스키마/라벨/호출 제한/마스터 검증 및 fixture 커밋 |
-| Phase 1 | 진행 중 (121개 범위 재검증) | - | 공식 master 검증 완료. 기존 10개 대상 검증은 legacy이며 121개 seed apply·1시간 무인 구동·full-cycle 측정 전 |
+| Phase 1 | 진행 중 (1시간 무인 구동 대기) | - | 121개 seed apply와 full-cycle 121/121 성공 확인. 대상별 5개 snapshot 1시간 검증 전 |
 | Phase 2 | 진행 중 (catalog cache 설계/구현) | - | Overture release cache·인허가 보정·직접 상세 링크 검증 전 |
 | Phase 3 | 병렬 구현 완료·gate 대기 | - | 순수 IDW/신뢰도/materialize 및 테스트 완료, Phase 2 HUMAN 품질 gate 대기 |
 | Phase 4 | 병렬 구현 완료·gate 대기 | - | cache-only 4 endpoint·CORS·bbox p95 검증 완료, Phase 3 gate 대기 |
@@ -279,3 +279,15 @@
 - 테스트: backend 87 passed(당시), frontend typecheck/build PASS
 - 판정: cache/API/P3 순수함수·materialize PASS. Phase 1 full cycle은 키 교체 후 재검증 필요
 - 관련 인시던트: `INC-2026-005`, `INC-2026-006`
+
+## 2026-07-11 — Phase 1 / 새 서울 API 키로 121개 full cycle 재검증
+
+- 실행 환경: local preview SQLite cache, 단일 ingest worker
+- 사전 검증: 새 키로 `광화문광장` 단일 호출 성공. `httpx`/`httpcore` WARNING 고정으로 request URL 로그 미출력 확인
+- 실행: `rtk uv run python -m app.ingest.worker --once --database-url sqlite+pysqlite:///data/preview.db`
+- 결과: targets=121, saved=121, failed=0. 실행은 10분 SLA보다 충분히 짧은 단일 cycle 안에 완료됐다.
+- 저장 확인: 새 cycle의 distinct hotspot 121개, health `last_ingest_at=2026-07-11T10:10:25Z`, 최근 1시간 snapshot 185개(이전 부분 cycle 포함)
+- materialize 결과: cafes=4,933; covered=2,317 / fringe=1,523 / uncovered=1,093
+- Tailnet 확인: `/api/health`, bbox `/api/cafes` HTTP 200. 홍대 viewport 522곳 모두 score/evidence 갱신 시각을 반환했다.
+- 판정: PASS (키 교체·secret-safe logging·full cycle). 1시간 무인 구동과 대상별 5개 snapshot DoD만 남음.
+- 관련 인시던트: `INC-2026-006`
