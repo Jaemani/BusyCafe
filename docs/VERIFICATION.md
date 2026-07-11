@@ -299,3 +299,17 @@
 - 수정: API 경계에서 timezone 없는 SQLite datetime을 UTC로 복원해 `2026-07-11T09:40:00Z` 형태로 반환. 패널은 경과 분 숫자를 표시하지 않음
 - 검증: bbox API 응답의 `evidence.observed_at`가 `Z` suffix를 포함하는 회귀 테스트와 local/tailnet HTTP 확인 PASS
 - 관련 인시던트: `INC-2026-007`
+
+## 2026-07-11 — Vercel 읽기 전용 스냅샷 배포
+
+- 배포 URL: `https://budy-cafe.vercel.app`
+- 배포 모델: `api/data/preview.db`의 카페 4,933개·저장된 혼잡도 점수를 포함한 읽기 전용
+  SQLite 스냅샷이다. 요청 중 외부 API를 호출하지 않으며 서울 API 키도 배포하지 않는다.
+- 검증: production에서 `/` HTTP 200, `/api/health` HTTP 200,
+  홍대 인근 bbox `/api/cafes` HTTP 200(1,059,073 bytes) 확인.
+- UI 배포: Vite 정적 산출물을 동일 함수에서 제공한다. 지도 attribution은 화면 최하단의
+  접힌 버튼으로 시작하며, 누르면만 원문 표기를 펼친다.
+- 제한: Vercel 서버리스는 지속 10분 worker와 쓰기 가능한 SQLite를 제공하지 않는다.
+  따라서 이 URL은 **배포 시점 스냅샷**이며, 현행성은 데이터 출처에 명시한다. 실시간 운영은
+  managed PostgreSQL과 별도 ingest worker로 전환할 때에만 약속한다.
+- 판정: PASS

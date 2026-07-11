@@ -34,6 +34,7 @@ frontend/dist/
 *.pid
 logs/
 backend/data/
+api/data/*.db
 
 # IDE / OS
 .DS_Store
@@ -46,3 +47,4 @@ tmp/
 *.tmp
 *.log
 .tokensave/
+.vercel

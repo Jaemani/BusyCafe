@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
@@ -107,6 +108,7 @@ def _cafe_response(
         website=_safe_website(cafe.website),
         source_label=(
             f"Overture Places · {cafe.source_release} · 신뢰도 {cafe.source_confidence:.2f}"
+            + (" · 배포 스냅샷" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "")
         ),
         level=score.level if score else None,
         score=score.score if score else None,
