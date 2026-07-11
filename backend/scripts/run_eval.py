@@ -13,6 +13,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from math import isfinite
 from pathlib import Path
 from statistics import mean
 from typing import Literal
@@ -20,15 +21,29 @@ from typing import Literal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.config import COVERED_M, R_MAX_M, SCORING_MODEL_VERSION
+from app.config import (
+    COVERED_M,
+    EVAL_AREA_PEDESTRIANS_PER_MIN_THRESHOLDS,
+    R_MAX_M,
+    SCORING_MODEL_VERSION,
+)
 from app.database import create_db_engine
 from app.models import Cafe, Hotspot, HotspotSnapshot
 from app.scoring.engine import HotspotObservation, score_cafe
 
 
 REQUIRED_COLUMNS = frozenset(
-    {"cafe_id", "observed_at", "slot", "observed_area_level"}
+    {
+        "cafe_id",
+        "observed_at",
+        "slot",
+        "observed_area_level",
+        "pedestrians_per_min",
+        "flow_obstruction",
+        "observer_notes",
+    }
 )
+FLOW_OBSTRUCTIONS = frozenset({"none", "repeated_avoidance", "blocked"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +54,9 @@ class GroundTruth:
     slot: str
     observed_area_level: int
     observed_venue_level: int | None = None
+    pedestrians_per_min: float | None = None
+    flow_obstruction: str = "none"
+    observer_notes: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +108,35 @@ def _parse_level(value: str | None, *, field: str) -> int:
     return parsed
 
 
+def _parse_pedestrians_per_min(value: str | None) -> float:
+    try:
+        parsed = float(value) if isinstance(value, str) and value.strip() else None
+    except ValueError as exc:
+        raise ValueError(
+            "pedestrians_per_min must be a finite nonnegative number"
+        ) from exc
+    if parsed is None or not isfinite(parsed) or parsed < 0:
+        raise ValueError("pedestrians_per_min must be a finite nonnegative number")
+    return parsed
+
+
+def _derive_area_level(pedestrians_per_min: float, flow_obstruction: str) -> int:
+    first, second, third = EVAL_AREA_PEDESTRIANS_PER_MIN_THRESHOLDS
+    if pedestrians_per_min <= first:
+        level = 1
+    elif pedestrians_per_min <= second:
+        level = 2
+    elif pedestrians_per_min <= third:
+        level = 3
+    else:
+        level = 4
+    if flow_obstruction == "repeated_avoidance":
+        return max(level, 3)
+    if flow_obstruction == "blocked":
+        return 4
+    return level
+
+
 def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
     """Load valid observations and count malformed rows.
 
@@ -114,6 +161,28 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
                 observed_area_level = _parse_level(
                     row["observed_area_level"], field="observed_area_level"
                 )
+                pedestrians_per_min = _parse_pedestrians_per_min(
+                    row["pedestrians_per_min"]
+                )
+                raw_flow_obstruction = row["flow_obstruction"]
+                if not isinstance(raw_flow_obstruction, str):
+                    raise ValueError("flow_obstruction is required")
+                flow_obstruction = raw_flow_obstruction.strip()
+                if flow_obstruction not in FLOW_OBSTRUCTIONS:
+                    raise ValueError("invalid flow_obstruction")
+                raw_observer_notes = row["observer_notes"]
+                observer_notes = (
+                    raw_observer_notes.strip()
+                    if isinstance(raw_observer_notes, str)
+                    else ""
+                )
+                if flow_obstruction != "none" and not observer_notes:
+                    raise ValueError("observer_notes required for flow obstruction")
+                derived_area_level = _derive_area_level(
+                    pedestrians_per_min, flow_obstruction
+                )
+                if observed_area_level != derived_area_level:
+                    raise ValueError("observed_area_level does not match raw evidence")
                 raw_slot = row["slot"]
                 if not isinstance(raw_slot, str) or not raw_slot.strip():
                     raise ValueError("slot must be nonblank")
@@ -137,6 +206,9 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
                     slot=slot,
                     observed_area_level=observed_area_level,
                     observed_venue_level=observed_venue_level,
+                    pedestrians_per_min=pedestrians_per_min,
+                    flow_obstruction=flow_obstruction,
+                    observer_notes=observer_notes,
                 )
             )
     return valid, total, invalid
@@ -349,6 +421,7 @@ def render_markdown(report: EvaluationReport) -> str:
         f"- Valid predictions: {overall.observations}",
         f"- Uncovered: {report.uncovered_rows}",
         f"- Invalid: {report.invalid_rows}",
+        "- Validation contract: area level is derived from pedestrians/min and flow obstruction; mismatches are invalid.",
         "",
         "## Primary surrounding-area metrics",
         "",

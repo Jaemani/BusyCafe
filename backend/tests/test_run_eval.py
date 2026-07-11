@@ -118,10 +118,11 @@ def _seed_database(path: Path) -> str:
 def test_csv_contract_counts_bad_rows_and_normalizes_to_utc(tmp_path: Path) -> None:
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
-        "1,2026-07-12T12:00:00+09:00,lunch,1,\n"
-        "2,2026-07-12T03:00:00,lunch,4,2\n"
-        "3,2026-07-12T03:00:00Z,lunch,5,3\n",
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level,"
+        "pedestrians_per_min,flow_obstruction,observer_notes\n"
+        "1,2026-07-12T12:00:00+09:00,lunch,1,,5,none,\n"
+        "2,2026-07-12T03:00:00,lunch,4,2,31,none,\n"
+        "3,2026-07-12T03:00:00Z,lunch,5,3,31,none,\n",
         encoding="utf-8",
     )
 
@@ -133,13 +134,19 @@ def test_csv_contract_counts_bad_rows_and_normalizes_to_utc(tmp_path: Path) -> N
     assert observations[0].observed_at == NOW
     assert observations[0].observed_area_level == 1
     assert observations[0].observed_venue_level is None
+    assert observations[0].pedestrians_per_min == 5
+    assert observations[0].flow_obstruction == "none"
 
 
 def test_csv_missing_required_column_fails_the_contract(tmp_path: Path) -> None:
     csv_path = tmp_path / "observations.csv"
-    csv_path.write_text("cafe_id,observed_at\n1,2026-07-12T03:00:00Z\n")
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction\n"
+        "1,2026-07-12T03:00:00Z,lunch,1,5,none\n"
+    )
 
-    with pytest.raises(ValueError, match="observed_area_level.*slot|slot.*observed_area_level"):
+    with pytest.raises(ValueError, match="observer_notes"):
         load_observations(csv_path)
 
 
@@ -148,9 +155,10 @@ def test_csv_rejects_blank_slot_and_invalid_optional_venue_level(
 ) -> None:
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
-        "1,2026-07-12T03:00:00Z,,1,2\n"
-        "2,2026-07-12T03:00:00Z,lunch,4,5\n",
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level,"
+        "pedestrians_per_min,flow_obstruction,observer_notes\n"
+        "1,2026-07-12T03:00:00Z,,1,2,5,none,\n"
+        "2,2026-07-12T03:00:00Z,lunch,4,5,31,none,\n",
         encoding="utf-8",
     )
 
@@ -164,8 +172,9 @@ def test_csv_rejects_blank_slot_and_invalid_optional_venue_level(
 def test_csv_allows_missing_optional_venue_column(tmp_path: Path) -> None:
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,slot,observed_area_level\n"
-        "1,2026-07-12T03:00:00Z,lunch,1\n",
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        "1,2026-07-12T03:00:00Z,lunch,1,5,none,\n",
         encoding="utf-8",
     )
 
@@ -174,6 +183,100 @@ def test_csv_allows_missing_optional_venue_column(tmp_path: Path) -> None:
     assert total == 1
     assert invalid == 0
     assert observations[0].observed_venue_level is None
+
+
+@pytest.mark.parametrize(
+    ("pedestrians_per_min", "expected_level"),
+    [("5", 1), ("15", 2), ("30", 3), ("30.1", 4)],
+)
+def test_csv_derives_area_level_at_threshold_boundaries(
+    tmp_path: Path, pedestrians_per_min: str, expected_level: int
+) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        f"1,2026-07-12T03:00:00Z,lunch,{expected_level},"
+        f"{pedestrians_per_min},none,\n",
+        encoding="utf-8",
+    )
+
+    observations, _, invalid = load_observations(csv_path)
+
+    assert invalid == 0
+    assert observations[0].observed_area_level == expected_level
+
+
+@pytest.mark.parametrize(
+    ("flow_obstruction", "expected_level", "notes"),
+    [
+        ("repeated_avoidance", 3, "people repeatedly stepped aside"),
+        ("blocked", 4, "flow stopped"),
+    ],
+)
+def test_csv_flow_obstruction_overrides_raw_level(
+    tmp_path: Path, flow_obstruction: str, expected_level: int, notes: str
+) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        f"1,2026-07-12T03:00:00Z,lunch,{expected_level},1,"
+        f"{flow_obstruction},{notes}\n",
+        encoding="utf-8",
+    )
+
+    observations, _, invalid = load_observations(csv_path)
+
+    assert invalid == 0
+    assert observations[0].flow_obstruction == flow_obstruction
+    assert observations[0].observer_notes == notes
+
+
+def test_csv_rejects_area_level_mismatch(tmp_path: Path) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        "1,2026-07-12T03:00:00Z,lunch,4,5,none,\n",
+        encoding="utf-8",
+    )
+
+    observations, _, invalid = load_observations(csv_path)
+
+    assert observations == []
+    assert invalid == 1
+
+
+@pytest.mark.parametrize("value", ["NaN", "inf", "-1"])
+def test_csv_rejects_invalid_pedestrian_counts(tmp_path: Path, value: str) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        f"1,2026-07-12T03:00:00Z,lunch,1,{value},none,\n",
+        encoding="utf-8",
+    )
+
+    observations, _, invalid = load_observations(csv_path)
+
+    assert observations == []
+    assert invalid == 1
+
+
+def test_csv_requires_notes_for_obstruction(tmp_path: Path) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,pedestrians_per_min,"
+        "flow_obstruction,observer_notes\n"
+        "1,2026-07-12T03:00:00Z,lunch,3,1,repeated_avoidance\n",
+        encoding="utf-8",
+    )
+
+    observations, _, invalid = load_observations(csv_path)
+
+    assert observations == []
+    assert invalid == 1
 
 
 def test_spearman_uses_average_ranks_and_handles_undefined_cases() -> None:
@@ -267,6 +370,7 @@ def test_evaluate_reconstructs_historical_snapshots_and_counts_outcomes(
     assert "| same slot | 2 | 1.000 | 1.000 |" in markdown
     assert "## Primary surrounding-area metrics" in markdown
     assert "## Optional venue utility metrics" in markdown
+    assert "Validation contract: area level is derived" in markdown
     assert "| 2 | 1.000 | 1.000 |" in markdown
     assert "- Uncovered: 1" in markdown
     assert "- Invalid: 1" in markdown
@@ -291,9 +395,10 @@ def test_cli_prints_by_default_and_only_writes_with_output(
     database_url = _seed_database(tmp_path / "eval.db")
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
-        "1,2026-07-12T03:00:00Z,slot-a,1,2\n"
-        "2,2026-07-12T03:00:00Z,slot-a,4,3\n",
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level,"
+        "pedestrians_per_min,flow_obstruction,observer_notes\n"
+        "1,2026-07-12T03:00:00Z,slot-a,1,2,5,none,\n"
+        "2,2026-07-12T03:00:00Z,slot-a,4,3,31,none,\n",
         encoding="utf-8",
     )
 
