@@ -400,5 +400,9 @@
   코드와 강제 숨김 CSS를 삭제해 라이브러리 기본 동작을 복원했다.
 - 프론트엔드 TypeScript typecheck와 production build는 통과했다. attribution의 최초 표시,
   접힘·펼침과 모바일 배치는 실제 브라우저 수동 검증이 남아 있다.
+- production `busy-cafe-g2ozf7t2k-jaemanis-projects.vercel.app`은 Ready이며 정확한
+  `busy-cafe.vercel.app` alias에 연결했다. 직접 deployment와 alias의 `/api/sources`가
+  모두 HTTP 200으로 세 source ID, 공공누리 제1유형과 Overture release를 반환했고,
+  배포 HTML에서 서울특별시·Overture·전체 라이선스 링크를 확인했다.
 - 코드 라이선스 선택과 루트 `LICENSE` 추가는 저장소 소유자의 `[HUMAN]` 결정이 필요해
   미완료 상태다.
