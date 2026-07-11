@@ -14,9 +14,12 @@
       <div id="map" aria-label="서울 카페 지도"></div>
 
       <header class="map-header">
-        <div>
-          <p class="eyebrow">BUSY CAFE</p>
-          <h1>지금, 어디가 덜 붐빌까?</h1>
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">B</span>
+          <div>
+            <p class="eyebrow">BUSY CAFE</p>
+            <h1>지금, 어디가 덜 붐빌까?</h1>
+          </div>
         </div>
         <p id="search-status" class="search-status" role="status">
           지도를 준비하고 있습니다
@@ -28,19 +31,36 @@
         <p class="panel-label">선택한 카페</p>
         <h2 id="cafe-name"></h2>
         <p id="cafe-address" class="cafe-address"></p>
+        <div class="cafe-contact">
+          <span id="cafe-phone">전화 정보 없음</span>
+          <a id="cafe-website" target="_blank" rel="noopener noreferrer" hidden>등록 웹사이트</a>
+        </div>
         <div class="estimate-placeholder">
-          <span class="estimate-dot"></span>
+          <span id="estimate-dot" class="estimate-dot" data-level="0"></span>
           <div>
-            <strong>주변 혼잡도 연결 전</strong>
-            <p>카페 위치는 실제 Kakao Local 결과이며, 혼잡도는 추정 근거가 준비된 뒤 표시합니다.</p>
+            <strong>주변 혼잡도 추정 · <span id="cafe-level">데이터 없음</span></strong>
+            <p id="cafe-evidence">이 지역은 아직 혼잡도 근거가 연결되지 않았어요.</p>
+            <div class="estimate-badges">
+              <span id="cafe-coverage">실시간 미커버</span>
+              <span id="cafe-confidence">신뢰도 산정 전</span>
+            </div>
           </div>
         </div>
-        <a id="cafe-link" class="cafe-link" target="_blank" rel="noreferrer">카카오맵에서 보기</a>
+        <p id="cafe-source" class="cafe-source"></p>
+        <nav id="external-map-links" class="external-map-links" aria-label="외부 지도 가게 상세" hidden>
+          <a id="map-link-naver" target="_blank" rel="noopener noreferrer" hidden>네이버 가게 상세</a>
+          <a id="map-link-kakao" target="_blank" rel="noopener noreferrer" hidden>카카오 가게 상세</a>
+          <a id="map-link-google" target="_blank" rel="noopener noreferrer" hidden>Google 가게 상세</a>
+        </nav>
       </aside>
 
-      <div class="legend" aria-label="지도 안내">
-        <span class="legend-marker"></span>
-        현재 화면의 카페
+      <div id="map-legend" class="legend" data-state="preview" aria-label="지도 안내">
+        <span class="legend-level"><i class="legend-marker level-calm"></i>여유</span>
+        <span class="legend-level"><i class="legend-marker level-normal"></i>보통</span>
+        <span class="legend-level"><i class="legend-marker level-crowded"></i>약간 붐빔</span>
+        <span class="legend-level"><i class="legend-marker level-busy"></i>붐빔</span>
+        <span class="legend-level"><i class="legend-marker level-none"></i>데이터 없음</span>
+        <span class="legend-preview"><i class="legend-marker level-none"></i>카페 위치 미리보기 · 혼잡도 연결 중</span>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

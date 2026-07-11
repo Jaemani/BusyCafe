@@ -1,3 +1,4 @@
+import "maplibre-gl/dist/maplibre-gl.css";
 import "./style.css";
 import { initializeCafeMap } from "./map";
 import { hideCafePanel } from "./panel";

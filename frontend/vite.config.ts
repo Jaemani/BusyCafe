@@ -6,5 +6,8 @@ export default defineConfig({
     port: 5188,
     strictPort: true,
     allowedHosts: [".tail2743ae.ts.net"],
+    proxy: {
+      "/api": "http://127.0.0.1:8190",
+    },
   },
 });
