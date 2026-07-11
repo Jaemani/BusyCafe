@@ -36,6 +36,14 @@ _DIRECT_LINK_HOSTS = {
 }
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    """Restore SQLite's lost timezone metadata using the UTC storage contract."""
+
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
     try:
         parsed = tuple(float(part.strip()) for part in value.split(","))
@@ -108,7 +116,7 @@ def _cafe_response(
         evidence=EvidenceResponse(
             hotspot_name=hotspot.name if hotspot else None,
             distance_m=score.primary_distance_m if score else None,
-            observed_at=observed_at,
+            observed_at=_utc(observed_at),
         ),
         external_links=_safe_external_links(cafe.external_links_json),
     )
@@ -179,12 +187,12 @@ def get_cafe(cafe_id: int, response: Response, db: Session = Depends(get_db)) ->
             .order_by(HotspotSnapshot.observed_at)
         ).all()
         trend = [
-            TrendPointResponse(observed_at=item.observed_at, level=item.congest_level)
+            TrendPointResponse(observed_at=_utc(item.observed_at), level=item.congest_level)
             for item in snapshots
         ]
         if snapshots:
             latest_snapshot = snapshots[-1]
-            base.evidence.observed_at = latest_snapshot.observed_at
+            base.evidence.observed_at = _utc(latest_snapshot.observed_at)
     contributors = []
     if score and score.contributors_json:
         contributors = [ContributorResponse.model_validate(item) for item in score.contributors_json]
@@ -240,7 +248,7 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
             name=hotspot.name,
             lat=hotspot.lat,
             lng=hotspot.lng,
-            observed_at=snapshot.observed_at if snapshot else None,
+            observed_at=_utc(snapshot.observed_at) if snapshot else None,
             level=snapshot.congest_level if snapshot else None,
         )
         for hotspot, snapshot in rows
@@ -251,7 +259,7 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
 def health(db: Session = Depends(get_db)) -> HealthResponse:
     now = datetime.now(UTC)
     return HealthResponse(
-        last_ingest_at=db.scalar(select(func.max(HotspotSnapshot.fetched_at))),
+        last_ingest_at=_utc(db.scalar(select(func.max(HotspotSnapshot.fetched_at)))),
         snapshots_last_hour=db.scalar(
             select(func.count())
             .select_from(HotspotSnapshot)

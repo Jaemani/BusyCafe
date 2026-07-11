@@ -291,3 +291,11 @@
 - Tailnet 확인: `/api/health`, bbox `/api/cafes` HTTP 200. 홍대 viewport 522곳 모두 score/evidence 갱신 시각을 반환했다.
 - 판정: PASS (키 교체·secret-safe logging·full cycle). 1시간 무인 구동과 대상별 5개 snapshot DoD만 남음.
 - 관련 인시던트: `INC-2026-006`
+
+## 2026-07-11 — API timestamp timezone 직렬화 보정
+
+- 증상: SQLite preview가 UTC offset을 보존하지 않아 브라우저 패널이 `09:40`을 KST로 해석, 약 30분 지연의 원본 데이터를 572분 전으로 표시
+- 원본 확인: citydata `PPLTN_TIME=2026-07-11 18:40` KST, 수집 시각 `19:10` KST
+- 수정: API 경계에서 timezone 없는 SQLite datetime을 UTC로 복원해 `2026-07-11T09:40:00Z` 형태로 반환. 패널은 경과 분 숫자를 표시하지 않음
+- 검증: bbox API 응답의 `evidence.observed_at`가 `Z` suffix를 포함하는 회귀 테스트와 local/tailnet HTTP 확인 PASS
+- 관련 인시던트: `INC-2026-007`

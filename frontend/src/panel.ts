@@ -10,16 +10,7 @@ function formatEvidence(cafe: CafeProperties): string {
   if (!cafe.hotspotName || cafe.distanceM === null) {
     return "이 지역은 아직 혼잡도 근거가 연결되지 않았어요.";
   }
-  const observed = cafe.observedAt ? new Date(cafe.observedAt) : null;
-  const ageMinutes = observed && !Number.isNaN(observed.getTime())
-    ? Math.max(0, Math.floor((Date.now() - observed.getTime()) / 60_000))
-    : null;
-  const ageText = ageMinutes === null
-    ? "갱신 시각 없음"
-    : ageMinutes < 1
-      ? "방금 갱신"
-      : `${ageMinutes.toLocaleString("ko-KR")}분 전 갱신`;
-  return `${cafe.hotspotName} 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m · ${ageText}`;
+  return `${cafe.hotspotName} 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m`;
 }
 
 const LEVEL_LABELS = ["데이터 없음", "여유", "보통", "약간 붐빔", "붐빔"] as const;

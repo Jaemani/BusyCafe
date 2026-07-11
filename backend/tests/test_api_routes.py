@@ -126,6 +126,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert payload[0]["coverage"] == "covered"
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert payload[0]["evidence"]["observed_at"] is not None
+    assert payload[0]["evidence"]["observed_at"].endswith("Z")
     assert payload[0]["phone"] == "02-123-4567"
     assert payload[0]["website"] == "https://example.test"
     assert payload[0]["external_links"]["kakao"].endswith("/456")
