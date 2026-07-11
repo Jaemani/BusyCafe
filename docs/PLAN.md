@@ -73,7 +73,7 @@
 
 ### 2.2 카카오 로컬 API
 
-- 발급: developers.kakao.com 앱 생성 → REST API 키. 지도 SDK용 JavaScript 키 + 사이트 도메인 등록도 함께. **[HUMAN]** Map/Local 제품 사용 활성화가 별도로 필요하며, 미활성화 시 `disabled OPEN_MAP_AND_LOCAL service` 403을 반환한다. JavaScript 키는 프론트에만 두고 REST 키는 백엔드에만 둔다.
+- 발급: developers.kakao.com 앱 생성 → REST API 키. 지도 SDK용 JavaScript 키 + 사이트 도메인(`http://localhost:5188`) 등록도 함께. **[HUMAN]** Map/Local 제품 사용 활성화가 별도로 필요하며, 미활성화 시 `disabled OPEN_MAP_AND_LOCAL service` 403을 반환한다. JavaScript 키는 프론트에만 두고 REST 키는 백엔드에만 둔다.
 - 카테고리 검색 [VERIFIED 2026-07-11]: `GET https://dapi.kakao.com/v2/local/search/category.json`
   - 헤더: `Authorization: KakaoAK {REST_KEY}`
   - 파라미터: `category_group_code=CE7`, `x`(경도), `y`(위도), `radius`(m, 최대 20000), `page`, `size`(≤15)
@@ -270,7 +270,7 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 작업:
 
 1. [HUMAN] 서울열린데이터광장 인증키 발급 → `.env`의 `SEOUL_API_KEY`
-2. [HUMAN] 카카오 개발자 앱 생성 → `KAKAO_REST_KEY`, `KAKAO_JS_KEY` + 로컬 도메인(`http://localhost:5173`) 등록
+2. [HUMAN] 카카오 개발자 앱 생성 → `KAKAO_REST_KEY`, `KAKAO_JS_KEY` + 로컬 도메인(`http://localhost:5188`) 등록
 3. 레포 스캐폴딩(§4.3 구조), `.env.example`, `config.py` 뼈대
 4. `scripts/verify_apis.py` 작성·실행:
    - citydata 실호출 1건(예: `광화문광장`) → 응답 원본을 `fixtures/citydata_sample.json` 저장
@@ -332,7 +332,7 @@ DoD:
 
 ### Phase 4 — API 서버
 
-작업: §4.7 엔드포인트 구현, CORS(localhost:5173), bbox 필터는 SQL where로, 응답 pydantic 스키마 고정
+작업: §4.7 엔드포인트 구현, CORS(localhost:5188), bbox 필터는 SQL where로, 응답 pydantic 스키마 고정
 
 DoD:
 

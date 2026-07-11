@@ -42,7 +42,11 @@ cd frontend
 cp .env.example .env
 rtk npm install
 rtk npm run build
+rtk npm run dev
 ```
+
+프론트 개발 서버는 다른 로컬 서비스와 충돌하지 않도록
+`http://127.0.0.1:5188`을 고정 사용하며, 포트가 이미 사용 중이면 즉시 실패합니다.
 
 로컬 PostgreSQL은 Docker가 설치된 환경에서 `rtk docker compose up -d postgres`로
 시작할 수 있습니다.
@@ -52,6 +56,8 @@ rtk npm run build
 발급받은 `SEOUL_API_KEY`, `KAKAO_REST_KEY`는 `backend/.env`에만 넣고 채팅,
 문서, 이슈, 커밋에는 붙여 넣지 마세요. 카카오 JavaScript 키는 백엔드에 필요
 없으며 `frontend/.env`의 `VITE_KAKAO_JS_KEY`에만 넣습니다.
+Kakao Developers의 JavaScript SDK 사이트 도메인에는
+`http://localhost:5188`도 등록해야 합니다.
 
 실측 fixture와 공식 마스터 원본은 이미 커밋되어 있습니다. 갱신할 때는 기존 원본을
 검토·이동한 뒤 검증/다운로드 스크립트를 명시적으로 실행해야 하며 자동 덮어쓰기는

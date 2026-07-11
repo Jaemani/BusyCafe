@@ -117,3 +117,28 @@
 
 - [x] 설정/시크릿 관련 테스트에서 실제 Settings loader 대신 명시적 test double 사용
 - [x] 키가 존재하는 로컬 환경에서 전체 테스트 재실행
+
+## INC-2026-003 — 기존 서비스의 5173 응답을 BusyCafe로 잘못 확인
+
+- 상태: Resolved
+- 심각도: SEV-3
+- 시작/감지/해결: 2026-07-11
+- 작성자: Codex
+
+### 요약
+
+5173 포트의 HTTP 200만 확인하고 BusyCafe 개발 서버라고 잘못 안내했다. 실제로는
+기존 `iNeed` Vite 서비스가 wildcard 주소에서 5173을 사용 중이었고, BusyCafe도
+별도 loopback listener로 같은 포트에 올라가 사용자가 다른 화면을 볼 수 있었다.
+
+### 근본 원인과 조치
+
+서비스 고유 내용이나 리스닝 프로세스를 확인하지 않고 상태 코드만 health evidence로
+사용했다. BusyCafe 세션을 종료하고 비어 있는 5188에서 재기동했으며, 프로세스 경로와
+`BUSY CAFE · DEVELOPMENT PREVIEW` 응답 문구를 함께 확인했다.
+
+### 재발 방지 조치
+
+- [x] 프로젝트 dev 명령을 5188 + `--strictPort`로 고정
+- [x] 로컬 서버 확인 시 PID/command와 서비스 고유 응답을 함께 검증
+- [x] PLAN/README의 Kakao 도메인과 향후 CORS 포트를 5188로 갱신

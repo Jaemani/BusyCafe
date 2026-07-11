@@ -168,6 +168,13 @@
 - [ ] 1시간 무인 구동, 대상별 snapshot ≥5 확인
 - [ ] PostgreSQL runtime migration/seed 검증(Docker 또는 PostgreSQL 필요)
 
+### 개발 미리보기 네트워크 확인
+
+- 로컬: `http://127.0.0.1:5188`, BusyCafe 고유 응답 확인
+- Tailscale Serve: `https://jaemans-mac-studio.tail2743ae.ts.net:8443/`
+- 공개 범위: tailnet only; 기존 443 Funnel(`/` → `127.0.0.1:8012`)은 변경하지 않음
+- Vite allowed host: 현재 tailnet suffix `.tail2743ae.ts.net`만 허용
+
 ## 2026-07-11 — Phase 0 / 기본 저장소 설계 변경
 
 - 실행 환경: 설계 검토(실 API 호출 없음)
