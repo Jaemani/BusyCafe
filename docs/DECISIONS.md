@@ -45,6 +45,20 @@
 
 - [ADR-0001: PostgreSQL을 기본 데이터베이스로 사용](adr/ADR-0001-primary-database.md) — 2026-07-11, Accepted
 - [ADR-0002: 공식 핫스팟 폴리곤에서 대표 좌표 산출](adr/ADR-0002-hotspot-location.md) — 2026-07-11, Accepted
+- [ADR-0003: MapLibre/OpenFreeMap 지도와 Overture 캐시 원장](adr/ADR-0003-maplibre-overture-catalog.md) — 2026-07-11, Accepted
+- [ADR-0004: 121개 전체 폴링과 cache-first 읽기 경로](adr/ADR-0004-seoulwide-polling-cache.md) — 2026-07-11, Accepted
+
+## 현재 제품 경로 요약
+
+| 영역 | 채택 | 제외/제약 |
+|---|---|---|
+| 지도 | MapLibre GL + OpenFreeMap | Kakao Maps SDK는 제품 런타임에서 로드하지 않음 |
+| 카페 원장 | Overture Places release를 PostgreSQL에 cache, 서울 인허가로 보정 | viewport마다 외부 POI 검색 금지 |
+| 혼잡도 | 서울 공식 121개 장소, 10분 non-overlapping polling | 과거 `≤12곳` 범위는 legacy 결정 |
+| 외부 매장 링크 | 검증된 provider ID/canonical direct detail URL만 표시 | 이름/좌표 검색 링크·스크레이핑·추측 매칭 금지 |
+
+Kakao Local의 실응답 fixture와 키/도메인 활성화 기록은 Phase 0의 역사적 검증 증거다.
+ADR-0003가 대체한 제품 POI 경로로 해석하지 않는다.
 
 ## 초기 결정 후보
 
@@ -53,4 +67,4 @@
 - 추정치와 근거·신뢰도를 함께 노출
 - 거리 가중 보간(IDW) 및 3단계 커버리지
 - 결정적 순수 함수 기반 스코어링
-- 준실시간 폴링 범위와 주기
+- IDW·coverage·신뢰도 파라미터의 Phase 6 보정

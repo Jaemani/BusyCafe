@@ -7,11 +7,11 @@
 | Phase | 상태 | 완료일 | 근거 |
 |---|---|---|---|
 | Phase 0 | 완료 | 2026-07-11 | 실 API/스키마/라벨/호출 제한/마스터 검증 및 fixture 커밋 |
-| Phase 1 | 진행 중 (HUMAN 대상 검수) | - | 구현/테스트/dry-run 완료, seed apply와 1시간 무인 구동 전 |
-| Phase 2 | 대기 | - | Phase 1 미완료 |
-| Phase 3 | 대기 | - | Phase 2 미완료 |
-| Phase 4 | 대기 | - | Phase 3 미완료 |
-| Phase 5 | 대기 | - | Phase 4 미완료 |
+| Phase 1 | 진행 중 (121개 범위 재검증) | - | 공식 master 검증 완료. 기존 10개 대상 검증은 legacy이며 121개 seed apply·1시간 무인 구동·full-cycle 측정 전 |
+| Phase 2 | 진행 중 (catalog cache 설계/구현) | - | Overture release cache·인허가 보정·직접 상세 링크 검증 전 |
+| Phase 3 | 병렬 구현 완료·gate 대기 | - | 순수 IDW/신뢰도/materialize 및 테스트 완료, Phase 2 HUMAN 품질 gate 대기 |
+| Phase 4 | 병렬 구현 완료·gate 대기 | - | cache-only 4 endpoint·CORS·bbox p95 검증 완료, Phase 3 gate 대기 |
+| Phase 5 | 진행 중 (MapLibre UI) | - | MapLibre/OpenFreeMap·내 위치·cached API 연결 완료, 브라우저 수동 시나리오/stale banner 대기 |
 | Phase 6 | 대기 | - | Phase 5 미완료 |
 
 ## 기록 템플릿
@@ -40,7 +40,23 @@
 
 ## Phase 0 미확정 항목
 
-없음. Phase 1에서 대표점 산출 후 실제 폴링 대상 목록을 확정한다.
+없음. 대표점 산출은 완료됐고, 현행 폴링 대상은 공식 master 121개 전부로 ADR-0004에서 확정했다.
+
+## 현행 제품 범위와 legacy 기록 해석
+
+2026-07-11에 채택한 [ADR-0003](adr/ADR-0003-maplibre-overture-catalog.md)와
+[ADR-0004](adr/ADR-0004-seoulwide-polling-cache.md)가 현행 제품 경로다.
+
+- 지도: MapLibre GL + OpenFreeMap. Kakao Maps SDK는 제품 런타임 의존성이 아니다.
+- 카페: Overture Places의 versioned 서울 cache와 인허가 보정. viewport 요청에서 외부
+  POI API를 호출하지 않는다.
+- 혼잡도: 공식 121개 장소 전부를 10분마다 폴링한다. 목표량은 17,424콜/일이다.
+- 외부 매장 링크: 검증된 provider ID/canonical direct detail URL이 있을 때만 보인다.
+  이름·좌표 검색 링크나 추측 매칭은 금지한다.
+
+아래의 `≤12곳`, `10곳`, `1,440/1,728콜/일`, Kakao 지도/CE7 seed 관련 기록은 당시
+실제 호출·코드·인시던트를 보존하는 **legacy 역사 기록**이다. 삭제하거나 실측 사실을
+바꾸지 않되, 현행 폴링 범위·제품 POI 경로로 해석하지 않는다.
 
 ## 2026-07-11 — Phase 0 / 첫 실 API 호출
 
@@ -220,3 +236,46 @@
 
 - 키 미설정 상태에서 검증 스크립트는 필요한 환경 변수 이름만 출력하고 exit 2로 안전 종료했다.
 - 현재 머신에는 Docker CLI가 없어 `compose.yaml` 런타임 검증은 실행하지 못했다. PostgreSQL은 Phase 0 API 실측 도구의 선행 조건이 아니다.
+
+## 2026-07-11 — 제품 경로 재기준선 / MapLibre·Overture·121개 polling
+
+- 실행 환경: 제품 범위 및 구현 diff 검토. 외부 API 추가 호출 없음.
+- 검증자: Codex
+- 관련 결정: `ADR-0003`, `ADR-0004`, `PLAN.md` v1.4
+- 입력: 사용자 요구(서울 전역 지도 이동, 부정확한 장소명·위치 개선, 서버 cache,
+  실제 매장 상세만 연결), Phase 0 서울 OpenAPI 호출 정책, 기존 Kakao fixture/인시던트
+- 실제 결과:
+  - 지도/POI 제품 경로는 MapLibre GL + OpenFreeMap과 Overture Places versioned cache로
+    변경했다. Kakao Local/Maps는 legacy fixture·도메인 활성화 기록으로만 보존한다.
+  - 외부 장소 provider는 지도 요청에서 호출하지 않는다. P2의 catalog job과 P4의 cache-only
+    API가 책임을 분리한다.
+  - 공식 121개 master 전체가 10분 polling 대상이다. 계획상 17,424콜/일이며, 이전
+    10개/1,440콜 검증은 실행 증거로 남지만 현행 범위 검증을 충족하지 않는다.
+  - Naver/Kakao/Google은 provider-specific ID/canonical detail URL이 검증된 경우에만
+    링크를 보인다. 검색 링크·스크레이핑·추측 ID 매칭은 제품 규칙에서 제외했다.
+- 판정: PASS (범위·문서·ADR 정렬); Phase 1 full-cycle, Phase 2 catalog ingest/direct-link,
+  Phase 4 API cache, Phase 5 브라우저 상호작용은 아직 별도 실행 검증이 필요하다.
+- 계획과의 차이: 예전 `≤12` polling, Kakao CE7 재귀 seed, Kakao Maps SDK 의존은
+  legacy로 대체됐다.
+- 후속 조치:
+  - [ ] 121개 seed dry-run/apply와 full cycle 10분 측정
+  - [ ] Overture release/hash·서울 분류/좌표·50곳 표본 검수
+  - [ ] 인허가 보정과 partial-release rollback/atomicity 검증
+  - [ ] provider direct detail URL allowlist와 ID-missing UI 테스트
+  - [ ] MapLibre/OpenFreeMap attribution, 내 위치 권한 허용/거부, cached API 연결 수동 확인
+
+## 2026-07-11 — Overture cache·API·부분 실시간 materialize
+
+- Overture release: `2026-06-17.0`
+- 필터: 서울 guard bbox, `cafe/coffee_shop/bubble_tea/tea_room/coffee_roastery`, confidence ≥ 0.80
+- 로컬 immutable extract: 4,933건, 420.9KB
+- SHA-256: `5115e468e6ea34a4859fb9391914a5a9c82c9c2e99d7ba09c8fe8b3d7d8d184e`
+- DB seed: hotspots 121/121 `is_polled=true`, cafes 4,933 active, 동일 release 멱등 테스트 PASS
+- 실시간 순회: HTTP 로그 키 노출 발견으로 64/121 저장 후 즉시 중단. 추가 호출은 새 키 발급 전 금지
+- 오프라인 score materialize: covered 1,803 / fringe 1,560 / uncovered 1,570
+- API: `/api/health`와 bbox `/api/cafes`를 로컬 5188 proxy 및 tailnet 8443에서 HTTP 200 확인
+- bbox 522건 응답 30회 로컬 측정: p50 18.5ms, p95 31.6ms, max 36.6ms
+- 보안: 검색 URL과 비허용 host/path는 외부 상세 링크 응답에서 제거; provider ID가 없으면 버튼 숨김
+- 테스트: backend 87 passed(당시), frontend typecheck/build PASS
+- 판정: cache/API/P3 순수함수·materialize PASS. Phase 1 full cycle은 키 교체 후 재검증 필요
+- 관련 인시던트: `INC-2026-005`, `INC-2026-006`

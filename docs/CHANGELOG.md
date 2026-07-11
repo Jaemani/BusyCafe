@@ -15,6 +15,9 @@
 - API 프로세스와 분리된 10분 ingest worker, 재시도·대상 검증·파싱 실패 원본 보존
 - Tailnet 전용 HTTPS 개발 미리보기와 제한된 Tailscale 호스트 허용 설정
 - Kakao 지도 이동 영역별 CE7 카페 검색, 중복 제거, 마커와 카페 상세 패널
+- MapLibre/OpenFreeMap 서울 지도, 클러스터, 내 위치 버튼과 모바일 상세 패널
+- Overture Places `2026-06-17.0` 고신뢰 서울 카페 4,933건 서버 cache ingest
+- 공식 121개 핫스팟 전체 seed, 결정적 IDW score materialize, cache-only FastAPI bbox API
 
 ### Changed
 
@@ -22,6 +25,9 @@
 - Kakao JavaScript 키를 프론트엔드에서만 관리하도록 중복 백엔드 설정 제거
 - 서울 OpenAPI 호출 횟수 무제한 확인에 따라 MVP 폴링 주기를 10분으로 확정
 - 프론트 개발 포트를 충돌 없는 5188로 고정하고 자동 포트 변경을 금지
+- 제품 지도/POI 경로를 Kakao에서 MapLibre + Overture cache로 변경
+- 폴링 대상을 초기 10곳에서 공식 121곳 전체로 변경
+- 외부 지도 검색 링크는 제거하고 검증된 가게 상세 URL이 있을 때만 표시
 
 ### Fixed
 
@@ -30,6 +36,11 @@
 ### Removed
 
 - 서비스 기능과 무관했던 개발 현황 상태 화면
+- 제품 런타임의 Kakao SDK/Local 검색과 OSM 타일 POI 추출
+
+### Security
+
+- 경로형 서울 API 키가 HTTP client INFO 로그에 노출되지 않도록 `httpx/httpcore` 로그 차단
 
 ## 릴리스 템플릿
 

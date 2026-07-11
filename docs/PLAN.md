@@ -1,4 +1,4 @@
-# cafe-crowd — 카페 혼잡도 맵 개발 계획서 (v1.2)
+# cafe-crowd — 카페 혼잡도 맵 개발 계획서 (v1.4)
 
 > **한 줄 정의**: 서울 주요 상권의 실시간 지역 혼잡도(서울 실시간 도시데이터)를 카페 위치에 공간 매핑하여, "지금 이 근처에서 상대적으로 한산할 카페"를 근거와 함께 보여주는 준실시간 지도 서비스.
 
@@ -10,6 +10,17 @@
 > 목록과 WGS84 영역을 검증했다. 초기 서울 중첩 응답 가정을 평면 구조로 수정하고,
 > 공식 폴리곤의 내부 대표점을 사용하는 위치 산출 결정을 반영했다. 일일 쿼터와
 > 폴링 주기만 사용자 포털 확인 대기 상태다.
+
+> **v1.3 (2026-07-11)**: 지도 엔진을 Kakao Maps에서 MapLibre GL로 전환하고,
+> OpenFreeMap 벡터 베이스맵을 채택했다. Kakao Local 데이터의 비-Kakao 지도 표시와
+> 장기 저장은 공식 정책상 명확히 허용되지 않아 제품 POI 경로에서 제외한다. 카페
+> 원장은 Overture Places 월간 서울 ingest, 폐업 보정은 서울시 인허가 데이터로 변경한다.
+
+> **v1.4 (2026-07-11)**: 운영 경로를 확정했다. 지도는 MapLibre GL + OpenFreeMap,
+> 카페는 Overture Places의 버전 있는 서울 원장을 서버에 적재·캐시해 제공한다. 서울
+> 실시간 도시데이터는 공식 121개 장소를 모두 10분마다 폴링한다. Naver/Kakao/Google
+> 링크는 검증된 공급자별 장소 ID 또는 canonical detail URL이 있는 경우에만 표시하며,
+> 이름 검색 링크로 임의의 다른 매장을 연결하지 않는다.
 
 ---
 
@@ -40,8 +51,9 @@
 
 ### 1.3 MVP 스코프
 
-- **지역**: 서울, 핫스팟이 커버하는 동네 2~3곳으로 시작. 기본 중심 핫스팟은 실 API와 공식 마스터에서 확인한 `성수카페거리`(`POI068`), `홍대 관광특구`(`POI007`), `연남동`(`POI073`) 주변. 각 동네 반경 내 추가 폴링 대상은 Phase 1의 대표점 산출 후 config에 확정한다.
+- **지역/지도 UX**: 사용자는 서울 전역을 일반 지도처럼 자유롭게 이동한다. 지도는 MapLibre GL + OpenFreeMap으로 렌더링하고, 카페는 서버의 검증·캐시된 원장에서 viewport bbox로 읽는다. 실시간 혼잡도는 121개 공식 핫스팟 coverage 안에서만 제공하고 나머지는 회색 `uncovered`로 정직하게 표시한다.
 - **사용자 플로우**: 지도 열기 → 카페 마커의 4단계 색상으로 주변 혼잡도 확인 → 마커 클릭 → 근거 패널(기준 핫스팟, 거리, 레벨, 갱신 시각, 12시간 추이, 1시간 뒤 예측).
+- **장소 확인 링크**: 상세 패널은 해당 공급자의 검증된 장소 식별자가 있는 경우에만 그 공급자의 **직접 상세 페이지** 링크를 보인다. 공급자 ID가 없으면 링크를 숨긴다. 이름·좌표를 넣은 검색 URL, 스크레이핑, 브라우저 자동화로 링크를 만들지 않는다.
 
 ---
 
@@ -50,9 +62,10 @@
 | 소스 | 용도 | 갱신 주기 | 접근 방식 | Phase |
 |---|---|---|---|---|
 | 서울 실시간 도시데이터 (열린데이터광장) | 핫스팟별 실시간 인구 혼잡도 + 12h 예측 | 인구 5분 / 상권 10분 | REST API, 인증키 | P0~P1 |
-| 카카오 로컬 API (카테고리 CE7) | 카페 POI (이름·좌표·place_id) | 온디맨드 | REST API, REST 키 | P2 |
+| Overture Maps Places | 카페 POI 원장(이름·좌표·주소·전화·GERS ID) | 월간 릴리스 | GeoParquet 서울 bbox ingest → PostgreSQL 캐시 | P2 |
+| 서울시 지방행정 인허가(휴게음식점) | 영업상태·폐업 보정 | 일/파일 갱신 | 공공데이터포털 → 서버 캐시 | P2 보정 |
+| OpenFreeMap | 지도 베이스맵 | 제공자 갱신 주기 | MapLibre vector style | P5 |
 | 서울시 주요 장소(핫스팟) 마스터 | 핫스팟 코드·명칭·WGS84 영역 | 정적 | 열린데이터광장 OA-21285 첨부 파일 | P1 |
-| 지방행정 인허가(휴게음식점) — 공공데이터포털 | 폐업 카페 필터 | 일 단위 | REST API | Backlog |
 | 서울 생활인구 (집계구·시간대별) | "평소 대비" 베이스라인 | 시간별 (며칠 지연 공개) | 파일/API | Backlog |
 | 기상청 단기예보 | 날씨 보정 | 시간별 | REST API | Backlog |
 
@@ -69,18 +82,25 @@
   - `PPLTN_TIME` — 데이터 기준 시각
   - `FCST_YN`, `FCST_PPLTN[]` — 실측 응답에 12개 예측 레코드. 각 레코드는 `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
 - 호출 단위 [VERIFIED 2026-07-11]: 공식 OA-21285 설명에 따라 **장소 1곳당 1콜**, 일괄 호출 불가. 장소명 또는 장소코드 중 하나로 호출한다.
-- **호출 제한 [VERIFIED 2026-07-11, HUMAN 포털 확인]**: 열린데이터광장 OpenAPI는 1회 호출당 최대 1,000건이며 호출 횟수 제한은 없다. `citydata_ppltn`은 공식적으로 장소 1곳씩 호출하므로 1,000건 행 제한의 영향이 없다. 제품 범위와 외부 서비스 부하를 제한하기 위해 폴링 대상은 MVP 동네의 핫스팟 ≤12곳, 주기는 10분으로 확정한다. 최대 예상량은 12 × 144 = 1,728콜/일이다.
+- **호출 제한 [VERIFIED 2026-07-11, HUMAN 포털 확인]**: 열린데이터광장 OpenAPI는 1회 호출당 최대 1,000건이며 호출 횟수 제한은 없다. `citydata_ppltn`은 공식적으로 장소 1곳씩 호출하므로 1,000건 행 제한의 영향이 없다. 서울 전역 지도 UX에 맞춰 공식 마스터 **121개 전부**를 10분마다 폴링한다. 예상량은 121 × 144 = **17,424콜/일**이다. 단일 worker는 주기 겹침을 금지하고, cycle duration·성공/실패 수·마지막 완전 cycle 시각을 기록한다.
 
-### 2.2 카카오 로컬 API
+### 2.2 Overture Places 캐시 원장
 
-- 발급: developers.kakao.com 앱 생성 → REST API 키. 지도 SDK용 JavaScript 키 + 사이트 도메인(`http://localhost:5188`) 등록도 함께. **[HUMAN]** Map/Local 제품 사용 활성화가 별도로 필요하며, 미활성화 시 `disabled OPEN_MAP_AND_LOCAL service` 403을 반환한다. JavaScript 키는 프론트에만 두고 REST 키는 백엔드에만 둔다.
+- **제품 원장**: Overture Places의 릴리스별 GeoParquet에서 `SEOUL_BBOX`로 후보를 제한하고, 카페 분류·좌표·필수 GERS ID를 검증한 레코드만 PostgreSQL에 upsert한다. `overture_id`, release, confidence, category와 원본 `sources`를 보존하고 로컬 extract SHA-256은 ingest 보고서와 `VERIFICATION.md`에 기록한다.
+- **갱신 방식**: 지도 이동이나 사용자 요청 때 Overture/외부 POI API를 호출하지 않는다. 월간 릴리스 ingest와 인허가 보정은 별도 job으로 실행하고, API는 캐시된 `cafes`/`cafe_scores`만 bbox 조회한다. 실패한 release는 현재 검증된 캐시를 계속 제공하며, 부분 파일이나 검증 실패 결과로 원장을 비우지 않는다.
+- **정합성 경계**: Overture의 영업 상태가 비어 있거나 오래될 수 있으므로 서울시 휴게음식점 인허가 데이터로 후속 보정한다. 이름·좌표 유사도만으로 타 공급자 레코드와 병합하거나 ID를 만들어내지 않는다.
+- **공급자 상세 링크**: `external_links_json`에는 공급자가 제공하거나 합법적 계약/공식 API로 검증된 canonical detail URL만 저장한다. Naver/Kakao/Google 각각의 ID가 없으면 해당 버튼은 없다. API는 HTTPS·provider host·detail path를 allowlist로 재검증하며 검색 URL은 제거한다.
+
+### 2.3 Kakao Local API — legacy 검증 기록, 제품 경로 아님
+
+- 다음 내용은 Phase 0에서 실제 응답과 키 활성화 상태를 검증한 **역사적 증거**다. MapLibre/OpenFreeMap 지도에 Kakao Local 결과를 표시·캐시·원장화하는 제품 기능에는 사용하지 않는다. 새 기능은 이 API를 호출하지 않으며 `KAKAO_*` 환경 변수나 JavaScript 키 등록을 요구하지 않는다.
 - 카테고리 검색 [VERIFIED 2026-07-11]: `GET https://dapi.kakao.com/v2/local/search/category.json`
   - 헤더: `Authorization: KakaoAK {REST_KEY}`
   - 파라미터: `category_group_code=CE7`, `x`(경도), `y`(위도), `radius`(m, 최대 20000), `page`, `size`(≤15)
 - 응답 구조 [VERIFIED 2026-07-11]: root `meta` + `documents[]`. `meta`는 `total_count`, `pageable_count`, `is_end`, `same_name`; document는 `id`, `place_name`, `category_*`, 주소, 전화, `x`, `y`, `place_url`, `distance`를 포함했다.
-- **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 쿼리 조건당 최대 **45건**(15건 × 3페이지)까지만 노출되므로 밀집 지역에서는 반드시 **재귀 4분할 스윕**을 구현한다: `total_count > 45`이면 검색 원을 4개 사분면 원으로 쪼개 재귀 호출, `is_end`까지 페이지 순회, `kakao_place_id`로 dedupe.
+- **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 이 한계와 비-Kakao 지도 표시/장기 저장 정책 불확실성 때문에 CE7 재귀 분할 수집안은 **채택하지 않았다**. 과거 fixture·검증 코드는 회귀 및 기록 목적 외 제품 실행 경로에서 사용하지 않는다.
 
-### 2.3 서울시 주요 121장소 마스터
+### 2.4 서울시 주요 121장소 마스터
 
 - 공식 데이터셋: [서울시 실시간 도시데이터 OA-21285](https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do)
 - [VERIFIED 2026-07-11] 첨부 `서울시 주요 121장소 목록.xlsx`(seq 23)와 `서울시 주요 121장소 영역.zip`(seq 24), 게시일 2026-04-02를 확인했다.
@@ -106,8 +126,8 @@
 ### 4.1 컴포넌트 흐름
 
 ```text
-[single ingest worker: POLL_INTERVAL마다]
-  ingest/poller ──> 서울 citydata API (핫스팟별 1콜)
+[single congestion worker: 10분 non-overlapping cycle]
+  ingest/poller ──> 서울 citydata API (공식 121개, 장소별 1콜)
        │ 파싱/대상 불일치 시 hotspot_parse_failures에 raw 저장 + 경고 로그
        ▼
   hotspot_snapshots (append-only)
@@ -115,17 +135,20 @@
        ▼
   scoring/engine.materialize_all() ──> cafe_scores (전체 재계산, upsert)
        ▲
-  cafes (P2에서 시드, 이후 정적)
+  cafes (P2 Overture release cache + 인허가 보정)
+
+[catalog worker: release/event driven]
+  Overture Places + 서울 인허가 ──> 검증·release metadata 보존 ──> cafes
 
 [요청 시]
-  frontend (Kakao Maps) ──> FastAPI ──> cafe_scores + cafes 조인 반환
+  frontend (MapLibre GL + OpenFreeMap) ──> FastAPI ──> cached cafes + cafe_scores 조인 반환
 ```
 
 ### 4.2 기술 스택
 
 - Backend: Python 3.12, FastAPI, SQLAlchemy 2 + PostgreSQL(운영·통합테스트 기준, 필요 시 PostGIS), httpx, pydantic v2, APScheduler(개발 단일 프로세스만; 운영은 단일 ingest worker로 분리)
-- Frontend: Vite + TypeScript(vanilla), Kakao Maps JavaScript SDK. (React 전환은 자유 — MVP는 vanilla로 스코프 최소화)
-- 테스트: pytest. **실 API 호출 테스트 금지** — 모든 테스트는 `fixtures/`의 실측 스냅샷 사용.
+- Frontend: Vite + TypeScript(vanilla), MapLibre GL JS + OpenFreeMap style. 브라우저 Geolocation control로 내 위치 이동을 제공하며 권한 거부 시 지도 기능은 계속 동작한다.
+- 테스트: pytest. **자동 테스트에서 실 API 호출 금지** — Seoul/Overture/인허가 입력은 versioned fixture 또는 로컬 test data를 사용한다. Phase 검증용 명시적 실호출은 원본 보존·secret-safe logging 조건에서만 수행한다. 지도 SDK와 타일 style은 빌드·수동 브라우저 확인을 분리 기록한다.
 
 > 저장소 선택은 `docs/adr/ADR-0001-primary-database.md`에서 PostgreSQL로 확정했다. 관계·시계열·공간 질의와 사용자 증가 시 비용/운영성을 비교한 결정이며, Firebase는 향후 Auth·푸시·호스팅 후보로만 둔다. 로컬 단위 테스트에는 SQLite를 제한적으로 사용할 수 있으나 운영 저장소로 사용하지 않는다.
 
@@ -140,16 +163,17 @@ cafe-crowd/
 │   │   ├── models.py          # SQLAlchemy 모델
 │   │   ├── schemas.py         # pydantic 응답/외부API 모델
 │   │   ├── clients/
-│   │   │   ├── seoul_citydata.py   # 외부 호출은 여기로만
-│   │   │   └── kakao_local.py
+│   │   │   └── seoul_citydata.py   # 실시간 외부 호출은 여기로만
 │   │   ├── ingest/poller.py
 │   │   ├── ingest/worker.py   # 단일 스케줄러 프로세스
+│   │   ├── ingest/overture_places.py # Overture release cache와 검증
 │   │   ├── scoring/engine.py  # 순수 함수 + materialize
 │   │   └── api/routes.py
 │   ├── scripts/
 │   │   ├── verify_apis.py     # P0: 실측 → fixtures 저장
 │   │   ├── seed_hotspots.py   # P1
-│   │   ├── seed_cafes.py      # P2
+│   │   ├── seed_cafes.py      # P2 Overture download/dry-run/apply
+│   │   ├── materialize_scores.py # P3 offline recompute
 │   │   └── run_eval.py        # P6
 │   ├── tests/
 │   ├── fixtures/              # 실측 API 응답 JSON
@@ -201,13 +225,19 @@ CREATE INDEX ix_parse_failure_hotspot_time ON hotspot_parse_failures(hotspot_id,
 
 CREATE TABLE cafes (
   id INTEGER PRIMARY KEY,
-  kakao_place_id TEXT UNIQUE NOT NULL,
+  overture_id TEXT UNIQUE NOT NULL, -- Overture GERS ID
+  source_release TEXT NOT NULL,
+  source_confidence REAL NOT NULL,
+  primary_category TEXT NOT NULL,
   name TEXT NOT NULL,
   lat REAL NOT NULL, lng REAL NOT NULL,
-  road_address TEXT, phone TEXT, place_url TEXT,
-  neighborhood TEXT,            -- config에 정의한 대상 동네 키
+  road_address TEXT, phone TEXT, website TEXT,
+  source_json JSONB,
+  external_links_json JSONB,
   active INTEGER DEFAULT 1
 );
+CREATE INDEX ix_cafes_bbox ON cafes(lng, lat);
+CREATE INDEX ix_cafes_active_bbox ON cafes(active, lng, lat);
 
 CREATE TABLE cafe_scores (
   cafe_id INTEGER PRIMARY KEY REFERENCES cafes(id),
@@ -242,24 +272,25 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 
 | 상수 | 기본값 | 의미 |
 |---|---|---|
-| `POLL_INTERVAL_MIN` | 10 | 폴링 주기(분). 호출 횟수 무제한 확인 후 확정 |
+| `POLL_INTERVAL_MIN` | 10 | 121개 전체 폴링 주기(분). 주기 겹침 금지 |
+| `OFFICIAL_HOTSPOT_COUNT` / `MAX_POLLED_HOTSPOTS` | 121 / 121 | 공식 마스터 전체만 폴링 |
+| `SEOUL_BBOX` | `(126.76, 37.41, 127.20, 37.72)` | Overture bulk ingest의 전세계 오조회 방지용 guard; 행정경계 정밀 필터는 P2 검증 |
 | `R_MAX_M` | 1500 | 이웃 탐색 최대 반경 |
 | `COVERED_M` | 600 | covered 판정 거리 |
 | `K_NEIGHBORS` | 3 | 최대 기여 핫스팟 수 |
 | `D_FLOOR_M` | 50 | 거리 하한 (0-나눗셈 방지) |
 | `TAU_MIN` | 15 | 신선도 감쇠 시상수(분) |
 | `CONF_HIGH` / `CONF_MID` | 0.55 / 0.30 | 신뢰도 등급 경계 |
-| `TARGET_NEIGHBORHOODS` | {성수, 홍대, 연남} | 동네 키 → 중심좌표+반경 정의 |
 | `STALE_WARN_MIN` | 25 | 이 이상 갱신 없으면 UI에 stale 배지 |
 
 ### 4.7 내부 API 스펙
 
 - `GET /api/cafes?bbox={minLng},{minLat},{maxLng},{maxLat}&min_conf=0`
-  → `[{id, name, lat, lng, level, score, confidence, confidence_tier, coverage, evidence: {hotspot_name, distance_m, observed_at}}]`
+  → cached 원장만 bbox filter해 `[{id, name, lat, lng, road_address, source_label, level, score, confidence, confidence_tier, coverage, evidence: {hotspot_name, distance_m, observed_at}, external_links: {naver?, kakao?, google?}}]`. 요청 처리 중 외부 POI 호출은 금지한다.
 - `GET /api/cafes/{id}`
-  → 위 필드 전체 + `contributors[]` + `trend_12h[]`(기준 핫스팟의 스냅샷 시계열) + `forecast_1h`(FCST에서 추출)
+  → 위 필드 전체 + `contributors[]` + `trend_12h[]`(기준 핫스팟의 스냅샷 시계열) + `forecast_1h`(FCST에서 추출). `external_links`는 검증된 direct detail link만 포함하고 누락 provider 키는 `null`이다.
 - `GET /api/hotspots` → 폴링 대상 핫스팟 현재 상태 (디버그 오버레이용)
-- `GET /api/health` → `{last_ingest_at, snapshots_last_hour, cafes_count}`
+- `GET /api/health` → `{last_ingest_at, snapshots_last_hour, cafes_count}`. complete-cycle metadata는 worker 계측 확장 시 추가한다.
 
 ---
 
@@ -270,15 +301,15 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 작업:
 
 1. [HUMAN] 서울열린데이터광장 인증키 발급 → `.env`의 `SEOUL_API_KEY`
-2. [HUMAN] 카카오 개발자 앱 생성 → `KAKAO_REST_KEY`, `KAKAO_JS_KEY` + 로컬 도메인(`http://localhost:5188`) 등록
-3. 레포 스캐폴딩(§4.3 구조), `.env.example`, `config.py` 뼈대
-4. `scripts/verify_apis.py` 작성·실행:
+2. 레포 스캐폴딩(§4.3 구조), `.env.example`, `config.py` 뼈대
+   - 카카오 키/도메인 등록은 P0에 수행한 legacy API 검증의 전제였으며, 현 제품 경로의 요구사항은 아니다.
+3. `scripts/verify_apis.py` 작성·실행:
    - citydata 실호출 1건(예: `광화문광장`) → 응답 원본을 `fixtures/citydata_sample.json` 저장
    - `[VERIFY]` 항목 전부 확정: 엔드포인트, 필드명, 혼잡도 라벨 문자열 4종, FCST 구조, `AREA_NM` 정확 표기
-   - 카카오 CE7 검색 실호출 1건 → `fixtures/kakao_ce7_sample.json`
+   - 카카오 CE7 fixture는 legacy 응답 검증용으로 보존하되, 제품 seed·지도에서 사용하지 않음
    - 121개 장소 마스터 파일 확보 경로 확인(열린데이터광장 내 장소 목록) 및 다운로드
-   - 인증키 일일 한도 확인(포털 마이페이지/문서) → `POLL_INTERVAL_MIN` 확정
-5. fixtures 기반 pydantic 외부 API 모델(`schemas.py`) 확정
+   - 호출 정책 확인 → 121 × 144 = 17,424콜/일 및 non-overlapping worker 정책 확정
+4. fixtures 기반 pydantic 외부 API 모델(`schemas.py`) 확정
 
 DoD:
 
@@ -291,29 +322,32 @@ DoD:
 작업:
 
 1. `seed_hotspots.py`: XLSX 장소 마스터와 WGS84 Shapefile을 `AREA_CD`로 결합하고 각 폴리곤을 검증/정규화한 내부 대표점을 `hotspots.lat/lng`로 적재. 정규화 실패·geometry 누락·DB의 공식 마스터 외 코드는 자동 수정하지 않고 중단한다. CLI 기본은 dry-run이며 **수동 검수 목록 출력 → [HUMAN] 확인 → `--apply`** 순서만 허용한다.
-2. `TARGET_NEIGHBORHOODS` 반경 내 핫스팟에 `is_polled=1` 설정 (≤12곳 확인)
-3. `ingest/poller.py`와 단일 `ingest/worker.py`: APScheduler로 `POLL_INTERVAL_MIN`마다 폴링 대상 순회 호출 → 요청한 AREA_CD/AREA_NM 일치 검증 → 파싱 → `hotspot_snapshots` append. fetch 실패는 3회 지수 백오프 후 로그를 남기고, fetch 성공 후 파싱/대상 불일치는 재호출 없이 raw를 `hotspot_parse_failures`에 append한다. 한 대상 실패 후 다음 대상으로 진행하며 FastAPI 프로세스에서는 스케줄러를 기동하지 않는다.
+2. 공식 마스터 121개 전부에 `is_polled=1`을 설정한다. 동네 중심점/반경은 더 이상 폴링 범위를 제한하지 않는다.
+3. `ingest/poller.py`와 단일 `ingest/worker.py`: APScheduler로 `POLL_INTERVAL_MIN`마다 공식 121개를 호출 → 요청한 AREA_CD/AREA_NM 일치 검증 → 파싱 → `hotspot_snapshots` append. fetch 실패는 3회 지수 백오프 후 로그를 남기고, fetch 성공 후 파싱/대상 불일치는 재호출 없이 raw를 `hotspot_parse_failures`에 append한다. 한 대상 실패 후 다음 대상으로 진행하며 FastAPI 프로세스에서는 스케줄러를 기동하지 않는다. 새 cycle은 이전 cycle 완료 전 시작하지 않으며 cycle metric을 기록한다.
 4. 파서 유닛테스트 (fixture 기반)
 
 DoD:
 
-- [ ] 로컬에서 1시간 무인 구동 → 대상 핫스팟당 스냅샷 ≥5개 적재
+- [ ] 로컬에서 1시간 무인 구동 → 121개 대상 각각 스냅샷 ≥5개 적재
 - [ ] 잘못된 응답(fixture 변조) 주입 시 크래시 없이 스킵·로깅
-- [ ] 일일 예상 콜 수 계산치가 쿼터 이내임을 `VERIFICATION.md`에 기록
+- [ ] 121개 전체 cycle이 10분 안에 완료되고, 일일 예상 17,424콜과 호출 정책을 `VERIFICATION.md`에 기록
 
 ### Phase 2 — 카페 시드
 
 작업:
 
-1. `seed_cafes.py`: 동네별 중심좌표+반경으로 CE7 스윕. **total_count>45 시 재귀 4분할** 구현. `kakao_place_id` dedupe, 동네 키 태깅
-2. 좌표 유효성 검사(서울 바운딩박스 내), 이름 정규화
-3. 결과 리포트 출력: 동네별 카페 수, 분할 호출 횟수, 총 API 콜 수
+1. `seed_cafes.py --download`: 지정한 Overture release를 서울 bbox·카페 category·confidence threshold로 제한해 immutable local GeoParquet cache를 만든다. 기존 파일은 덮어쓰지 않는다.
+2. `overture_id`로 멱등 upsert하고 release·confidence·category·sources를 보존한다. 빈 extract는 적용을 거부하고, 새 release에서 사라진 레코드는 soft deactivate한다. dry-run이 기본이다.
+3. ingest 보고서는 release, SHA-256, 입력/신규/갱신/유지/비활성 수를 출력한다.
+4. 서울시 휴게음식점 인허가 보정은 후속 P2 작업이다. 이름/좌표 fuzzy match는 provider ID나 외부 상세 링크 생성에 사용하지 않는다.
+5. `external_links_json`은 검증된 canonical detail URL만 허용하며 API가 provider별 host/path를 다시 검증한다.
 
 DoD:
 
-- [ ] 대상 동네 3곳 카페 적재 완료 (동네당 수백 건 규모 예상)
-- [ ] 무작위 10곳 스팟체크 체크리스트 출력 → [HUMAN] 카카오맵과 대조 확인
-- [ ] 재실행 시 멱등(중복 삽입 없음)
+- [x] 선택한 Overture release의 고신뢰 서울 cache 4,933건 적재; release/hash/건수가 `VERIFICATION.md`에 기록됨
+- [ ] 무작위 50곳의 이름·좌표·주소를 원본과 spot check하고, 카페가 아닌 분류/서울 밖 좌표는 격리됨
+- [ ] 재실행과 동일 release 재시도는 멱등이며, 실패/부분 release가 기존 cache를 비우지 않음
+- [ ] provider ID 없는 카페에서 Naver/Kakao/Google 링크가 숨겨지고, 있는 링크는 해당 provider direct detail URL만 사용함
 
 ### Phase 3 — 스코어링 엔진
 
@@ -332,29 +366,32 @@ DoD:
 
 ### Phase 4 — API 서버
 
-작업: §4.7 엔드포인트 구현, CORS(localhost:5188), bbox 필터는 SQL where로, 응답 pydantic 스키마 고정
+작업: §4.7 엔드포인트 구현, CORS(개발 localhost:5188 및 허용 tailnet origin), bbox 필터는 SQL where/PostGIS 전환 가능 경계로, 응답 pydantic 스키마를 고정한다. `/api/cafes`와 상세는 DB cache만 읽으며 요청 중 외부 provider를 호출하지 않는다. 응답은 `Cache-Control: private, max-age=30, stale-while-revalidate=60`을 사용한다. Redis는 실제 병목이 확인될 때만 추가한다.
 
 DoD:
 
 - [ ] `/docs` OpenAPI에서 4개 엔드포인트 동작 확인
 - [ ] bbox 쿼리 로컬 p95 < 100ms
 - [ ] health가 마지막 인제스트 시각을 정확히 반환
+- [ ] 같은 bbox 요청이 외부 POI 호출 없이 cache/DB만 읽고, catalog release와 score 갱신이 바뀌면 응답 cache가 무효화됨
 
 ### Phase 5 — 프론트엔드 지도
 
 작업:
 
-1. Kakao Maps SDK 로드(JS 키), 초기 뷰 = 첫 번째 대상 동네
+1. MapLibre GL에 OpenFreeMap style을 로드한다. 초기 뷰는 홍대이되, 사용자는 서울 전역을 자유롭게 이동한다. Kakao Maps SDK와 JavaScript 키는 로드하지 않는다.
 2. bbox 변경(이동/줌 종료) 시 `/api/cafes` 재조회, 마커 렌더
 3. 마커: level 1~4 → 4색(초록→노랑→주황→빨강 계열, 프론트 재량). `coverage=fringe` → 테두리 점선, `uncovered` → 회색. `confidence_tier=low` → 투명도 60%
-4. 마커 클릭 → 근거 패널: 카페명, 주변 혼잡 레벨 문구("○○ 기준 · 620m · 8분 전 갱신"), 신뢰도 뱃지, 12h 미니 추이(단순 스파크라인), 1시간 뒤 예측
-5. `STALE_WARN_MIN` 초과 시 상단 배너 "데이터 갱신 지연 중"
+4. 내 위치 버튼은 브라우저 위치 권한을 요청해 현 위치로 이동하고 정확도 원을 표시한다. 거부·오류 시 명확한 안내만 보이고 지도나 카페 조회는 중단하지 않는다.
+5. 마커 클릭 → 근거 패널: 카페명, 원장 출처/release, 주변 혼잡 레벨 문구("○○ 기준 · 620m · 8분 전 갱신"), 신뢰도 뱃지, 12h 미니 추이(단순 스파크라인), 1시간 뒤 예측. provider ID가 검증된 경우에만 해당 provider의 직접 상세 링크 버튼을 보인다.
+6. `STALE_WARN_MIN` 초과 시 상단 배너 "데이터 갱신 지연 중"
 
 DoD (수동 시나리오 체크리스트를 docs에 기록):
 
 - [ ] 지도 이동/줌 시 마커 갱신
 - [ ] covered/fringe/uncovered 3종이 시각적으로 구분됨
 - [ ] 근거 패널에 D6 요소(핫스팟명·거리·갱신시각) 전부 표시
+- [ ] 내 위치 권한 허용/거부 모두에서 예측 가능한 UX, provider ID 누락 시 외부 링크 미표시
 - [ ] 백엔드 중단 상태에서 프론트가 죽지 않고 에러 표시
 
 ### Phase 6 — 캘리브레이션 및 검증 (eval)
@@ -379,7 +416,7 @@ DoD:
 
 1. **"평소 대비" 베이스라인**: 스냅샷이 2~3주 쌓이면 핫스팟별 요일×시간 평균 → "평소보다 붐빔/한산" 상대 표시 (자체 데이터만으로 가능, 외부 의존 없음)
 2. FCST 12h 예측 활용 확대: "몇 시에 가면 여유" 추천
-3. 인허가 데이터(공공데이터포털) 연동 폐업 필터 + 프론트 "폐업 신고" 버튼
+3. 프론트 "폐업 신고" 버튼 + 인허가 보정 불일치 검토 큐
 4. 원탭 체크인("자리 있어요/없어요") → ground truth 축적 → 카페별 보정계수
 5. 날씨 보정(기상청), 커버 동네 확장, PostGIS 공간 인덱스/읽기 replica(실제 병목 확인 시)
 
@@ -389,11 +426,13 @@ DoD:
 
 | 리스크 | 영향 | 대응 |
 |---|---|---|
-| 외부 API 과호출 또는 정책 변경 | 인제스트 지연/중단 | 현재 호출 횟수 제한 없음 확인. 대상 ≤12곳·10분 주기를 유지하고 호출량 메트릭을 기록한다. 정책 변경 시 주기를 config에서 즉시 완화한다. |
+| 121개 폴링 cycle 지연 또는 정책 변경 | 혼잡도 stale/부분 갱신 | 현재 호출 횟수 제한 없음 확인. 121 × 144 = 17,424콜/일과 cycle duration·실패 수를 기록하고 cycle overlap을 금지한다. 정책 변경 또는 10분 초과 시 concurrency/backoff·주기를 config/ADR로 조정한다. |
 | citydata 스키마 변경 | 파싱 실패 | pydantic strict 파싱 + 실패 시 raw_json 보존, 알림 로그. 문서 갱신 절차(§0) |
+| POI 원장 stale·오분류·부분 release | 잘못된 카페/위치 또는 목록 소실 | versioned Overture cache, source hash, 서울 bbox·분류 검증, quarantine, release atomicity를 적용한다. 인허가 보정과 표본 검수 전에는 원본 release를 active로 승격하지 않는다. |
+| provider 이름 검색 링크 오매칭 | 사용자가 다른 매장 상세를 봄 | 검색 URL 금지. 검증된 provider ID/canonical direct URL이 없으면 버튼을 숨긴다. |
 | 핫스팟 신호와 골목 카페 괴리 (역 앞은 붐비는데 골목은 한산) | 추정 오차 | 이것이 P6 검증의 존재 이유. 거리 구간별 분해로 정량화, R/COVERED 튜닝, 한계는 confidence로 표현 |
 | 데이터 지연/장애 | 낡은 값 표시 | freshness 감쇠 + STALE 배지. 절대 마지막 값을 "현재"처럼 위장하지 않음 |
-| 폐업 카페 표시 | 신뢰 하락 | Backlog 3 (인허가 필터 + 신고 버튼) |
+| 폐업 카페 표시 | 신뢰 하락 | P2 인허가 cache 보정과 release별 soft deactivate를 적용하고, 미확정은 원장 출처/갱신 시각을 표시한다. |
 
 ---
 
