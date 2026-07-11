@@ -475,6 +475,24 @@
   `postgresql://`와 `postgres://`를 credential/query 손상 없이 `postgresql+psycopg://`로
   내부 정규화하고, Vercel bundle에 psycopg 3 binary를 추가했다. transaction pooler 호환을
   위해 `prepare_threshold=None`을 사용하며 외부 연결 없는 URL·engine 회귀 테스트를 추가했다.
+
+## 2026-07-12 — Supabase production bootstrap dry-run 연결 검증
+
+- 대상: GitHub `Production` environment secrets와 Supabase production DB. seed apply와
+  `PRODUCTION_ENABLED`는 사용하지 않았다.
+- 준비: 수동 `bootstrap-production.yml`을 추가했다. 기본 `apply=false`는 migration과
+  hotspot/cafe dry-run만 수행하고, 명시적 HUMAN 승인 전에는 seed와 서울 API 수집을 하지 않는다.
+- 첫 dispatch: job-level env에서 `runner.temp` context를 사용해 GitHub parser가 HTTP 422로
+  실행 전 거부했다. `/tmp` runner 경로로 수정한 커밋은 `f13887b`이다. 외부 상태 변경 없음.
+- run `29165824349`: secret preflight와 dependency 설치는 통과했지만 Alembic의 raw
+  `postgresql://` 경로가 psycopg2를 요구해 migration 전에 실패했다. runtime과 migration의
+  URL 정규화를 단일화한 `682f151`로 수정하고 166 tests 및 raw-URL offline render를 통과했다.
+- run `29165859811`: psycopg 3 driver와 URL 정규화는 통과했다. Supabase direct connection이
+  IPv6 주소로 해석됐으나 GitHub hosted runner에 IPv6 route가 없어 실제 연결 전에
+  `Network is unreachable`로 종료됐다. migration과 seed 변경은 0건이다.
+- 판정: 코드 경로 PASS, direct connection from GitHub BLOCKED. GitHub `DATABASE_URL`을
+  Supabase Session pooler connection string으로 교체한 뒤 dry-run을 재실행한다. Vercel은
+  serverless용 Transaction pooler를 유지하고 `PRODUCTION_ENABLED`는 계속 미설정 상태다.
 - 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
   `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
   실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.

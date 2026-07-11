@@ -136,6 +136,44 @@ pooled connection string을 Production 전용으로 다시 등록한 뒤 새 dep
 암호화되어 다시 읽을 수 없는 설정을 삭제할 때는 scope 가정을 금지하고, 복구 가능한 새 값을
 먼저 준비해야 한다.
 
+## INC-2026-012 — 애플리케이션과 Alembic의 Supabase URL 처리 불일치
+
+- 상태: Resolved
+- 심각도: SEV-3
+- 시작/감지/해결 시각(KST): 2026-07-12
+- 작성자: Codex
+- 관련 커밋/실행: `7139f3c`, `682f151`, bootstrap run `29165824349`
+
+### 요약
+
+Supabase 표준 `postgresql://` URL을 애플리케이션 engine에서는 psycopg 3 dialect로
+정규화했지만 Alembic은 별도 설정 경로에서 raw URL을 사용했다. 첫 production bootstrap
+dry-run이 migration 전에 `psycopg2` 모듈을 찾지 못하고 종료됐다. DB 연결과 schema 변경은
+발생하지 않았다.
+
+### 근본 원인
+
+runtime `create_db_engine()`만 production DB 진입점으로 간주했고, Alembic `env.py`가
+`engine_from_config()`로 독립 engine을 만든다는 점을 URL 호환 테스트 범위에 포함하지 않았다.
+
+### 대응과 복구
+
+URL 정규화 함수를 공개 단일 함수로 만들고 runtime과 Alembic이 함께 사용하도록 변경했다.
+Alembic에도 psycopg 3 transaction-pooler 호환 설정을 적용했다. raw `postgresql://` URL을
+사용한 offline migration render와 전체 테스트를 통과시킨 뒤 dry-run을 재실행했다.
+
+### 재발 방지 조치
+
+- [x] runtime과 migration URL 정규화 단일화
+- [x] `postgresql://`, `postgres://`, explicit psycopg, SQLite 회귀 테스트
+- [x] raw Supabase 형식으로 Alembic PostgreSQL SQL render 검증
+- [ ] Session pooler로 실제 remote migration dry-run 통과
+
+### 교훈
+
+DB 호환성은 요청 runtime뿐 아니라 migration, worker, backup 도구의 모든 연결 경로에서
+검증해야 한다.
+
 ## INC-2026-001 — 추정 스키마가 원본 fixture 저장을 막을 수 있었던 설계
 
 - 상태: Resolved
