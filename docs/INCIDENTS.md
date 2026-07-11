@@ -55,6 +55,47 @@
 다음 구현과 운영에 반영할 원칙은 무엇인가?
 ```
 
+## INC-2026-010 — 비활성 production poll의 preflight가 checkout 전에 실패
+
+- 상태: Resolved
+- 심각도: SEV-3
+- 시작 시각(KST): 2026-07-11 production poll workflow 추가 시점
+- 감지 시각(KST): 2026-07-12
+- 해결 시각(KST): 2026-07-12
+- 작성자: Codex
+- 관련 커밋/실행: `b0712e6`, 실패 run `29162731378`, 검증 run `29164391760`
+
+### 요약
+
+production secret이 없는 동안 성공 skip해야 하는 scheduled poll이 checkout 전
+`backend/` working directory에서 preflight shell을 시작하려 했다. repository가 아직
+checkout되지 않아 디렉터리가 없었고, 외부 API나 DB 호출 전에 job이 실패했다. 공개
+snapshot과 사용자 요청에는 영향이 없었지만 workflow가 반복해서 불필요한 실패를 만들었다.
+
+### 근본 원인
+
+job-level 기본 working directory를 `backend`로 지정하면서 checkout 전 실행하는 설정 확인
+step에도 같은 기본값이 적용된다는 점을 놓쳤다. secret 누락 분기는 테스트했지만 GitHub의
+checkout 이전 파일 시스템 상태를 재현하지 않았다.
+
+### 대응과 복구
+
+preflight step의 working directory를 workspace root로 명시했다. `PRODUCTION_ENABLED`가
+`true`가 아니면 명시적으로 skip하고, 활성화 후 secret이 빠지면 실패하도록 계약도 분리했다.
+현재 revision의 workflow dispatch에서 checkout 이후 단계가 모두 skip되고 job이 성공하는
+것을 확인했다. freshness monitor도 같은 비활성 경로를 별도 run으로 검증했다.
+
+### 재발 방지 조치
+
+- [x] checkout 전 step은 repository 내부 working directory를 사용하지 않도록 고정
+- [x] 비활성 poll workflow dispatch 성공 검증 — run `29164391760`
+- [x] 비활성 freshness monitor dispatch 성공 검증 — run `29164392552`
+- [ ] managed DB 전환 시 `PRODUCTION_ENABLED=true`에서 secret 누락 실패와 정상 cycle 성공을 각각 검증
+
+### 교훈
+
+workflow의 skip 경로도 실제 runner의 checkout 전 상태에서 실행 가능한 독립 경로여야 한다.
+
 ## INC-2026-001 — 추정 스키마가 원본 fixture 저장을 막을 수 있었던 설계
 
 - 상태: Resolved

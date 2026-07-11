@@ -445,3 +445,42 @@
 - [ ] 후보 POI 유효성 및 관측 가능성 HUMAN 검수
 - [ ] 동네별 3개 슬롯 현장 관측
 - [ ] `docs/EVAL_REPORT.md`와 `v1-idw-point` 기준 지표 기록
+
+## 2026-07-12 — complete-cycle 운영 상태와 preview.1 배포
+
+- 관련 커밋: Phase 6 현장 입력 `a164e17`, 운영 상태·monitor `b0712e6`
+- 문제 정의: 기존 `/api/health.last_ingest_at`은 121곳 중 한 곳의 snapshot만 갱신돼도
+  fresh하게 보일 수 있었다. 또한 Vercel 프론트는 build-time 상수로 항상 snapshot 문구를
+  표시해 향후 managed DB 전환 뒤에도 잘못된 모드를 보일 구조였다.
+- 구현: `ingest_cycles`가 cycle 시작, 완료 시각, targets/saved/failed와
+  running/complete/partial/failed 상태를 저장한다. 전체 대상 저장과 score materialize가
+  모두 성공해야 complete가 된다. one-shot worker는 complete가 아니면 nonzero로 종료한다.
+- health/monitor: API는 `data_mode`, 마지막 complete cycle과 latest cycle 상태를 반환한다.
+  freshness probe는 complete cycle age만 사용하고 partial/failed, 25분 초과, 2분을 넘는 미래
+  시각, HTTP URL과 잘못된 JSON을 실패 처리한다. cache-busting query로 CDN stale 응답도 피한다.
+- workflow gate: `PRODUCTION_ENABLED=true` 전에는 poll과 monitor가 명시적으로 skip한다.
+  활성화 뒤 URL 또는 secret 누락은 실패한다. 비활성 수동 검증은 poll run `29164391760`,
+  monitor run `29164392552`에서 PASS했다.
+- 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
+  `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
+  실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.
+- migration: `20260712_0004`를 local과 Vercel bundle의 `preview.db`에 실제 적용했다.
+  두 DB 모두 Alembic head를 확인했다. 적용 전 백업은 repository에서 제외된 로컬 파일로
+  보존했다.
+  - local before/after SHA-256:
+    `738e78170aacc1f94f43ff314f4cd2cd18cb76cf7d31518eb0c1b1f5bc5c5895` /
+    `bdce186700bfde078ac26bc0b0a83a6abe4d30cecbf1ca99b6ccc5ccc26cd8eb`
+  - Vercel bundle before/after SHA-256:
+    `762744cc67e120a111bb433d0e428a2911e62a1036b5246d0907cf4303b4122b` /
+    `141848e5f1304826557097d609389b8ac06638578dc480a3ff37e75cdd01332c`
+- 로컬 검증: backend 158 passed, compileall, PostgreSQL migration SQL render, frontend
+  typecheck/build와 세 workflow YAML parse PASS. 기존 Starlette/httpx deprecation과 Vite
+  500kB chunk warning은 남아 있다.
+- 원격 검증: CI run `29164383390`에서 PostgreSQL 17 실제 migration, schema smoke, backend와
+  frontend가 모두 PASS했다.
+- 배포: `busy-cafe-k78p8h65o-jaemanis-projects.vercel.app`가 Ready이며
+  `busy-cafe.vercel.app` exact alias에 연결했다. direct URL과 alias의 `/api/health`가 모두
+  HTTP 200, `data_mode=snapshot`, `cafes_count=4933`을 반환한다. preview에는 complete cycle
+  기록이 없으므로 해당 필드는 NULL이며, 이를 live freshness로 해석하지 않는다.
+- 판정: complete-cycle 계측, 비활성 monitor와 snapshot 재배포 PASS. managed PostgreSQL,
+  `PRODUCTION_ENABLED=true`, 1시간 6-cycle 검증과 실제 복구 훈련은 `[HUMAN]`/운영 대기다.
