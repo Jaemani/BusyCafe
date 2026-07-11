@@ -20,6 +20,7 @@ const CLUSTER_COUNT_LAYER = "cafe-cluster-count";
 const CAFE_LAYER = "cafe-points";
 const CAFE_HIT_LAYER = "cafe-hit-area";
 const MIN_CAFE_ZOOM = 11;
+const IS_DEPLOYED_SNAPSHOT = import.meta.env.VITE_DATA_MODE === "snapshot";
 
 const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
@@ -248,12 +249,13 @@ export async function initializeCafeMap(
     showUserLocation: true,
   });
   map.addControl(geolocateControl, "bottom-right");
-  map.addControl(
-    new maplibregl.AttributionControl({
-      compact: true,
-    }),
-    "bottom-right",
-  );
+  const attributionControl = new maplibregl.AttributionControl({ compact: true });
+  map.addControl(attributionControl, "bottom-right");
+  const attributionElement = map
+    .getContainer()
+    .querySelector<HTMLDetailsElement>(".maplibregl-ctrl-attrib");
+  attributionElement?.classList.remove("maplibregl-compact-show");
+  attributionElement?.removeAttribute("open");
 
   const cafeProvider = provider ?? new CachedApiCafeProvider();
 
@@ -297,7 +299,9 @@ export async function initializeCafeMap(
       source?.setData(result);
       updateLegend(result.features.some((feature) => feature.properties.level !== null));
       statusElement.textContent = result.features.length
-        ? `카페 ${result.features.length.toLocaleString("ko-KR")}곳`
+        ? `카페 ${result.features.length.toLocaleString("ko-KR")}곳${
+            IS_DEPLOYED_SNAPSHOT ? " · 배포 스냅샷" : ""
+          }`
         : "지도 준비됨 · 카페 데이터 연결 대기";
       statusElement.dataset.state = result.features.length ? "ready" : "empty";
     } catch (error) {

@@ -251,6 +251,17 @@ h1 {
 .maplibregl-ctrl-group { overflow: hidden; border: 1px solid var(--line); border-radius: 0.8rem; box-shadow: 0 0.5rem 1.5rem rgb(22 42 33 / 12%); }
 .maplibregl-ctrl-group button { width: 2.75rem; height: 2.75rem; }
 
+/* Required map attribution stays accessible, but does not compete with map UI. */
+.maplibregl-ctrl-attrib.maplibregl-compact {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  margin: 0 !important;
+  border-radius: 0.65rem 0 0 0;
+  box-shadow: 0 0 0.7rem rgb(25 40 31 / 12%);
+}
+.maplibregl-ctrl-attrib.maplibregl-compact:not(.maplibregl-compact-show) .maplibregl-ctrl-attrib-inner { display: none; }
+
 @media (max-width: 40rem) {
   .map-header { top: 0.7rem; right: 0.7rem; left: 0.7rem; width: auto; }
   .brand-mark { width: 2.3rem; height: 2.3rem; }
@@ -271,6 +282,7 @@ h1 {
     overscroll-behavior: contain;
   }
   .maplibregl-ctrl-bottom-right { bottom: 3.8rem; }
+  .maplibregl-ctrl-attrib.maplibregl-compact { bottom: env(safe-area-inset-bottom); }
   .panel-open .maplibregl-ctrl-bottom-right { display: none; }
 }
 
