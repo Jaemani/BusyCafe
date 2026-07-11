@@ -429,6 +429,8 @@
 - 실행 명령: `cd backend && uv run pytest` 및
   `uv run python -m compileall -q app scripts tests`
 - 실제 결과: backend 112 passed, compileall PASS, `git diff --check` PASS.
+- 원격 검증: GitHub Actions CI run `29161361101`에서 frontend typecheck/build와 backend
+  pytest/compileall, PostgreSQL 17의 실제 Alembic upgrade 및 schema smoke가 모두 PASS했다.
 - 판정: 도구·후보 생성 PASS. 후보의 `poi_valid`와 `exclusion_reason` 검수 및 현장 관측은
   `[HUMAN]` 대기다. 실측 전이므로 정확도와 제품 가설에 대한 성능 주장은 하지 않는다.
 - 계획과의 차이: PLAN v1.6의 좌석 점유 단일 라벨과 16곳×6슬롯 계획을 폐기했다.
