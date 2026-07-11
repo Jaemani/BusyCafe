@@ -27,7 +27,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
-      OVERTURE_CACHE: ${{ runner.temp }}/overture-seoul-cafes.parquet
+      OVERTURE_CACHE: /tmp/overture-seoul-cafes.parquet
     steps:
       - name: Check production secrets
         working-directory: .
