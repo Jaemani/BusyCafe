@@ -302,7 +302,11 @@
 
 ## 2026-07-11 — Vercel 읽기 전용 스냅샷 배포
 
-- 배포 URL: `https://budy-cafe.vercel.app`
+- 배포 URL: `https://busy-cafe.vercel.app`
+- rename 검증(2026-07-12): 오타가 있던 Vercel 프로젝트 `budy-cafe`를 `busy-cafe`로
+  변경하고 새 production deployment와 alias를 연결했다.
+- 초기 수동 alias는 SSO로 HTTP 302를 반환했다. 공개 접근 정책을 복원한 뒤
+  `https://busy-cafe.vercel.app/`과 `/api/health`가 인증 리디렉션 없이 HTTP 200임을 확인했다.
 - 배포 모델: `api/data/preview.db`의 카페 4,933개·저장된 혼잡도 점수를 포함한 읽기 전용
   SQLite 스냅샷이다. 요청 중 외부 API를 호출하지 않으며 서울 API 키도 배포하지 않는다.
 - 검증: production에서 `/` HTTP 200, `/api/health` HTTP 200,
@@ -334,3 +338,34 @@
   strict SLA에 부적합하므로 상시 worker 전환 기준과 bootstrap 절차를 ADR-0005에 기록했다.
 - 검증: backend pytest 87 passed, snapshot fallback `GET /api/health` HTTP 200, workflow YAML
   parse PASS.
+
+## 2026-07-12 — Track 1 A1 scoring model version 고정
+
+- 구현: `SCORING_MODEL_VERSION="v1-idw-point"`를 단일 상수로 두고 `CafeScore`의
+  non-null `model_version`, materialize upsert, 목록·상세 API 응답에 additive 필드로 연결했다.
+- migration: `20260712_0003`이 nullable 컬럼 추가 → 기존 행 backfill → NOT NULL 전환 순서로
+  실행되도록 구성하고, 기존 score가 있는 SQLite DB의 실제 upgrade 테스트를 추가했다.
+- 실제 DB: local `backend/data/preview.db`와 Vercel bundle `api/data/preview.db`를 각각 백업한 뒤
+  upgrade했다. 두 DB 모두 4,933개 score가 `v1-idw-point`로 backfill되고 NOT NULL임을 확인했다.
+- 복구 확인: local snapshot 2,363건을 보존했고 materialize 재실행 결과 cafes 4,933,
+  covered/fringe/uncovered `2,317/1,523/1,093`이었다.
+- 검증: backend 전체 97 passed, compileall PASS, Vercel snapshot TestClient의 bbox API가 HTTP 200과
+  `model_version=v1-idw-point`를 반환했다.
+- 재기동 확인: worker session 13858에서 scheduler started, API session 50211에서 local health
+  `snapshots_last_hour=121`, `last_ingest_at=2026-07-11T15:42:09.249470Z`를 확인했다. 카페 응답은
+  `model_version=v1-idw-point`를 반환했다.
+- 판정: PASS. confidence 공식은 변경하지 않았다.
+- 관련 인시던트: `INC-2026-009`
+
+## 2026-07-12 — 국내·해외 확장을 위한 universal contracts
+
+- 공개 타입: provider 독립 경계에 `RegionProfile`, `RawObservation`, `CrowdObservation`,
+  `CoverageSnapshot`을 추가했다.
+- 감사 필드: observation과 coverage에 provider, source version, license manifest, region/area,
+  geometry version, observed/fetched 시각을 필수화했다.
+- 원본 보존: provider 값의 타입·단위·라벨·정의·원본 필드명을 정규화 전 상태로 보존한다.
+- 안전성: strict·immutable contract, IANA timezone 검증, UTC 정규화, 유효 상태 집합,
+  시간 순서와 중복 locale/quality flag를 검증한다.
+- 검증: source/license 필수값, 원본 의미 보존, UTC, coverage 상태, extra field 차단을 포함한
+  focused tests 8건 PASS.
+- 판정: PASS. provider adapter, DB persistence 및 외부 API 연동은 아직 추가하지 않았다.
