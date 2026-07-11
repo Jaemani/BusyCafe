@@ -19,6 +19,21 @@ GitHub secrets는 repository의 `Production` environment에 저장하고 poll jo
 environment를 명시한다. Supabase의 `Project URL`(`https://...supabase.co`)과 publishable
 key는 PostgreSQL connection string이 아니므로 `DATABASE_URL`에 넣지 않는다.
 
+### Supabase 연결 항목 대응
+
+| Supabase 항목 | BusyCafe 사용처 |
+|---|---|
+| Project URL | 사용하지 않음. Supabase REST API endpoint이며 DB URL이 아님 |
+| Publishable key | 사용하지 않음. 브라우저가 Supabase에 직접 접근하지 않음 |
+| Direct connection string | GitHub migration/worker 후보. runner에서 IPv6 연결이 안 되면 session pooler 사용 |
+| Transaction pooler connection string | Vercel Production `DATABASE_URL` 권장 |
+| CLI setup command | 로컬 Supabase CLI용이며 production runtime에 사용하지 않음 |
+
+Supabase가 제공하는 표준 `postgresql://` 문자열은 그대로 secret에 저장한다. 애플리케이션이
+내부에서 psycopg 3 dialect로 정규화하며 transaction pooler 호환을 위해 client-side prepared
+statement를 비활성화한다. Vercel 값은 Production에만 등록하고 Preview에는 production DB를
+노출하지 않는다.
+
 비밀값은 명령 인자, 로그, 문서, 이슈 또는 채팅에 출력하지 않는다. 로컬에서는 shell
 환경변수나 커밋되지 않는 `.env`만 사용한다.
 

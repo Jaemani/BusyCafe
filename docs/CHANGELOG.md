@@ -44,6 +44,8 @@
   완료 시각 기준으로 교체
 - 현장 지역 혼잡 라벨이 원시 보행량·흐름 방해 규칙과 모순돼도 평가에 포함되던 입력
   계약을 fail-closed 검증으로 교체
+- Supabase 표준 PostgreSQL URL이 psycopg 2를 찾거나 Vercel bundle에서 driver가 누락될 수
+  있던 production 연결 경로를 psycopg 3 자동 정규화와 serverless pooler 호환 설정으로 수정
 
 ### Removed
 

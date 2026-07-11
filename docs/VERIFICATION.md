@@ -470,6 +470,11 @@
   없으며 교체 대기다. Vercel의 direct URL 제거 중 CLI scope 오판으로 Production 값도 함께
   삭제됐으나 공개 snapshot health는 HTTP 200과 카페 4,933개를 유지했다. `INC-2026-011`에
   기록했고 올바른 pooled Production URL 재등록 전에는 redeploy와 live 승격을 하지 않는다.
+- 연결 전 코드 감사에서 Supabase 표준 `postgresql://` URL이 SQLAlchemy 기본 psycopg 2
+  dialect로 해석되지만 Vercel requirements에는 PostgreSQL driver가 전혀 없음을 발견했다.
+  `postgresql://`와 `postgres://`를 credential/query 손상 없이 `postgresql+psycopg://`로
+  내부 정규화하고, Vercel bundle에 psycopg 3 binary를 추가했다. transaction pooler 호환을
+  위해 `prepare_threshold=None`을 사용하며 외부 연결 없는 URL·engine 회귀 테스트를 추가했다.
 - 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
   `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
   실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.
