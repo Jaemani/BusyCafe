@@ -313,3 +313,11 @@
   따라서 이 URL은 **배포 시점 스냅샷**이며, 현행성은 데이터 출처에 명시한다. 실시간 운영은
   managed PostgreSQL과 별도 ingest worker로 전환할 때에만 약속한다.
 - 판정: PASS
+
+## 2026-07-11 — 읽기 API CDN 캐시 정책
+
+- 대상: `GET /api/cafes`, `/api/hotspots`, `/api/health`
+- 정책: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
+- 근거: 지도 이동·확대/축소 중 같은 bbox가 반복 요청되는 비용을 CDN에서 흡수한다.
+  공유 캐시는 60초로 제한해 10분 인제스트 SLA보다 충분히 짧게 유지한다.
+- 회귀 검증: backend pytest 87 passed, frontend typecheck 및 production build PASS
