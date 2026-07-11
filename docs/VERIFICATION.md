@@ -320,4 +320,6 @@
 - 정책: `public, max-age=30, s-maxage=60, stale-while-revalidate=300`
 - 근거: 지도 이동·확대/축소 중 같은 bbox가 반복 요청되는 비용을 CDN에서 흡수한다.
   공유 캐시는 60초로 제한해 10분 인제스트 SLA보다 충분히 짧게 유지한다.
-- 회귀 검증: backend pytest 87 passed, frontend typecheck 및 production build PASS
+- 회귀 검증: backend pytest 87 passed, frontend typecheck 및 production build PASS.
+  Vercel production은 지시자를 `cache-control: public, max-age=30`으로 정규화했고,
+  동일 bbox 재조회에서 `x-vercel-cache: HIT`를 반환했다.
