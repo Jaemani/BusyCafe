@@ -1,0 +1,3 @@
+Single-database Alembic migrations for cafe-crowd.
+
+Run from backend/ with: alembic upgrade head

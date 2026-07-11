@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy import create_engine, event, inspect, select
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.models import (
+    Base,
+    Cafe,
+    CafeScore,
+    Hotspot,
+    HotspotParseFailure,
+    HotspotSnapshot,
+)
+
+
+@pytest.fixture
+def engine():
+    db_engine = create_engine("sqlite+pysqlite:///:memory:")
+
+    @event.listens_for(db_engine, "connect")
+    def enable_foreign_keys(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(db_engine)
+    yield db_engine
+    db_engine.dispose()
+
+
+def hotspot(**overrides) -> Hotspot:
+    values = {
+        "area_cd": "POI001",
+        "name": "테스트 장소",
+        "lat": 37.57,
+        "lng": 126.98,
+    }
+    values.update(overrides)
+    return Hotspot(**values)
+
+
+def cafe(**overrides) -> Cafe:
+    values = {
+        "kakao_place_id": "12345",
+        "name": "테스트 카페",
+        "lat": 37.571,
+        "lng": 126.981,
+    }
+    values.update(overrides)
+    return Cafe(**values)
+
+
+def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
+    snapshot = HotspotSnapshot.__table__.c
+    parse_failure = HotspotParseFailure.__table__.c
+    score = CafeScore.__table__.c
+
+    assert snapshot.observed_at.type.timezone is True
+    assert snapshot.fetched_at.type.timezone is True
+    assert parse_failure.fetched_at.type.timezone is True
+    assert score.computed_at.type.timezone is True
+    assert isinstance(
+        snapshot.forecast_json.type.dialect_impl(postgresql.dialect()),
+        postgresql.JSONB,
+    )
+    assert isinstance(
+        score.contributors_json.type.dialect_impl(postgresql.dialect()),
+        postgresql.JSONB,
+    )
+    assert isinstance(
+        parse_failure.raw_json.type.dialect_impl(postgresql.dialect()),
+        postgresql.JSONB,
+    )
+
+
+def test_snapshot_is_unique_per_hotspot_and_observed_time(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        place = hotspot()
+        session.add(place)
+        session.flush()
+        session.add_all(
+            [
+                HotspotSnapshot(
+                    hotspot_id=place.id,
+                    observed_at=now,
+                    fetched_at=now,
+                    congest_level=2,
+                    congest_label="보통",
+                ),
+                HotspotSnapshot(
+                    hotspot_id=place.id,
+                    observed_at=now,
+                    fetched_at=now,
+                    congest_level=3,
+                    congest_label="약간 붐빔",
+                ),
+            ]
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_uncovered_score_requires_all_estimate_fields_to_be_null(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        shop = cafe()
+        session.add(shop)
+        session.flush()
+        session.add(
+            CafeScore(
+                cafe_id=shop.id,
+                computed_at=now,
+                coverage="uncovered",
+                score=1.0,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_valid_uncovered_and_covered_scores_round_trip(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        place = hotspot()
+        uncovered_cafe = cafe()
+        covered_cafe = cafe(kakao_place_id="67890", name="커버 카페")
+        session.add_all([place, uncovered_cafe, covered_cafe])
+        session.flush()
+        session.add_all(
+            [
+                CafeScore(
+                    cafe_id=uncovered_cafe.id,
+                    computed_at=now,
+                    coverage="uncovered",
+                ),
+                CafeScore(
+                    cafe_id=covered_cafe.id,
+                    computed_at=now,
+                    coverage="covered",
+                    score=2.25,
+                    level=2,
+                    confidence=0.7,
+                    confidence_tier="high",
+                    primary_hotspot_id=place.id,
+                    primary_distance_m=125.0,
+                    contributors_json=[
+                        {
+                            "hotspot_id": place.id,
+                            "distance_m": 125.0,
+                            "level": 2,
+                            "weight": 1.0,
+                        }
+                    ],
+                ),
+            ]
+        )
+        session.commit()
+
+        stored = session.scalars(select(CafeScore).order_by(CafeScore.cafe_id)).all()
+        assert stored[0].coverage == "uncovered"
+        assert stored[0].score is None
+        assert stored[1].contributors_json[0]["level"] == 2
+
+
+def test_cafe_delete_cascades_materialized_score(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        shop = cafe()
+        session.add(shop)
+        session.flush()
+        session.add(
+            CafeScore(cafe_id=shop.id, computed_at=now, coverage="uncovered")
+        )
+        session.commit()
+        shop_id = shop.id
+        session.delete(shop)
+        session.commit()
+
+        assert session.get(CafeScore, shop_id) is None
+
+
+def test_parse_failures_are_append_only_and_hotspot_delete_cascades(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        place = hotspot()
+        session.add(place)
+        session.flush()
+        session.add_all(
+            [
+                HotspotParseFailure(
+                    hotspot_id=place.id,
+                    fetched_at=now,
+                    error_type="ValidationError",
+                    error_message="required population field is missing",
+                    raw_json={"AREA_NM": "테스트 장소"},
+                ),
+                HotspotParseFailure(
+                    hotspot_id=place.id,
+                    fetched_at=now,
+                    error_type="ValidationError",
+                    error_message="required population field is missing",
+                    raw_json={"AREA_NM": "테스트 장소"},
+                ),
+            ]
+        )
+        session.commit()
+
+        failures = session.scalars(select(HotspotParseFailure)).all()
+        assert len(failures) == 2
+        assert failures[0].raw_json["AREA_NM"] == "테스트 장소"
+
+        session.delete(place)
+        session.commit()
+        assert session.scalars(select(HotspotParseFailure)).all() == []
+
+
+def test_parse_failure_requires_nonempty_error_summary(engine):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        place = hotspot()
+        session.add(place)
+        session.flush()
+        session.add(
+            HotspotParseFailure(
+                hotspot_id=place.id,
+                fetched_at=now,
+                error_type="",
+                error_message="invalid response",
+                raw_json={},
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_expected_query_indexes_exist(engine):
+    schema = inspect(engine)
+    cafe_indexes = {item["name"] for item in schema.get_indexes("cafes")}
+    snapshot_indexes = {
+        item["name"] for item in schema.get_indexes("hotspot_snapshots")
+    }
+    failure_indexes = {
+        item["name"] for item in schema.get_indexes("hotspot_parse_failures")
+    }
+
+    assert "ix_cafes_bbox" in cafe_indexes
+    assert "ix_cafes_neighborhood_active" in cafe_indexes
+    assert "ix_snap_hotspot_time" in snapshot_indexes
+    assert "ix_parse_failure_hotspot_time" in failure_indexes

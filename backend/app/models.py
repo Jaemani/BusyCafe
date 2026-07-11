@@ -1,0 +1,231 @@
+"""SQLAlchemy persistence models and database-level invariants."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    MetaData,
+    String,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+NAMING_CONVENTION = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+JSON_VALUE = JSON().with_variant(JSONB(), "postgresql")
+
+
+class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class Hotspot(Base):
+    __tablename__ = "hotspots"
+    __table_args__ = (
+        CheckConstraint("lat BETWEEN -90 AND 90", name="lat_range"),
+        CheckConstraint("lng BETWEEN -180 AND 180", name="lng_range"),
+        Index("ix_hotspots_is_polled", "is_polled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    area_cd: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(100))
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    is_polled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+
+    snapshots: Mapped[list[HotspotSnapshot]] = relationship(
+        back_populates="hotspot", cascade="all, delete-orphan", passive_deletes=True
+    )
+    parse_failures: Mapped[list[HotspotParseFailure]] = relationship(
+        back_populates="hotspot", cascade="all, delete-orphan", passive_deletes=True
+    )
+    primary_scores: Mapped[list[CafeScore]] = relationship(
+        back_populates="primary_hotspot"
+    )
+
+
+class HotspotSnapshot(Base):
+    __tablename__ = "hotspot_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "hotspot_id", "observed_at", name="uq_snapshot_hotspot_observed"
+        ),
+        CheckConstraint(
+            "congest_level BETWEEN 1 AND 4", name="congest_level_range"
+        ),
+        CheckConstraint(
+            "ppltn_min IS NULL OR ppltn_min >= 0", name="ppltn_min_nonnegative"
+        ),
+        CheckConstraint(
+            "ppltn_max IS NULL OR ppltn_max >= 0", name="ppltn_max_nonnegative"
+        ),
+        CheckConstraint(
+            "ppltn_min IS NULL OR ppltn_max IS NULL OR ppltn_min <= ppltn_max",
+            name="ppltn_bounds_order",
+        ),
+        Index(
+            "ix_snap_hotspot_time",
+            "hotspot_id",
+            text("observed_at DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotspot_id: Mapped[int] = mapped_column(
+        ForeignKey("hotspots.id", ondelete="CASCADE"), nullable=False
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    congest_level: Mapped[int] = mapped_column(Integer, nullable=False)
+    congest_label: Mapped[str] = mapped_column(String(32), nullable=False)
+    ppltn_min: Mapped[int | None] = mapped_column(Integer)
+    ppltn_max: Mapped[int | None] = mapped_column(Integer)
+    forecast_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_VALUE)
+    raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_VALUE)
+
+    hotspot: Mapped[Hotspot] = relationship(back_populates="snapshots")
+
+
+class HotspotParseFailure(Base):
+    """Append-only raw response retained when upstream schema parsing fails."""
+
+    __tablename__ = "hotspot_parse_failures"
+    __table_args__ = (
+        CheckConstraint("length(error_type) > 0", name="error_type_nonempty"),
+        CheckConstraint("length(error_message) > 0", name="error_message_nonempty"),
+        Index(
+            "ix_parse_failure_hotspot_time",
+            "hotspot_id",
+            text("fetched_at DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotspot_id: Mapped[int] = mapped_column(
+        ForeignKey("hotspots.id", ondelete="CASCADE"), nullable=False
+    )
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    error_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    error_message: Mapped[str] = mapped_column(String(1_000), nullable=False)
+    raw_json: Mapped[dict[str, Any]] = mapped_column(JSON_VALUE, nullable=False)
+
+    hotspot: Mapped[Hotspot] = relationship(back_populates="parse_failures")
+
+
+class Cafe(Base):
+    __tablename__ = "cafes"
+    __table_args__ = (
+        CheckConstraint("lat BETWEEN -90 AND 90", name="lat_range"),
+        CheckConstraint("lng BETWEEN -180 AND 180", name="lng_range"),
+        Index("ix_cafes_bbox", "lng", "lat"),
+        Index("ix_cafes_neighborhood_active", "neighborhood", "active"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kakao_place_id: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    lat: Mapped[float] = mapped_column(Float, nullable=False)
+    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    road_address: Mapped[str | None] = mapped_column(String(500))
+    phone: Mapped[str | None] = mapped_column(String(64))
+    place_url: Mapped[str | None] = mapped_column(String(500))
+    neighborhood: Mapped[str | None] = mapped_column(String(64))
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+
+    score: Mapped[CafeScore | None] = relationship(
+        back_populates="cafe", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class CafeScore(Base):
+    __tablename__ = "cafe_scores"
+    __table_args__ = (
+        CheckConstraint(
+            "coverage IN ('covered', 'fringe', 'uncovered')",
+            name="coverage_values",
+        ),
+        CheckConstraint(
+            "confidence_tier IS NULL OR confidence_tier IN ('high', 'mid', 'low')",
+            name="confidence_tier_values",
+        ),
+        CheckConstraint(
+            "score IS NULL OR score BETWEEN 1.0 AND 4.0", name="score_range"
+        ),
+        CheckConstraint(
+            "level IS NULL OR level BETWEEN 1 AND 4", name="level_range"
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR confidence BETWEEN 0.0 AND 1.0",
+            name="confidence_range",
+        ),
+        CheckConstraint(
+            "primary_distance_m IS NULL OR primary_distance_m >= 0",
+            name="primary_distance_nonnegative",
+        ),
+        CheckConstraint(
+            "(coverage = 'uncovered' AND score IS NULL AND level IS NULL "
+            "AND confidence IS NULL AND confidence_tier IS NULL "
+            "AND primary_hotspot_id IS NULL AND primary_distance_m IS NULL "
+            "AND contributors_json IS NULL) OR "
+            "(coverage IN ('covered', 'fringe') AND score IS NOT NULL "
+            "AND level IS NOT NULL AND confidence IS NOT NULL "
+            "AND confidence_tier IS NOT NULL AND primary_hotspot_id IS NOT NULL "
+            "AND primary_distance_m IS NOT NULL AND contributors_json IS NOT NULL)",
+            name="coverage_nullable_fields",
+        ),
+        Index("ix_cafe_scores_coverage_confidence", "coverage", "confidence"),
+    )
+
+    cafe_id: Mapped[int] = mapped_column(
+        ForeignKey("cafes.id", ondelete="CASCADE"), primary_key=True
+    )
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    score: Mapped[float | None] = mapped_column(Float)
+    level: Mapped[int | None] = mapped_column(Integer)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    confidence_tier: Mapped[str | None] = mapped_column(String(16))
+    coverage: Mapped[str] = mapped_column(String(16), nullable=False)
+    primary_hotspot_id: Mapped[int | None] = mapped_column(
+        ForeignKey("hotspots.id"), nullable=True
+    )
+    primary_distance_m: Mapped[float | None] = mapped_column(Float)
+    contributors_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_VALUE)
+
+    cafe: Mapped[Cafe] = relationship(back_populates="score")
+    primary_hotspot: Mapped[Hotspot | None] = relationship(
+        back_populates="primary_scores"
+    )

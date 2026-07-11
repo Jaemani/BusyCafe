@@ -101,6 +101,9 @@ class Settings(BaseSettings):
 
     seoul_api_key: SecretStr | None = None
     kakao_rest_key: SecretStr | None = None
+    database_url: str = (
+        "postgresql+psycopg://cafe_crowd:cafe_crowd_dev@localhost:5432/cafe_crowd"
+    )
 
 
 @lru_cache(maxsize=1)
