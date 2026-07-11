@@ -8,6 +8,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import SCORING_MODEL_VERSION
 from app.database import get_db
 from app.main import create_app
 from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot
@@ -81,6 +82,7 @@ def api_client():
         session.add(
             CafeScore(
                 cafe_id=cafe.id,
+                model_version=SCORING_MODEL_VERSION,
                 computed_at=now,
                 score=2.0,
                 level=2,
@@ -124,12 +126,25 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     payload = response.json()
     assert [item["name"] for item in payload] == ["정확한 카페"]
     assert payload[0]["coverage"] == "covered"
+    assert payload[0]["model_version"] == SCORING_MODEL_VERSION
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert payload[0]["evidence"]["observed_at"] is not None
     assert payload[0]["evidence"]["observed_at"].endswith("Z")
     assert payload[0]["phone"] == "02-123-4567"
     assert payload[0]["website"] == "https://example.test"
     assert payload[0]["external_links"]["kakao"].endswith("/456")
+
+
+def test_detail_api_returns_scoring_model_version(api_client) -> None:
+    listing = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    ).json()
+
+    response = api_client.get(f"/api/cafes/{listing[0]['id']}")
+
+    assert response.status_code == 200
+    assert response.json()["model_version"] == SCORING_MODEL_VERSION
 
 
 @pytest.mark.parametrize(

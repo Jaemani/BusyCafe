@@ -57,6 +57,7 @@ HTTP_USER_AGENT: Final = "cafe-crowd/0.1"
 # Polling interval confirmed after the portal reported no call-count limit.
 # Scoring defaults remain subject to Phase 6 calibration.
 POLL_INTERVAL_MIN: Final = 10
+SCORING_MODEL_VERSION: Final = "v1-idw-point"
 R_MAX_M: Final = 1_500
 COVERED_M: Final = 600
 K_NEIGHBORS: Final = 3

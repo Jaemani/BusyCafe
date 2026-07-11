@@ -8,6 +8,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.config import SCORING_MODEL_VERSION
 from app.models import (
     Base,
     Cafe,
@@ -67,6 +68,7 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     assert snapshot.fetched_at.type.timezone is True
     assert parse_failure.fetched_at.type.timezone is True
     assert score.computed_at.type.timezone is True
+    assert score.model_version.nullable is False
     assert isinstance(
         snapshot.forecast_json.type.dialect_impl(postgresql.dialect()),
         postgresql.JSONB,
@@ -118,6 +120,7 @@ def test_uncovered_score_requires_all_estimate_fields_to_be_null(engine):
         session.add(
             CafeScore(
                 cafe_id=shop.id,
+                model_version=SCORING_MODEL_VERSION,
                 computed_at=now,
                 coverage="uncovered",
                 score=1.0,
@@ -139,11 +142,13 @@ def test_valid_uncovered_and_covered_scores_round_trip(engine):
             [
                 CafeScore(
                     cafe_id=uncovered_cafe.id,
+                    model_version=SCORING_MODEL_VERSION,
                     computed_at=now,
                     coverage="uncovered",
                 ),
                 CafeScore(
                     cafe_id=covered_cafe.id,
+                    model_version=SCORING_MODEL_VERSION,
                     computed_at=now,
                     coverage="covered",
                     score=2.25,
@@ -178,7 +183,12 @@ def test_cafe_delete_cascades_materialized_score(engine):
         session.add(shop)
         session.flush()
         session.add(
-            CafeScore(cafe_id=shop.id, computed_at=now, coverage="uncovered")
+            CafeScore(
+                cafe_id=shop.id,
+                model_version=SCORING_MODEL_VERSION,
+                computed_at=now,
+                coverage="uncovered",
+            )
         )
         session.commit()
         shop_id = shop.id

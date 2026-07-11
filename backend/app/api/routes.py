@@ -110,6 +110,7 @@ def _cafe_response(
             f"Overture Places · {cafe.source_release} · 신뢰도 {cafe.source_confidence:.2f}"
             + (" · 배포 스냅샷" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "")
         ),
+        model_version=score.model_version if score else None,
         level=score.level if score else None,
         score=score.score if score else None,
         confidence=score.confidence if score else None,

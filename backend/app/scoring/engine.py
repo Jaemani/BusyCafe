@@ -22,6 +22,7 @@ from app.config import (
     D_FLOOR_M,
     K_NEIGHBORS,
     R_MAX_M,
+    SCORING_MODEL_VERSION,
     TAU_MIN,
 )
 from app.geo import haversine_m
@@ -275,6 +276,7 @@ def materialize_all(
         )
         counts[estimate.coverage] += 1
         values = {
+            "model_version": SCORING_MODEL_VERSION,
             "computed_at": computed_at,
             "score": estimate.score,
             "level": estimate.level,

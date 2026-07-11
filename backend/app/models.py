@@ -224,6 +224,7 @@ class CafeScore(Base):
     cafe_id: Mapped[int] = mapped_column(
         ForeignKey("cafes.id", ondelete="CASCADE"), primary_key=True
     )
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from app.config import SCORING_MODEL_VERSION
 from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot
 from app.scoring.engine import HotspotObservation, materialize_all, score_cafe
 
@@ -210,6 +211,7 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         assert first.covered == 1
         stored = session.scalar(select(CafeScore))
         assert stored is not None
+        assert stored.model_version == SCORING_MODEL_VERSION
         assert stored.level == 3
         assert stored.coverage == "covered"
         assert stored.computed_at.replace(tzinfo=UTC) == NOW + timedelta(minutes=15)

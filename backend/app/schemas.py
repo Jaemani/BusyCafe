@@ -123,6 +123,7 @@ class CafeMapResponse(BaseModel):
     phone: str | None = None
     website: str | None = None
     source_label: str
+    model_version: str | None = None
     level: int | None = None
     score: float | None = None
     confidence: float | None = None
