@@ -391,8 +391,9 @@
   회귀 테스트 추가 시 백엔드 전체 104개가 통과했고, 출처 API 테스트까지 포함한 최종
   결과는 105개 통과다.
 - CI에 PostgreSQL 17 service를 추가하고 Alembic migration을 실제 DB에 적용한 뒤
-  스키마를 확인하도록 구성했다. workflow YAML 검증과 관련 로컬 테스트는 통과했으며,
-  원격 CI workflow 실행 결과는 아직 확인하지 않았다.
+  스키마를 확인하도록 구성했다. GitHub Actions run `29160900757`에서 backend 40초,
+  frontend 18초로 통과했고 실제 `upgrade head`, head 확인과 핵심 테이블 smoke가 모두
+  성공했다. Node.js 20 기반 action의 deprecation annotation은 후속 정리 대상이다.
 - README의 외부 재현·Quickstart 명령에서 로컬 전용 `rtk` 의존을 제거하고 표준
   `git`, `uv`, `npm`, `curl` 명령만 사용하도록 정리했다.
 - `/api/sources`와 지도 헤더에 서울특별시 OA-21285, Overture Places 및 전체 라이선스

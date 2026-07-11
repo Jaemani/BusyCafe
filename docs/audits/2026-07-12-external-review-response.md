@@ -36,10 +36,10 @@ API schema, 수집기, fixture, 실패 격리와 배포 동작 검증까지 0으
 | 순위 | 작업 | 상태 | 완료 조건 |
 |---:|---|---|---|
 | 1 | 관리형 PostgreSQL provision과 production 전환 | `[HUMAN]` credential 대기 | Vercel read API와 10분 worker가 같은 DB 사용, 1시간 freshness 검증 |
-| 2 | 축소 Phase 6 평가 | 진행 | 평가 도구 완료, 20~30개 카페 × 3개 슬롯 관측, Spearman 보고 |
-| 3 | 현행 라이선스·attribution 감사 | 대기 | 코드 라이선스 결정, 세 데이터 source 의무 검증 |
-| 4 | 외부인용 README와 감사 재현 절차 | 진행 | 표준 명령만으로 새 환경에서 검증 가능 |
-| 5 | PostgreSQL migration CI | 진행 | 실제 PostgreSQL 17에 upgrade와 schema smoke 성공 |
+| 2 | 축소 Phase 6 평가 | 도구 완료·`[HUMAN]` 관측 대기 | 20~30개 카페 × 3개 슬롯 관측, Spearman 보고 |
+| 3 | 현행 라이선스·attribution 감사 | 출처 보완 완료·코드 LICENSE `[HUMAN]` 대기 | 코드 라이선스 결정, 지도 attribution 브라우저 확인 |
+| 4 | 외부인용 README와 감사 재현 절차 | 완료 | 표준 명령으로 CI와 로컬 검증 가능 |
+| 5 | PostgreSQL migration CI | 완료 | GitHub Actions run `29160900757`에서 PostgreSQL 17 upgrade와 schema smoke 성공 |
 | 6 | freshness 경보·백업/복구 runbook | 대기 | 25분 stale 탐지와 복구 훈련 기록 |
 
 ## 작업 동결
