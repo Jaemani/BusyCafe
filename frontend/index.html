@@ -11,8 +11,34 @@
   </head>
   <body>
     <main id="app">
-      <h1>cafe-crowd</h1>
-      <p>Phase 0 API 검증을 준비하고 있습니다.</p>
+      <p class="eyebrow">BUSY CAFE · DEVELOPMENT PREVIEW</p>
+      <h1>서울 카페 혼잡도 지도</h1>
+      <p class="lead">
+        지역 혼잡도 근거를 카페 위치에 매핑해, 지금 상대적으로 여유로울 가능성이
+        높은 곳을 찾는 서비스입니다.
+      </p>
+
+      <section class="status-card" aria-labelledby="phase-title">
+        <div>
+          <span class="badge">Phase 1 진행 중</span>
+          <h2 id="phase-title">데이터 인제스트 기반 구현 완료</h2>
+        </div>
+        <ul>
+          <li>서울·카카오 실제 API 응답과 혼잡도 라벨 4종 검증</li>
+          <li>서울시 공식 121개 장소 목록·WGS84 영역 확보</li>
+          <li>PostgreSQL schema, 안전한 seed, 10분 ingest worker 구현</li>
+          <li>백엔드 테스트 59개 및 프론트 프로덕션 빌드 통과</li>
+        </ul>
+      </section>
+
+      <section class="notice" aria-labelledby="next-title">
+        <h2 id="next-title">아직 지도는 연결되지 않았습니다</h2>
+        <p>
+          다음 구현은 서울 전역 121개 핫스팟 폴링과 사용자가 이동한 viewport의
+          카페를 타일 단위로 불러오는 지도입니다. 커버리지 밖 카페는 데이터 없음으로
+          정직하게 표시합니다.
+        </p>
+      </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

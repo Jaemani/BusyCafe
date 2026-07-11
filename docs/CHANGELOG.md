@@ -13,6 +13,7 @@
 - PostgreSQL/JSONB 기반 초기 schema와 Alembic migration
 - 공식 WGS84 영역 대표점 기반 121개 핫스팟 멱등 seed 및 HUMAN 검수 dry-run
 - API 프로세스와 분리된 10분 ingest worker, 재시도·대상 검증·파싱 실패 원본 보존
+- 브라우저에서 현재 개발 단계와 완료된 검증을 확인하는 Phase 1 상태 화면
 
 ### Changed
 

@@ -1,15 +1,115 @@
 :root {
-  font-family: system-ui, sans-serif;
-  color: #1f2937;
-  background: #f8fafc;
+  font-family: Inter, Pretendard, system-ui, sans-serif;
+  color: #172018;
+  background: #f2f5ec;
+  font-synthesis: none;
 }
 
 body {
   margin: 0;
+  min-width: 20rem;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 85% 8%, rgb(210 226 183 / 70%), transparent 30rem),
+    #f2f5ec;
 }
 
 #app {
-  max-width: 48rem;
-  margin: 5rem auto;
-  padding: 0 1.5rem;
+  box-sizing: border-box;
+  width: min(100%, 56rem);
+  margin: 0 auto;
+  padding: clamp(3rem, 8vw, 7rem) 1.5rem;
+}
+
+.eyebrow {
+  margin: 0 0 1rem;
+  color: #557048;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+h1 {
+  max-width: 12ch;
+  margin: 0;
+  font-size: clamp(2.6rem, 8vw, 5.8rem);
+  line-height: 0.96;
+  letter-spacing: -0.06em;
+}
+
+.lead {
+  max-width: 42rem;
+  margin: 1.75rem 0 3rem;
+  color: #536052;
+  font-size: clamp(1rem, 2vw, 1.2rem);
+  line-height: 1.7;
+}
+
+.status-card,
+.notice {
+  border: 1px solid rgb(54 72 49 / 16%);
+  border-radius: 1.5rem;
+  background: rgb(255 255 255 / 72%);
+  box-shadow: 0 1.5rem 4rem rgb(61 79 48 / 10%);
+  backdrop-filter: blur(1rem);
+}
+
+.status-card {
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.45rem 0.75rem;
+  color: #f8fff2;
+  background: #4d6b3e;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+h2 {
+  margin: 1rem 0;
+  font-size: clamp(1.25rem, 3vw, 1.7rem);
+  letter-spacing: -0.035em;
+}
+
+ul {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.75rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+li {
+  position: relative;
+  padding-left: 1.5rem;
+  color: #445043;
+  line-height: 1.55;
+}
+
+li::before {
+  position: absolute;
+  left: 0;
+  color: #6b8b55;
+  content: "✓";
+  font-weight: 900;
+}
+
+.notice {
+  margin-top: 1rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: none;
+}
+
+.notice h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.notice p {
+  margin: 0;
+  color: #657064;
+  line-height: 1.6;
 }
