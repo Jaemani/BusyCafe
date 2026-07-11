@@ -53,7 +53,7 @@
 
 - 실행 환경: 설계 검토(실 API 호출 없음)
 - 검증자: Codex
-- 관련 커밋: 초기 커밋 전
+- 관련 커밋: `f1be918`
 - 입력/fixture: `docs/PLAN.md`의 관계, 시계열, bbox, IDW 요구사항
 - 기대 결과: 사용자 증가와 공간 질의를 감당하면서 데이터 정합성을 유지할 저장소 선택
 - 실제 결과: PostgreSQL을 운영·통합테스트 기준으로 채택하고 PostGIS를 선택적으로 활성화하기로 결정
@@ -66,7 +66,7 @@
 
 - 실행 환경: 계획서 정적 검토(실 API 호출 없음)
 - 검증자: Codex
-- 관련 커밋: 초기 커밋 전
+- 관련 커밋: `f1be918`
 - 기대 결과: D4와 §4.5의 uncovered NULL 규칙이 DDL과 일치
 - 실제 결과: 초기 DDL은 `score`, `level`, `confidence`를 `NOT NULL`로 선언해 규칙과 충돌
 - 판정: PASS (문서 정정)
@@ -77,7 +77,7 @@
 
 - 실행 환경: macOS, Python 3.14.6(프로젝트 기준 3.12+), Node.js 22.23.0
 - 검증자: Codex
-- 관련 커밋: 초기 커밋 전
+- 관련 커밋: `e2c044d`
 - 입력/fixture: 실측 fixture 없음, in-memory HTTP transport만 사용
 - 실행 명령: `rtk uv run pytest`, `rtk uv run python -m compileall -q app scripts tests`, `rtk npm run typecheck`, `rtk npm run build`
 - 기대 결과: 외부 실호출 없이 검증 도구 안전장치와 양쪽 스캐폴딩이 통과
