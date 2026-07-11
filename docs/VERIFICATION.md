@@ -51,7 +51,7 @@
 
 - 실행 환경: 로컬 `.env`, 키 값은 출력·기록하지 않음
 - 검증자: Codex
-- 관련 커밋: 다음 fixture/schema 커밋에 연결 예정
+- 관련 커밋: `c641095`
 - 입력/fixture: 서울 `광화문광장`, 카카오 광화문 인근 CE7 반경 1,000m
 - 실행 명령: `rtk uv run python scripts/verify_apis.py --service all`
 - 기대 결과: 서울·카카오 원본 fixture 각각 1개 저장
@@ -60,6 +60,7 @@
 - 계획과의 차이: 서울 응답은 예상한 `LIVE_PPLTN_STTS` 중첩이 아니라 `SeoulRtd.citydata_ppltn[]`의 평면 레코드. root 성공 결과도 `RESULT.CODE`/`RESULT.MESSAGE` 형태의 키 사용
 - 후속 조치: 두 실측 모델의 fixture 기반 회귀 테스트 유지. 쿼터와 장소 마스터 확인
 - 관련 결정/인시던트: `docs/INCIDENTS.md`의 INC-2026-001
+- 회귀 검증: 실측 fixture 기반 backend 13 tests passed, Python compileall, TypeScript typecheck, Vite production build 통과
 
 ### 확인된 서울 값
 
