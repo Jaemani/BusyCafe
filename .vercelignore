@@ -1,0 +1,26 @@
+# Vercel 배포에는 읽기 전용 프로덕션 스냅샷 하나만 포함한다.
+api/data/**
+!api/data/preview.db
+
+# 백엔드 런타임 함수가 사용하지 않는 로컬 데이터와 개발 자산이다.
+backend/data/**
+backend/tests/**
+backend/fixtures/**
+backend/migrations/**
+backend/scripts/**
+backend/.venv/**
+backend/.pytest_cache/**
+backend/**/__pycache__/**
+
+# 프론트엔드는 Vercel 빌드 중 다시 설치하고 생성한다.
+frontend/dist/**
+frontend/node_modules/**
+frontend/.env
+
+# 배포 런타임에 필요하지 않은 저장소 및 로컬 메타데이터다.
+docs/**
+.git/**
+.github/**
+.vercel/**
+.tokensave/**
+.env

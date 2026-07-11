@@ -303,10 +303,14 @@
 ## 2026-07-11 — Vercel 읽기 전용 스냅샷 배포
 
 - 배포 URL: `https://busy-cafe.vercel.app`
+- production deployment: `https://busy-cafe-fdx012hxi-jaemanis-projects.vercel.app`가
+  Vercel에서 `Ready` 상태임을 확인했다.
 - rename 검증(2026-07-12): 오타가 있던 Vercel 프로젝트 `budy-cafe`를 `busy-cafe`로
   변경하고 새 production deployment와 alias를 연결했다.
 - 초기 수동 alias는 SSO로 HTTP 302를 반환했다. 공개 접근 정책을 복원한 뒤
   `https://busy-cafe.vercel.app/`과 `/api/health`가 인증 리디렉션 없이 HTTP 200임을 확인했다.
+- production HTML의 canonical과 `og:url`은 모두 `https://busy-cafe.vercel.app/`이다.
+  기존 `budy-cafe.vercel.app` alias는 이전 링크 호환용으로 유지한다.
 - 배포 모델: `api/data/preview.db`의 카페 4,933개·저장된 혼잡도 점수를 포함한 읽기 전용
   SQLite 스냅샷이다. 요청 중 외부 API를 호출하지 않으며 서울 API 키도 배포하지 않는다.
 - 검증: production에서 `/` HTTP 200, `/api/health` HTTP 200,
@@ -350,6 +354,8 @@
 - 복구 확인: local snapshot 2,363건을 보존했고 materialize 재실행 결과 cafes 4,933,
   covered/fringe/uncovered `2,317/1,523/1,093`이었다.
 - 검증: backend 전체 97 passed, compileall PASS, Vercel snapshot TestClient의 bbox API가 HTTP 200과
+  `model_version=v1-idw-point`를 반환했다.
+- production 검증: cache-busting query를 붙인 홍대 bbox API가 HTTP 200이며
   `model_version=v1-idw-point`를 반환했다.
 - 재기동 확인: worker session 13858에서 scheduler started, API session 50211에서 local health
   `snapshots_last_hour=121`, `last_ingest_at=2026-07-11T15:42:09.249470Z`를 확인했다. 카페 응답은
