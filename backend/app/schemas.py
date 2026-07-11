@@ -183,6 +183,14 @@ class HotspotStatusResponse(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    data_mode: Literal["snapshot", "live"]
     last_ingest_at: datetime | None = None
+    last_complete_cycle_at: datetime | None = None
+    last_cycle_status: (
+        Literal["running", "complete", "partial", "failed"] | None
+    ) = None
+    last_cycle_targets: int | None = None
+    last_cycle_saved: int | None = None
+    last_cycle_failed: int | None = None
     snapshots_last_hour: int
     cafes_count: int

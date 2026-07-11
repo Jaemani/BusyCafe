@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.ingest.poller import ParseFailureRecord, PollTarget, SnapshotRecord
-from app.models import Hotspot, HotspotParseFailure, HotspotSnapshot
+from app.models import IngestCycle, Hotspot, HotspotParseFailure, HotspotSnapshot
 
 
 class SnapshotRepository:
@@ -31,6 +33,42 @@ class SnapshotRepository:
             )
             for row in rows
         ]
+
+    def start_cycle(self, *, targets: int, started_at: datetime) -> int:
+        """Commit a running cycle before any external polling begins."""
+
+        with self._session_factory() as session:
+            cycle = IngestCycle(
+                started_at=started_at,
+                targets=targets,
+                saved=0,
+                failed=0,
+                status="running",
+            )
+            session.add(cycle)
+            session.commit()
+            return cycle.id
+
+    def finish_cycle(
+        self,
+        cycle_id: int,
+        *,
+        completed_at: datetime,
+        saved: int,
+        failed: int,
+        status: str,
+    ) -> None:
+        """Commit final counters and status for a previously started cycle."""
+
+        with self._session_factory() as session:
+            cycle = session.get(IngestCycle, cycle_id)
+            if cycle is None:
+                raise RuntimeError(f"ingest cycle {cycle_id} not found")
+            cycle.completed_at = completed_at
+            cycle.saved = saved
+            cycle.failed = failed
+            cycle.status = status
+            session.commit()
 
     @staticmethod
     def _snapshot_exists(session: Session, record: SnapshotRecord) -> bool:

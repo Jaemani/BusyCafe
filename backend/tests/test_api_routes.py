@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.config import OVERTURE_RELEASE, SCORING_MODEL_VERSION
 from app.database import get_db
 from app.main import create_app
-from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot
+from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
 
 
 @pytest.fixture
@@ -101,6 +101,25 @@ def api_client():
                 ],
             )
         )
+        session.add(
+            IngestCycle(
+                started_at=now - timedelta(minutes=1),
+                completed_at=now - timedelta(minutes=1),
+                targets=1,
+                saved=1,
+                failed=0,
+                status="complete",
+            )
+        )
+        session.add(
+            IngestCycle(
+                started_at=now,
+                targets=1,
+                saved=0,
+                failed=0,
+                status="running",
+            )
+        )
         session.commit()
 
     app = create_app()
@@ -172,11 +191,30 @@ def test_search_or_untrusted_external_links_are_not_exposed(api_client) -> None:
     assert links.google is None
 
 
-def test_health_counts_only_active_cafes(api_client) -> None:
+def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
+    monkeypatch.delenv("CAFE_CROWD_SNAPSHOT", raising=False)
+
     response = api_client.get("/api/health")
     assert response.status_code == 200
+    assert response.json()["data_mode"] == "live"
     assert response.json()["cafes_count"] == 1
     assert response.json()["snapshots_last_hour"] == 1
+    assert response.json()["last_complete_cycle_at"].endswith("Z")
+    assert response.json()["last_cycle_status"] == "running"
+    assert response.json()["last_cycle_targets"] == 1
+    assert response.json()["last_cycle_saved"] == 0
+    assert response.json()["last_cycle_failed"] == 0
+
+
+def test_health_reports_snapshot_mode_from_runtime_environment(
+    api_client, monkeypatch
+) -> None:
+    monkeypatch.setenv("CAFE_CROWD_SNAPSHOT", "1")
+
+    response = api_client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["data_mode"] == "snapshot"
 
 
 def test_sources_returns_static_license_manifest(api_client) -> None:

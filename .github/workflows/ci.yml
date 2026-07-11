@@ -48,7 +48,7 @@ jobs:
           uv run python -c
           "import os;
           from sqlalchemy import create_engine, inspect;
-          required = {'alembic_version', 'hotspots', 'hotspot_snapshots', 'hotspot_parse_failures', 'cafes', 'cafe_scores'};
+          required = {'alembic_version', 'ingest_cycles', 'hotspots', 'hotspot_snapshots', 'hotspot_parse_failures', 'cafes', 'cafe_scores'};
           actual = set(inspect(create_engine(os.environ['DATABASE_URL']).connect()).get_table_names());
           missing = required - actual;
           assert not missing, f'missing migrated tables: {sorted(missing)}'"

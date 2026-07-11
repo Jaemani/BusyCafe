@@ -22,7 +22,13 @@ from app.ingest.poller import (
 )
 from app.ingest.repository import SnapshotRepository
 from app.ingest.worker import main, run_poll_cycle, suppress_secret_bearing_http_logs
-from app.models import Base, Hotspot, HotspotParseFailure, HotspotSnapshot
+from app.models import (
+    Base,
+    Hotspot,
+    HotspotParseFailure,
+    HotspotSnapshot,
+    IngestCycle,
+)
 
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
@@ -194,8 +200,65 @@ def test_run_poll_cycle_uses_database_targets_without_real_http(session_factory)
 
     assert client.calls == ["광화문광장"]
     assert report.targets == report.saved == 1
+    assert report.status == "complete"
     with session_factory() as session:
         assert session.scalar(select(func.count()).select_from(HotspotSnapshot)) == 1
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "complete"
+        assert cycle.completed_at is not None
+
+
+def test_cycle_is_committed_running_before_first_external_call(session_factory):
+    add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+
+    class ObservingClient(FixtureClient):
+        def fetch_population_raw(self, area_name: str) -> dict[str, Any]:
+            with session_factory() as session:
+                cycle = session.scalar(select(IngestCycle))
+                assert cycle is not None
+                assert cycle.status == "running"
+                assert cycle.completed_at is None
+            return super().fetch_population_raw(area_name)
+
+    report = run_poll_cycle(
+        session_factory,
+        client=ObservingClient(load_citydata_fixture()),
+    )
+
+    assert report.status == "complete"
+
+
+def test_materialize_exception_marks_cycle_failed_then_reraises(session_factory):
+    add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+
+    def fail_materialize(_session: Session) -> None:
+        raise RuntimeError("materialize unavailable")
+
+    with pytest.raises(RuntimeError, match="materialize unavailable"):
+        run_poll_cycle(
+            session_factory,
+            client=FixtureClient(load_citydata_fixture()),
+            materializer=fail_materialize,
+        )
+
+    with session_factory() as session:
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "failed"
+        assert cycle.targets == cycle.saved == 1
+        assert cycle.failed == 0
+        assert cycle.completed_at is not None
 
 
 def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
@@ -235,6 +298,49 @@ def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
     check_engine = create_engine(database_url)
     with Session(check_engine) as session:
         assert session.scalar(select(func.count()).select_from(HotspotSnapshot)) == 1
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "complete"
+    check_engine.dispose()
+
+
+def test_worker_once_returns_nonzero_for_incomplete_cycle(tmp_path):
+    database_url = f"sqlite+pysqlite:///{tmp_path / 'failed-worker.db'}"
+    setup_engine = create_engine(database_url)
+    Base.metadata.create_all(setup_engine)
+    setup_factory = sessionmaker(
+        bind=setup_engine, expire_on_commit=False, class_=Session
+    )
+    add_hotspot(
+        setup_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+    setup_engine.dispose()
+
+    class FailingClient:
+        def fetch_population_raw(self, _area_name: str) -> dict[str, Any]:
+            raise RuntimeError("upstream unavailable")
+
+    result = main(
+        ["--once", "--database-url", database_url],
+        settings_loader=lambda: Settings(
+            seoul_api_key=SecretStr("test-key"),
+            database_url="sqlite+pysqlite:///ignored.db",
+        ),
+        client_factory=lambda _key: FailingClient(),
+        engine_factory=lambda url: create_engine(url),
+    )
+
+    assert result == 1
+    check_engine = create_engine(database_url)
+    with Session(check_engine) as session:
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "failed"
+        assert cycle.saved == 0
+        assert cycle.failed == 1
     check_engine.dispose()
 
 

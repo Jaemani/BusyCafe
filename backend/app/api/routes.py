@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import MAX_CAFES_PER_VIEWPORT, OVERTURE_RELEASE
 from app.database import get_db
-from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot
+from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
 from app.schemas import (
     CafeDetailResponse,
     CafeMapResponse,
@@ -333,8 +333,27 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
 @router.get("/health", response_model=HealthResponse)
 def health(db: Session = Depends(get_db)) -> HealthResponse:
     now = datetime.now(UTC)
+    latest_cycle = db.scalar(
+        select(IngestCycle).order_by(
+            IngestCycle.started_at.desc(), IngestCycle.id.desc()
+        ).limit(1)
+    )
     return HealthResponse(
+        data_mode=(
+            "snapshot" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "live"
+        ),
         last_ingest_at=_utc(db.scalar(select(func.max(HotspotSnapshot.fetched_at)))),
+        last_complete_cycle_at=_utc(
+            db.scalar(
+                select(func.max(IngestCycle.completed_at)).where(
+                    IngestCycle.status == "complete"
+                )
+            )
+        ),
+        last_cycle_status=latest_cycle.status if latest_cycle else None,
+        last_cycle_targets=latest_cycle.targets if latest_cycle else None,
+        last_cycle_saved=latest_cycle.saved if latest_cycle else None,
+        last_cycle_failed=latest_cycle.failed if latest_cycle else None,
         snapshots_last_hour=db.scalar(
             select(func.count())
             .select_from(HotspotSnapshot)

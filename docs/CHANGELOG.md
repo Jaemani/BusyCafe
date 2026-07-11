@@ -19,6 +19,8 @@
 - Overture Places `2026-06-17.0` 고신뢰 서울 카페 4,933건 서버 cache ingest
 - 공식 121개 핫스팟 전체 seed, 결정적 IDW score materialize, cache-only FastAPI bbox API
 - 세 개 고도화 트랙 및 유니버설 확장 로드맵 문서화
+- Phase 6 지역 혼잡/매장 효용 이중 라벨 evaluator와 거리대별 24곳 현장 후보
+- 전체 수집 cycle 상태, production freshness monitor와 백업·복구 runbook
 
 ### Changed
 
@@ -29,10 +31,17 @@
 - 제품 지도/POI 경로를 Kakao에서 MapLibre + Overture cache로 변경
 - 폴링 대상을 초기 10곳에서 공식 121곳 전체로 변경
 - 외부 지도 검색 링크는 제거하고 검증된 가게 상세 URL이 있을 때만 표시
+- Phase 6 순위 평가는 실제 관측 timestamp 대신 동네별 field slot로 묶되, 과거 예측
+  재생에는 각 실제 관측 시각을 사용하도록 변경
+- 공개 데이터 모드를 프론트 빌드 상수가 아닌 `/api/health.data_mode`의 runtime 상태로 표시
 
 ### Fixed
 
 - 서울 인구 API의 실제 평면 응답 구조와 dotted `RESULT` 키를 반영하도록 provisional 스키마 수정
+- 일부 hotspot만 갱신돼도 production이 fresh로 보일 수 있던 health 판정을 전체 cycle
+  완료 시각 기준으로 교체
+- 현장 지역 혼잡 라벨이 원시 보행량·흐름 방해 규칙과 모순돼도 평가에 포함되던 입력
+  계약을 fail-closed 검증으로 교체
 
 ### Removed
 

@@ -20,7 +20,18 @@ const CLUSTER_COUNT_LAYER = "cafe-cluster-count";
 const CAFE_LAYER = "cafe-points";
 const CAFE_HIT_LAYER = "cafe-hit-area";
 const MIN_CAFE_ZOOM = 11;
-const IS_DEPLOYED_SNAPSHOT = import.meta.env.VITE_DATA_MODE === "snapshot";
+
+type DataMode = "snapshot" | "live";
+
+async function fetchDataMode(): Promise<DataMode> {
+  const response = await fetch("/api/health");
+  if (!response.ok) throw new Error("데이터 모드 조회 실패");
+  const payload = (await response.json()) as { data_mode?: unknown };
+  if (payload.data_mode !== "snapshot" && payload.data_mode !== "live") {
+    throw new Error("데이터 모드 응답 형식 오류");
+  }
+  return payload.data_mode;
+}
 
 const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
@@ -265,6 +276,35 @@ export async function initializeCafeMap(
 
   let requestController: AbortController | null = null;
   let requestSequence = 0;
+  let dataMode: DataMode | "unknown" | null = null;
+  let displayedCafeCount: number | null = null;
+
+  const renderCafeStatus = (): void => {
+    if (displayedCafeCount === null) return;
+    const modeLabel = dataMode === "snapshot"
+      ? " · 배포 스냅샷"
+      : dataMode === "unknown"
+        ? " · 데이터 모드 확인 불가"
+        : "";
+    if (displayedCafeCount === 0) {
+      statusElement.textContent = `지도 준비됨 · 카페 데이터 연결 대기${modeLabel}`;
+      statusElement.dataset.state = "empty";
+      return;
+    }
+    statusElement.textContent =
+      `카페 ${displayedCafeCount.toLocaleString("ko-KR")}곳${modeLabel}`;
+    statusElement.dataset.state = "ready";
+  };
+
+  void fetchDataMode()
+    .then((mode) => {
+      dataMode = mode;
+      renderCafeStatus();
+    })
+    .catch(() => {
+      dataMode = "unknown";
+      renderCafeStatus();
+    });
 
   const updateLegend = (hasScores: boolean): void => {
     const legend = document.querySelector<HTMLElement>("#map-legend");
@@ -275,6 +315,7 @@ export async function initializeCafeMap(
     requestController?.abort();
     requestController = new AbortController();
     const sequence = ++requestSequence;
+    displayedCafeCount = null;
     statusElement.textContent = "현재 화면을 확인하는 중";
     statusElement.dataset.state = "loading";
 
@@ -293,12 +334,8 @@ export async function initializeCafeMap(
       const source = map.getSource(CAFE_SOURCE) as GeoJSONSource | undefined;
       source?.setData(result);
       updateLegend(result.features.some((feature) => feature.properties.level !== null));
-      statusElement.textContent = result.features.length
-        ? `카페 ${result.features.length.toLocaleString("ko-KR")}곳${
-            IS_DEPLOYED_SNAPSHOT ? " · 배포 스냅샷" : ""
-          }`
-        : "지도 준비됨 · 카페 데이터 연결 대기";
-      statusElement.dataset.state = result.features.length ? "ready" : "empty";
+      displayedCafeCount = result.features.length;
+      renderCafeStatus();
     } catch (error) {
       if (requestController.signal.aborted || sequence !== requestSequence) return;
       statusElement.textContent =
@@ -309,6 +346,7 @@ export async function initializeCafeMap(
 
   map.on("movestart", () => {
     hideCafePanel();
+    displayedCafeCount = null;
     statusElement.textContent = "지도 이동 중";
     statusElement.dataset.state = "moving";
   });

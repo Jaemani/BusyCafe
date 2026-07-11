@@ -101,6 +101,7 @@ uv run python -m app.ingest.worker
 - [중요 사고와 재발 방지](docs/INCIDENTS.md)
 - [설계 결정](docs/DECISIONS.md)
 - [데이터 라이선스·출처표시 감사](docs/LICENSE_ATTRIBUTION_AUDIT.md)
+- [Production 운영·백업·복구 Runbook](docs/OPERATIONS.md)
 - [고도화 로드맵](docs/ROADMAP.md)
 - [기여 가이드](CONTRIBUTING.md)
 

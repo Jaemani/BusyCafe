@@ -48,9 +48,23 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
                 {"cafe_id": cafe_id},
             ).scalar_one()
             columns = {item["name"]: item for item in inspect(connection).get_columns("cafe_scores")}
+            cycle_columns = {
+                item["name"]: item
+                for item in inspect(connection).get_columns("ingest_cycles")
+            }
 
         assert stored_version == SCORING_MODEL_VERSION
         assert columns["model_version"]["nullable"] is False
+        assert set(cycle_columns) == {
+            "id",
+            "started_at",
+            "completed_at",
+            "targets",
+            "saved",
+            "failed",
+            "status",
+        }
+        assert cycle_columns["completed_at"]["nullable"] is True
         engine.dispose()
     finally:
         get_settings.cache_clear()

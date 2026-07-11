@@ -7,7 +7,9 @@
 
 Vercel은 프론트엔드와 FastAPI read API를 제공한다. 정본 데이터는 관리형 PostgreSQL에
 저장하고, `app.ingest.worker`는 web 요청과 분리해 10분 간격으로 서울 도시데이터를
-가져와 snapshot과 cafe score를 원자적으로 갱신한다.
+가져온 뒤 cafe score를 갱신한다. 대상별 snapshot 저장과 score materialize는 하나의 DB
+transaction이 아니다. 대신 cycle 시작과 완료 결과를 별도 영속화하며, 전체 대상 저장과
+materialize가 모두 성공한 경우에만 cycle을 `complete`로 표시한다.
 
 Vercel의 SQLite 번들은 데모/장애 시 읽기 전용 fallback으로만 유지한다. Vercel 함수의
 임시 파일 시스템과 함수 수명에 폴링 상태를 의존하지 않는다.
@@ -32,4 +34,6 @@ Vercel의 SQLite 번들은 데모/장애 시 읽기 전용 fallback으로만 유
   보장하지 못한다.
 - GitHub Actions cron은 편리한 MVP scheduler지만 지연될 수 있으므로 엄격한 정확한
   10분 SLA의 최종 해법은 아니다.
+- freshness와 승격 판정은 개별 snapshot의 최신 시각이 아니라 마지막 `complete` cycle을
+  기준으로 한다. 부분 성공이나 materialize 실패는 최신 snapshot이 있어도 정상으로 보지 않는다.
 - `SEOUL_API_KEY`는 worker에만 설정한다. Vercel read API에는 키를 배포하지 않는다.

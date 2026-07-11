@@ -40,7 +40,7 @@ API schema, 수집기, fixture, 실패 격리와 배포 동작 검증까지 0으
 | 3 | 현행 라이선스·attribution 감사 | 출처 보완 완료·코드 LICENSE `[HUMAN]` 대기 | 코드 라이선스 결정, 지도 attribution 브라우저 확인 |
 | 4 | 외부인용 README와 감사 재현 절차 | 완료 | 표준 명령으로 CI와 로컬 검증 가능 |
 | 5 | PostgreSQL migration CI | 완료 | GitHub Actions run `29160900757`에서 PostgreSQL 17 upgrade와 schema smoke 성공 |
-| 6 | freshness 경보·백업/복구 runbook | 대기 | 25분 stale 탐지와 복구 훈련 기록 |
+| 6 | freshness 경보·백업/복구 runbook | complete-cycle probe와 runbook 구현, 활성화·복구 훈련 대기 | 25분 stale 탐지와 별도 recovery DB 복구 훈련 기록 |
 
 ## 작업 동결
 

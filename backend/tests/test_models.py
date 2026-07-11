@@ -16,6 +16,7 @@ from app.models import (
     Hotspot,
     HotspotParseFailure,
     HotspotSnapshot,
+    IngestCycle,
 )
 
 
@@ -63,11 +64,14 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     snapshot = HotspotSnapshot.__table__.c
     parse_failure = HotspotParseFailure.__table__.c
     score = CafeScore.__table__.c
+    cycle = IngestCycle.__table__.c
 
     assert snapshot.observed_at.type.timezone is True
     assert snapshot.fetched_at.type.timezone is True
     assert parse_failure.fetched_at.type.timezone is True
     assert score.computed_at.type.timezone is True
+    assert cycle.started_at.type.timezone is True
+    assert cycle.completed_at.type.timezone is True
     assert score.model_version.nullable is False
     assert isinstance(
         snapshot.forecast_json.type.dialect_impl(postgresql.dialect()),
@@ -81,6 +85,23 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
         parse_failure.raw_json.type.dialect_impl(postgresql.dialect()),
         postgresql.JSONB,
     )
+
+
+def test_complete_cycle_requires_all_targets_saved(engine):
+    now = datetime(2026, 7, 12, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        session.add(
+            IngestCycle(
+                started_at=now,
+                completed_at=now,
+                targets=2,
+                saved=1,
+                failed=1,
+                status="complete",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_snapshot_is_unique_per_hotspot_and_observed_time(engine):

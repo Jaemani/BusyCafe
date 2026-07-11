@@ -313,7 +313,10 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 - `GET /api/cafes/{id}`
   → 위 필드 전체 + `contributors[]` + `trend_12h[]`(기준 핫스팟의 스냅샷 시계열) + `forecast_1h`(FCST에서 추출). `external_links`는 검증된 direct detail link만 포함하고 누락 provider 키는 `null`이다.
 - `GET /api/hotspots` → 폴링 대상 핫스팟 현재 상태 (디버그 오버레이용)
-- `GET /api/health` → `{last_ingest_at, snapshots_last_hour, cafes_count}`. complete-cycle metadata는 worker 계측 확장 시 추가한다.
+- `GET /api/health` → `{data_mode, last_ingest_at, last_complete_cycle_at,
+  last_cycle_status, last_cycle_targets, last_cycle_saved, last_cycle_failed,
+  snapshots_last_hour, cafes_count}`. freshness 승격 판정은 개별 snapshot 시각이 아니라
+  `last_complete_cycle_at`을 사용한다.
 
 ---
 
@@ -442,9 +445,11 @@ DoD (수동 시나리오 체크리스트를 docs에 기록):
    4=만석·대기(>90%)로 기록한다. 지역 혼잡 예측과의 연관성을 보는 제품 효용 지표이며,
    엔진 정확도와 합산하거나 같은 주장으로 표현하지 않는다. `[HUMAN]`
 5. `scripts/run_eval.py`는 필수 CSV 필드
-   `cafe_id, observed_at, slot, observed_area_level`과 선택 필드
-   `observed_venue_level`을 받는다. 각 실제 관측 시각까지 `observed_at`과 `fetched_at`이
-   모두 도달한 스냅샷만 재생해 미래 데이터 누출을 막는다.
+   `cafe_id, observed_at, slot, observed_area_level, pedestrians_per_min,
+   flow_obstruction, observer_notes`와 선택 필드 `observed_venue_level`을 받는다.
+   `observed_area_level`은 보행량 임계값과 흐름 방해 규칙으로 다시 계산한 값과 일치해야
+   하며, 불일치 행은 평가에서 제외한다. 각 실제 관측 시각까지 `observed_at`과
+   `fetched_at`이 모두 도달한 스냅샷만 재생해 미래 데이터 누출을 막는다.
    - **주 지표:** 슬롯별 Spearman을 계산한 뒤 슬롯 간 macro average
    - **주 보조 지표:** 지역 라벨 기준 `|pred - obs| ≤ 1` 비율
    - **제품 효용:** 매장 라벨이 있는 표본만 별도 Spearman·한 단계 이내 비율

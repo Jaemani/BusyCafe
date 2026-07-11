@@ -1,4 +1,4 @@
-name: Poll production city data
+name: Monitor production freshness
 
 on:
   schedule:
@@ -9,32 +9,27 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-citydata-poll
-  cancel-in-progress: false
+  group: production-freshness-monitor
+  cancel-in-progress: true
 
 jobs:
-  poll:
+  freshness:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
-    defaults:
-      run:
-        working-directory: backend
+    timeout-minutes: 3
     env:
       PRODUCTION_ENABLED: ${{ vars.PRODUCTION_ENABLED }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+      PRODUCTION_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
     steps:
       - id: configuration
-        name: Check production secrets
-        working-directory: .
+        name: Check monitor configuration
         run: |
           if [ "$PRODUCTION_ENABLED" != "true" ]; then
-            echo "Production polling disabled (set PRODUCTION_ENABLED=true to enable); skipping."
+            echo "Production monitoring disabled (set PRODUCTION_ENABLED=true to enable); skipping."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ -z "$DATABASE_URL" ] || [ -z "$SEOUL_API_KEY" ]; then
-            echo "PRODUCTION_ENABLED=true but DATABASE_URL or SEOUL_API_KEY is missing." >&2
+          if [ -z "$PRODUCTION_HEALTH_URL" ]; then
+            echo "PRODUCTION_ENABLED=true but PRODUCTION_HEALTH_URL is missing." >&2
             exit 1
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
@@ -49,8 +44,8 @@ jobs:
         with:
           enable-cache: true
       - if: steps.configuration.outputs.enabled == 'true'
+        working-directory: backend
         run: uv sync --frozen
       - if: steps.configuration.outputs.enabled == 'true'
-        run: uv run alembic -c alembic.ini upgrade head
-      - if: steps.configuration.outputs.enabled == 'true'
-        run: uv run python -m app.ingest.worker --once
+        working-directory: backend
+        run: uv run python scripts/check_freshness.py "$PRODUCTION_HEALTH_URL"

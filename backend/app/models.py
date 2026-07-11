@@ -40,6 +40,45 @@ class Base(DeclarativeBase):
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
+class IngestCycle(Base):
+    """Durable operational result for one scheduled ingest cycle."""
+
+    __tablename__ = "ingest_cycles"
+    __table_args__ = (
+        CheckConstraint("targets >= 0", name="targets_nonnegative"),
+        CheckConstraint("saved >= 0", name="saved_nonnegative"),
+        CheckConstraint("failed >= 0", name="failed_nonnegative"),
+        CheckConstraint(
+            "saved + failed <= targets", name="result_within_targets"
+        ),
+        CheckConstraint(
+            "status IN ('running', 'complete', 'partial', 'failed')",
+            name="status_values",
+        ),
+        CheckConstraint(
+            "(status = 'running' AND completed_at IS NULL) OR "
+            "(status != 'running' AND completed_at IS NOT NULL)",
+            name="completion_matches_status",
+        ),
+        CheckConstraint(
+            "status != 'complete' OR "
+            "(targets > 0 AND saved = targets AND failed = 0)",
+            name="complete_result",
+        ),
+        Index("ix_ingest_cycles_started_at", text("started_at DESC")),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    targets: Mapped[int] = mapped_column(Integer, nullable=False)
+    saved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
 class Hotspot(Base):
     __tablename__ = "hotspots"
     __table_args__ = (
