@@ -461,6 +461,9 @@
 - workflow gate: `PRODUCTION_ENABLED=true` 전에는 poll과 monitor가 명시적으로 skip한다.
   활성화 뒤 URL 또는 secret 누락은 실패한다. 비활성 수동 검증은 poll run `29164391760`,
   monitor run `29164392552`에서 PASS했다.
+- GitHub repository variable `PRODUCTION_HEALTH_URL`은
+  `https://busy-cafe.vercel.app/api/health`로 등록했다. `PRODUCTION_ENABLED`와 production
+  secrets는 아직 없으므로 monitor와 poll은 계속 비활성이다.
 - 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
   `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
   실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.
