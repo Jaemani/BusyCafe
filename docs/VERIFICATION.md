@@ -12,7 +12,7 @@
 | Phase 3 | 병렬 구현 완료·gate 대기 | - | 순수 IDW/신뢰도/materialize 및 테스트 완료, Phase 2 HUMAN 품질 gate 대기 |
 | Phase 4 | 병렬 구현 완료·gate 대기 | - | cache-only 4 endpoint·CORS·bbox p95 검증 완료, Phase 3 gate 대기 |
 | Phase 5 | 진행 중 (MapLibre UI) | - | MapLibre/OpenFreeMap·내 위치·cached API 연결 완료, 브라우저 수동 시나리오/stale banner 대기 |
-| Phase 6 | 대기 | - | Phase 5 미완료 |
+| Phase 6 | 병렬 구현 완료·HUMAN 검수/관측 대기 | - | 이중 라벨 historical evaluator와 24곳 후보 완료. 공개 승격은 Phase 5 gate 및 현장 기준선 대기 |
 
 ## 기록 템플릿
 
@@ -407,3 +407,39 @@
   배포 HTML에서 서울특별시·Overture·전체 라이선스 링크를 확인했다.
 - 코드 라이선스 선택과 루트 `LICENSE` 추가는 저장소 소유자의 `[HUMAN]` 결정이 필요해
   미완료 상태다.
+
+## 2026-07-12 — Phase 6 축소 기준선 계약과 현장 후보
+
+- 관련 커밋: `5912787510db6f359336693b15eae77ae607820b`
+- 입력: 현재 카페 원장, `v1-idw-point`의 materialized score, 홍대 관광특구와
+  성수카페거리의 근접·중간·외곽 거리대
+- 구현: `select_eval_candidates.py`가 active 카페를 POI source confidence 내림차순,
+  거리 오름차순, cafe ID 오름차순으로 고정 선택한다. `run_eval.py`는 실제 관측 시각까지
+  fetched된 과거 스냅샷만 재생한다.
+- 라벨 계약: `observed_area_level`은 주변 보행 혼잡의 주 정답이고,
+  `observed_venue_level`은 선택적인 매장 효용 라벨이다. 두 지표를 합산하지 않는다.
+  동일 순위 비교군은 필수 `slot`으로 묶고 Spearman은 슬롯별 계산 후 macro average한다.
+- 발견·수정한 문제: 이전 evaluator는 정확한 `observed_at`별로 순위를 계산했다. 현장
+  순차 관측에서는 timestamp당 표본이 1개가 되어 Spearman이 대부분 `N/A`가 되므로,
+  실제 관측 시각은 historical replay에만 사용하고 순위 비교는 사전 정의한 slot으로
+  분리했다.
+- 후보 결과: 총 24곳, 홍대·성수 각 12곳, 각 동네의 near/mid/fringe가 각각 4곳이다.
+  cafe ID는 24개 모두 고유하다. 후보 CSV SHA-256은
+  `38f5bed085646b691c6857e88dc18c420d0b5af5591b845e7b208c2d2036aff3`이다.
+- 실행 명령: `cd backend && uv run pytest` 및
+  `uv run python -m compileall -q app scripts tests`
+- 실제 결과: backend 112 passed, compileall PASS, `git diff --check` PASS.
+- 판정: 도구·후보 생성 PASS. 후보의 `poi_valid`와 `exclusion_reason` 검수 및 현장 관측은
+  `[HUMAN]` 대기다. 실측 전이므로 정확도와 제품 가설에 대한 성능 주장은 하지 않는다.
+- 계획과의 차이: PLAN v1.6의 좌석 점유 단일 라벨과 16곳×6슬롯 계획을 폐기했다.
+  PLAN v1.7은 Track 1의 제품 경계에 맞춘 이중 라벨과 24곳×동네별 3슬롯 축소 기준선을
+  canonical protocol로 둔다.
+
+### 현재 Phase 6 DoD
+
+- [x] 결정적 후보 선택기와 거리대별 24곳 후보 생성
+- [x] 미래 fetched 데이터 누출을 막는 historical evaluator
+- [x] 지역 혼잡 주 라벨과 매장 효용 보조 라벨 분리
+- [ ] 후보 POI 유효성 및 관측 가능성 HUMAN 검수
+- [ ] 동네별 3개 슬롯 현장 관측
+- [ ] `docs/EVAL_REPORT.md`와 `v1-idw-point` 기준 지표 기록
