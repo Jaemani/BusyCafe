@@ -323,3 +323,14 @@
 - 회귀 검증: backend pytest 87 passed, frontend typecheck 및 production build PASS.
   Vercel production은 지시자를 `cache-control: public, max-age=30`으로 정규화했고,
   동일 bbox 재조회에서 `x-vercel-cache: HIT`를 반환했다.
+
+## 2026-07-11 — 실시간 production 전환 기반
+
+- 구현: `DATABASE_URL`이 설정된 Vercel API는 관리형 PostgreSQL을 읽고, 값이 없을 때만
+  읽기 전용 SQLite 배포 스냅샷으로 fallback한다.
+- scheduler: 10분 one-shot GitHub Actions worker를 추가했다. DB/API 키가 없는 동안에는
+  성공 종료로 skip하며, 동시 실행은 concurrency group으로 막는다.
+- 운영 이관: 항상 켜진 worker용 Dockerfile을 추가했다. GitHub Actions cron 지연은
+  strict SLA에 부적합하므로 상시 worker 전환 기준과 bootstrap 절차를 ADR-0005에 기록했다.
+- 검증: backend pytest 87 passed, snapshot fallback `GET /api/health` HTTP 200, workflow YAML
+  parse PASS.

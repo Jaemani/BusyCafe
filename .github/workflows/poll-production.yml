@@ -1,0 +1,50 @@
+name: Poll production city data
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-citydata-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+    steps:
+      - id: secrets
+        name: Check production secrets
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$SEOUL_API_KEY" ]; then
+            echo "Production secrets are not configured; skipping."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secrets.outputs.configured == 'true'
+        uses: actions/checkout@v4
+      - if: steps.secrets.outputs.configured == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - if: steps.secrets.outputs.configured == 'true'
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - if: steps.secrets.outputs.configured == 'true'
+        run: uv sync --frozen
+      - if: steps.secrets.outputs.configured == 'true'
+        run: uv run alembic -c alembic.ini upgrade head
+      - if: steps.secrets.outputs.configured == 'true'
+        run: uv run python -m app.ingest.worker --once
