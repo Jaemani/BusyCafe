@@ -24,6 +24,7 @@ jobs:
       - run: uv sync --frozen --extra dev
       - run: uv run pytest
       - run: uv run python -m compileall -q app scripts tests
+      - run: uv run alembic -c alembic.ini upgrade head --sql > /dev/null
 
   frontend:
     runs-on: ubuntu-latest

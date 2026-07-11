@@ -7,7 +7,7 @@
 | Phase | 상태 | 완료일 | 근거 |
 |---|---|---|---|
 | Phase 0 | 완료 | 2026-07-11 | 실 API/스키마/라벨/호출 제한/마스터 검증 및 fixture 커밋 |
-| Phase 1 | 진행 중 | - | Phase 0 DoD 통과 |
+| Phase 1 | 진행 중 (HUMAN 대상 검수) | - | 구현/테스트/dry-run 완료, seed apply와 1시간 무인 구동 전 |
 | Phase 2 | 대기 | - | Phase 1 미완료 |
 | Phase 3 | 대기 | - | Phase 2 미완료 |
 | Phase 4 | 대기 | - | Phase 3 미완료 |
@@ -115,6 +115,58 @@
 - SHA-256 ZIP: `fda69cd2ee3812103931cfd0ef1a0146336f06a23b6e1c2e4f9e0653620262ac`
 - 계획과의 차이: 목록에 중심 좌표가 없고 별도 폴리곤으로 제공됨. Phase 1은 공식 폴리곤의 내부 대표점을 사용하도록 변경
 - 관련 결정: `docs/adr/ADR-0002-hotspot-location.md`
+- 안전 절차: seed CLI는 기본 dry-run이며 `--apply`에서만 write. 공식 121개 외 DB 코드는 자동 삭제하지 않고 전체 transaction을 rollback
+
+## 2026-07-11 — Phase 1 / 공식 영역 대표점 및 폴링 대상 검증
+
+- 입력: 커밋된 121장소 XLSX와 WGS84 Shapefile
+- 기대 결과: 121개 metadata/geometry 일대일 결합, 유효한 서울 내부 대표점, 폴링 대상 ≤12
+- 실제 결과: 121개 코드·명칭·분류 일치. `POI070` 원본 polygon에서 self-intersection 발견
+- 처리: 원본 fixture는 변경하지 않고 Shapely `make_valid`로 topology 정규화 후 내부 대표점 산출
+- 폴링 대상: TARGET_NEIGHBORHOODS 반경 합집합 10곳
+  - `POI007` 홍대 관광특구
+  - `POI015` 건대입구역
+  - `POI025` 뚝섬역
+  - `POI040` 신촌·이대역
+  - `POI053` 합정역
+  - `POI055` 홍대입구역(2호선)
+  - `POI068` 성수카페거리
+  - `POI073` 연남동
+  - `POI101` 서울숲공원
+  - `POI122` 신촌 스타광장
+- 판정: PASS (코드/대표점/≤12); HUMAN 목록 검수와 DB apply는 진행 중
+- 관련 결정: `docs/adr/ADR-0002-hotspot-location.md`
+- 관련 커밋: `5e78cb8`
+
+## 2026-07-11 — Phase 1 / DB nullable 규칙 명확화
+
+- 입력: D4 uncovered 규칙과 PostgreSQL 초기 migration
+- 결정: uncovered는 score/level/confidence뿐 아니라 tier, primary hotspot/distance, contributors도 모두 NULL
+- 근거: 데이터가 없는데 evidence 또는 신뢰도 등급만 남는 모순 상태를 DB CHECK constraint로 차단
+- 판정: PASS (모델·migration·SQLite constraint tests), PostgreSQL runtime 검증 대기
+- 관련 커밋: `781e8a8`
+
+## 2026-07-11 — Phase 1 / 인제스트 통합 검증
+
+- 관련 커밋: DB `781e8a8`, seed `5e78cb8`, worker `fbc7086`
+- 테스트: backend 59 passed, 경고 없음; Python compileall; PostgreSQL offline Alembic SQL 생성; frontend typecheck/build
+- SQLite migration: `/tmp/BusyCafe-phase1-review.sqlite`에 initial upgrade 성공
+- seed 기본 실행: dry-run, source 121, would insert 121, polling targets 10/12
+- 안전 확인: dry-run 후 DB `hotspots=0`
+- 스냅샷 보호: 응답 AREA_CD와 AREA_NM을 요청 대상과 모두 대조하고 불일치 시 저장 차단
+- 파싱 실패: 재호출하지 않고 안전한 고정 오류 요약과 raw JSON을 `hotspot_parse_failures`에 append
+- fetch 실패: 최초 호출 후 최대 3회 지수 backoff, 최종 실패 후 다음 대상 진행
+- 호출량: 대상 10곳 × 144회 = 1,440콜/일, 확인된 호출 횟수 무제한 정책 내
+
+### Phase 1 현재 DoD
+
+- [x] 공식 121개 metadata/geometry 결정적 결합 및 대표점 검증
+- [x] 폴링 대상 10곳(≤12) 산출
+- [x] 잘못된 응답/대상 불일치/저장 실패 격리 fixture 테스트
+- [x] 예상 일일 호출량 1,440회와 호출 정책 확인
+- [ ] HUMAN 폴링 대상 목록 확인 후 `--apply`
+- [ ] 1시간 무인 구동, 대상별 snapshot ≥5 확인
+- [ ] PostgreSQL runtime migration/seed 검증(Docker 또는 PostgreSQL 필요)
 
 ## 2026-07-11 — Phase 0 / 기본 저장소 설계 변경
 

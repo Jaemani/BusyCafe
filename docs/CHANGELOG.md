@@ -10,6 +10,9 @@
 - Phase 0 API 검증용 백엔드 스캐폴딩과 프론트엔드 Vite/TypeScript 뼈대
 - 로컬 PostgreSQL 개발 환경
 - 서울시 OA-21285의 121개 장소 목록·영역 원본을 안전하게 받는 다운로드 도구
+- PostgreSQL/JSONB 기반 초기 schema와 Alembic migration
+- 공식 WGS84 영역 대표점 기반 121개 핫스팟 멱등 seed 및 HUMAN 검수 dry-run
+- API 프로세스와 분리된 10분 ingest worker, 재시도·대상 검증·파싱 실패 원본 보존
 
 ### Changed
 

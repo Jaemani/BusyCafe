@@ -85,7 +85,7 @@
 - 공식 데이터셋: [서울시 실시간 도시데이터 OA-21285](https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do)
 - [VERIFIED 2026-07-11] 첨부 `서울시 주요 121장소 목록.xlsx`(seq 23)와 `서울시 주요 121장소 영역.zip`(seq 24), 게시일 2026-04-02를 확인했다.
 - [VERIFIED 2026-07-11] XLSX는 `CATEGORY`, `NO`, `AREA_CD`, `AREA_NM`, `ENG_NM`의 121개 레코드다. 영역 ZIP은 같은 121개 장소의 Shapefile(`.shp/.shx/.dbf/.prj/.cpg`)이며 WGS84 경위도(`GCS_WGS_1984`)다.
-- 목록에는 중심 좌표가 없으므로 Phase 1에서 WGS84 폴리곤의 내부 대표점(`representative_point`)을 `hotspots.lat/lng`로 사용한다. Kakao 키워드 좌표는 공식 geometry가 없거나 손상된 경우에만 fallback하고 수동 검수한다. 결정 근거는 `docs/adr/ADR-0002-hotspot-location.md`에 기록한다.
+- 목록에는 중심 좌표가 없으므로 Phase 1에서 WGS84 폴리곤을 검증하고, invalid topology는 `make_valid`로 정규화한 뒤 내부 대표점(`representative_point`)을 `hotspots.lat/lng`로 사용한다. 정규화할 수 없거나 geometry가 누락되면 자동 fallback하지 않고 seed를 중단해 HUMAN 결정을 요청한다. 결정 근거는 `docs/adr/ADR-0002-hotspot-location.md`에 기록한다.
 
 ---
 
@@ -108,7 +108,7 @@
 ```text
 [single ingest worker: POLL_INTERVAL마다]
   ingest/poller ──> 서울 citydata API (핫스팟별 1콜)
-       │ 파싱(pydantic) 실패 시 raw 저장 + 경고 로그
+       │ 파싱/대상 불일치 시 hotspot_parse_failures에 raw 저장 + 경고 로그
        ▼
   hotspot_snapshots (append-only)
        │ 인제스트 훅
@@ -189,6 +189,16 @@ CREATE TABLE hotspot_snapshots (
 );
 CREATE INDEX ix_snap_hotspot_time ON hotspot_snapshots(hotspot_id, observed_at DESC);
 
+CREATE TABLE hotspot_parse_failures (
+  id INTEGER PRIMARY KEY,
+  hotspot_id INTEGER NOT NULL REFERENCES hotspots(id),
+  fetched_at TIMESTAMPTZ NOT NULL,
+  error_type TEXT NOT NULL,
+  error_message TEXT NOT NULL,  -- raw 값을 포함하지 않는 안전한 요약
+  raw_json JSONB NOT NULL
+);
+CREATE INDEX ix_parse_failure_hotspot_time ON hotspot_parse_failures(hotspot_id, fetched_at DESC);
+
 CREATE TABLE cafes (
   id INTEGER PRIMARY KEY,
   kakao_place_id TEXT UNIQUE NOT NULL,
@@ -225,7 +235,8 @@ CREATE TABLE cafe_scores (
 6. `confidence = cov × freshness × min(1, n_neighbors / 2)`
 7. `coverage`: d_min ≤ `COVERED_M` → covered / ≤ R_MAX → fringe / else uncovered(스코어 계산 안 함)
 
-이웃이 0곳이면 `coverage=uncovered`, level/score/confidence는 NULL 처리.
+이웃이 0곳이면 `coverage=uncovered`이며 level/score/confidence/confidence_tier,
+primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 
 ### 4.6 `config.py` 기본값 (전부 P6 캘리브레이션 대상)
 
@@ -279,9 +290,9 @@ DoD:
 
 작업:
 
-1. `seed_hotspots.py`: XLSX 장소 마스터와 WGS84 Shapefile을 `AREA_CD`로 결합하고 각 폴리곤의 내부 대표점을 `hotspots.lat/lng`로 적재. geometry 누락·손상 시에만 카카오 키워드 검색 fallback 후 **수동 검수 목록 출력** [HUMAN 확인 1회]
+1. `seed_hotspots.py`: XLSX 장소 마스터와 WGS84 Shapefile을 `AREA_CD`로 결합하고 각 폴리곤을 검증/정규화한 내부 대표점을 `hotspots.lat/lng`로 적재. 정규화 실패·geometry 누락·DB의 공식 마스터 외 코드는 자동 수정하지 않고 중단한다. CLI 기본은 dry-run이며 **수동 검수 목록 출력 → [HUMAN] 확인 → `--apply`** 순서만 허용한다.
 2. `TARGET_NEIGHBORHOODS` 반경 내 핫스팟에 `is_polled=1` 설정 (≤12곳 확인)
-3. `ingest/poller.py`와 단일 `ingest/worker.py`: APScheduler로 `POLL_INTERVAL_MIN`마다 폴링 대상 순회 호출 → 파싱 → `hotspot_snapshots` append. 실패 시 3회 지수 백오프, 최종 실패는 로그만 남기고 다음 대상 진행. FastAPI 프로세스에서는 스케줄러를 기동하지 않는다.
+3. `ingest/poller.py`와 단일 `ingest/worker.py`: APScheduler로 `POLL_INTERVAL_MIN`마다 폴링 대상 순회 호출 → 요청한 AREA_CD/AREA_NM 일치 검증 → 파싱 → `hotspot_snapshots` append. fetch 실패는 3회 지수 백오프 후 로그를 남기고, fetch 성공 후 파싱/대상 불일치는 재호출 없이 raw를 `hotspot_parse_failures`에 append한다. 한 대상 실패 후 다음 대상으로 진행하며 FastAPI 프로세스에서는 스케줄러를 기동하지 않는다.
 4. 파서 유닛테스트 (fixture 기반)
 
 DoD:

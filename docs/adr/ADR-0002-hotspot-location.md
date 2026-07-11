@@ -13,11 +13,13 @@ Kakao 키워드 검색으로 보정하도록 했다. OA-21285 실측 결과 XLSX
 ## 결정
 
 Phase 1에서 XLSX와 Shapefile을 `AREA_CD`로 결합한다. 각 공식 폴리곤의 내부
-대표점(`representative_point`)을 핫스팟의 `lat/lng`로 사용하고 원본 geometry도
+대표점(`representative_point`)을 핫스팟의 `lat/lng`로 사용한다. invalid topology는
+원본을 변경하지 않고 `make_valid`로 정규화하며, 원본 geometry도
 향후 PostGIS 적재를 위해 보존한다.
 
-Kakao 키워드 검색은 공식 geometry가 누락되거나 손상된 예외에만 사용하며, 해당
-레코드는 반드시 수동 검수 목록에 포함한다.
+공식 geometry가 누락되거나 `make_valid`로도 정규화되지 않으면 자동으로 Kakao
+검색 좌표를 섞지 않는다. seed를 중단하고 원본 증거와 함께 HUMAN 결정을 요청한다.
+별도 좌표 override가 승인될 경우 그 근거를 새 ADR과 검증 로그에 남긴다.
 
 ## 근거
 
@@ -33,3 +35,5 @@ Kakao 키워드 검색은 공식 geometry가 누락되거나 손상된 예외에
 - 121개 코드가 XLSX와 DBF에서 일대일로 일치하는지 seed 전에 검증한다.
 - 산출한 모든 대표점이 해당 geometry 내부이고 서울 bounding box 안인지 테스트한다.
 - geometry fallback 발생 건수와 수동 검수 목록을 `docs/VERIFICATION.md`에 남긴다.
+- 최초 실측에서 `POI070` self-intersection 1건을 발견했고 `make_valid` 후 모든
+  121개 대표점이 유효 geometry 내부와 서울 bbox에 있음을 확인했다.

@@ -2,7 +2,7 @@
 
 서울 실시간 도시데이터의 지역 혼잡도를 카페 위치에 공간 매핑해, 지금 주변에서 상대적으로 한산할 가능성이 높은 카페를 근거와 함께 보여주는 지도 서비스입니다.
 
-현재는 Phase 0 준비 단계입니다. 외부 API의 엔드포인트, 응답 필드, 장소명, 쿼터 등은 아직 확정하지 않았으며 실제 응답을 저장한 fixture를 기준으로 검증할 예정입니다.
+Phase 0 실측 검증을 완료했고 Phase 1 인제스트 파이프라인을 구현 중입니다.
 
 ## 문서
 
@@ -22,9 +22,9 @@
 
 ## 현재 상태
 
-Phase 0의 키 없이 가능한 스캐폴딩과 검증 도구까지 준비됐습니다. 실제 fixture,
-쿼터 확인, 121개 장소 마스터 확보는 API 키 발급 후 진행합니다. Phase 0 DoD가
-끝나기 전에는 Phase 1 인제스트 구현으로 넘어가지 않습니다.
+서울·카카오 실측 fixture, 공식 121개 장소 목록과 WGS84 영역, PostgreSQL 모델과
+별도 ingest worker까지 준비됐습니다. 현재 공식 영역에서 선택된 폴링 대상 10곳의
+HUMAN 검수 후 DB seed와 1시간 무인 폴링 검증을 진행합니다.
 
 ## 로컬 준비
 
@@ -45,22 +45,37 @@ rtk npm run build
 ```
 
 로컬 PostgreSQL은 Docker가 설치된 환경에서 `rtk docker compose up -d postgres`로
-시작할 수 있습니다. 현재 Phase 0 검증 도구 자체는 데이터베이스를 요구하지 않습니다.
+시작할 수 있습니다.
 
-## API 키 준비 후
+## API 키
 
 발급받은 `SEOUL_API_KEY`, `KAKAO_REST_KEY`는 `backend/.env`에만 넣고 채팅,
 문서, 이슈, 커밋에는 붙여 넣지 마세요. 카카오 JavaScript 키는 백엔드에 필요
 없으며 `frontend/.env`의 `VITE_KAKAO_JS_KEY`에만 넣습니다.
 
+실측 fixture와 공식 마스터 원본은 이미 커밋되어 있습니다. 갱신할 때는 기존 원본을
+검토·이동한 뒤 검증/다운로드 스크립트를 명시적으로 실행해야 하며 자동 덮어쓰기는
+허용되지 않습니다.
+
+## 데이터베이스와 인제스트
+
 ```bash
 cd backend
-rtk uv run python scripts/verify_apis.py --service all
-rtk uv run python scripts/download_hotspot_master.py --file all
+rtk uv run alembic -c alembic.ini upgrade head
+rtk uv run python scripts/seed_hotspots.py
 ```
 
-스크립트는 원본 JSON을 provisional 스키마 검증보다 먼저 저장하고 기존 결과를
-덮어쓰지 않습니다. 스키마가 다르면 원본은 유지한 채 `.validation_error.txt`를
-생성하므로, 그 증거를 바탕으로 계획과 모델을 함께 갱신합니다.
+`seed_hotspots.py`의 기본 동작은 dry-run입니다. 출력된 대상 목록을 사람이 확인한
+후에만 다음 명령으로 적용합니다.
+
+```bash
+rtk uv run python scripts/seed_hotspots.py --apply
+rtk uv run python -m app.ingest.worker --once
+rtk uv run python -m app.ingest.worker
+```
+
+마지막 명령은 API 서버와 분리된 단일 worker를 실행하며 10분마다 폴링합니다.
+응답의 장소 코드·이름이 요청 대상과 다르거나 스키마 파싱이 실패하면 snapshot을
+만들지 않고 원본을 `hotspot_parse_failures`에 보존합니다.
 
 인증키 값은 문서나 이슈에 붙여 넣지 마세요.
