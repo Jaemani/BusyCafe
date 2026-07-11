@@ -95,6 +95,7 @@
 
 ### 공식 OA-21285 첨부 확인
 
+- 관련 커밋: `b860b3e`
 - 페이지: `https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do`
 - 목록: `서울시 주요 121장소 목록.xlsx`, seq 23, 2026-04-02
 - 영역: `서울시 주요 121장소 영역.zip`, seq 24, 2026-04-02
