@@ -174,6 +174,8 @@
 - Tailscale Serve: `https://jaemans-mac-studio.tail2743ae.ts.net:8443/`
 - 공개 범위: tailnet only; 기존 443 Funnel(`/` → `127.0.0.1:8012`)은 변경하지 않음
 - Vite allowed host: 현재 tailnet suffix `.tail2743ae.ts.net`만 허용
+- Kakao SDK Referer 검증: localhost:5188 및 tailnet:8443 모두 401 `domain mismatched`; Kakao Developers 사이트 도메인 등록 대기
+- 지도 구현 검증: TypeScript typecheck 및 Vite production build 통과. SDK 도메인 등록 후 브라우저 런타임 확인 필요
 
 ## 2026-07-11 — Phase 0 / 기본 저장소 설계 변경
 

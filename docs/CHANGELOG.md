@@ -13,8 +13,8 @@
 - PostgreSQL/JSONB 기반 초기 schema와 Alembic migration
 - 공식 WGS84 영역 대표점 기반 121개 핫스팟 멱등 seed 및 HUMAN 검수 dry-run
 - API 프로세스와 분리된 10분 ingest worker, 재시도·대상 검증·파싱 실패 원본 보존
-- 브라우저에서 현재 개발 단계와 완료된 검증을 확인하는 Phase 1 상태 화면
 - Tailnet 전용 HTTPS 개발 미리보기와 제한된 Tailscale 호스트 허용 설정
+- Kakao 지도 이동 영역별 CE7 카페 검색, 중복 제거, 마커와 카페 상세 패널
 
 ### Changed
 
@@ -28,6 +28,8 @@
 - 서울 인구 API의 실제 평면 응답 구조와 dotted `RESULT` 키를 반영하도록 provisional 스키마 수정
 
 ### Removed
+
+- 서비스 기능과 무관했던 개발 현황 상태 화면
 
 ## 릴리스 템플릿
 
