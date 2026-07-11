@@ -305,6 +305,7 @@
 - 배포 URL: `https://busy-cafe.vercel.app`
 - production deployment: `https://busy-cafe-fdx012hxi-jaemanis-projects.vercel.app`가
   Vercel에서 `Ready` 상태임을 확인했다.
+- `.vercelignore` 적용 후 최신 production `https://busy-cafe-lpih2yfxk-jaemanis-projects.vercel.app`가 `Ready`이며, function bundle은 19.88MB에서 13.26MB로 감소했다. 정확한 `busy-cafe.vercel.app` alias를 재연결한 뒤 홈·API HTTP 200과 bbox `model_version=v1-idw-point`를 확인했다.
 - rename 검증(2026-07-12): 오타가 있던 Vercel 프로젝트 `budy-cafe`를 `busy-cafe`로
   변경하고 새 production deployment와 alias를 연결했다.
 - 초기 수동 alias는 SSO로 HTTP 302를 반환했다. 공개 접근 정책을 복원한 뒤
