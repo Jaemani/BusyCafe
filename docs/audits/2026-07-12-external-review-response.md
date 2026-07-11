@@ -36,7 +36,7 @@ API schema, 수집기, fixture, 실패 격리와 배포 동작 검증까지 0으
 | 순위 | 작업 | 상태 | 완료 조건 |
 |---:|---|---|---|
 | 1 | 관리형 PostgreSQL provision과 production 전환 | `[HUMAN]` credential 대기 | Vercel read API와 10분 worker가 같은 DB 사용, 1시간 freshness 검증 |
-| 2 | 축소 Phase 6 평가 | 도구 완료·`[HUMAN]` 관측 대기 | 20~30개 카페 × 3개 슬롯 관측, Spearman 보고 |
+| 2 | 축소 Phase 6 평가 | 이중 라벨 evaluator·24곳 후보 완료, `[HUMAN]` POI 검수·관측 대기 | 2개 동네 × 3개 거리대 × 4곳 후보를 동네별 3개 슬롯에서 관측, 지역 혼잡 Spearman 보고 |
 | 3 | 현행 라이선스·attribution 감사 | 출처 보완 완료·코드 LICENSE `[HUMAN]` 대기 | 코드 라이선스 결정, 지도 attribution 브라우저 확인 |
 | 4 | 외부인용 README와 감사 재현 절차 | 완료 | 표준 명령으로 CI와 로컬 검증 가능 |
 | 5 | PostgreSQL migration CI | 완료 | GitHub Actions run `29160900757`에서 PostgreSQL 17 upgrade와 schema smoke 성공 |
@@ -53,6 +53,8 @@ API schema, 수집기, fixture, 실패 격리와 배포 동작 검증까지 0으
 ## 감사 후 첫 산출물
 
 - `backend/scripts/run_eval.py`: 저장 snapshot을 재생하는 결정적 평가 도구
+- `backend/scripts/select_eval_candidates.py`: 거리대와 POI source confidence를 고정한
+  결정적 현장 후보 선택기
 - PostgreSQL 17 service를 사용하는 실제 migration CI
 - 외부인용 README와 표준 감사 명령
 - ADR-0007과 이 대응 문서

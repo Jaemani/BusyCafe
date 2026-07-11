@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -25,7 +26,9 @@ from app.models import Cafe, Hotspot, HotspotSnapshot
 from app.scoring.engine import HotspotObservation, score_cafe
 
 
-REQUIRED_COLUMNS = frozenset({"cafe_id", "observed_at", "observed_level"})
+REQUIRED_COLUMNS = frozenset(
+    {"cafe_id", "observed_at", "slot", "observed_area_level"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +36,9 @@ class GroundTruth:
     row_number: int
     cafe_id: int
     observed_at: datetime
-    observed_level: int
-    slot: str | None
+    slot: str
+    observed_area_level: int
+    observed_venue_level: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +83,13 @@ def _parse_positive_int(value: str | None, *, field: str) -> int:
     return parsed
 
 
+def _parse_level(value: str | None, *, field: str) -> int:
+    parsed = _parse_positive_int(value, field=field)
+    if parsed > 4:
+        raise ValueError(f"{field} must be between 1 and 4")
+    return parsed
+
+
 def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
     """Load valid observations and count malformed rows.
 
@@ -100,13 +111,21 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
             try:
                 cafe_id = _parse_positive_int(row["cafe_id"], field="cafe_id")
                 observed_at = _parse_iso_datetime(row["observed_at"])
-                observed_level = _parse_positive_int(
-                    row["observed_level"], field="observed_level"
+                observed_area_level = _parse_level(
+                    row["observed_area_level"], field="observed_area_level"
                 )
-                if observed_level > 4:
-                    raise ValueError("observed_level must be between 1 and 4")
-                raw_slot = row.get("slot")
-                slot = raw_slot.strip() if raw_slot and raw_slot.strip() else None
+                raw_slot = row["slot"]
+                if not isinstance(raw_slot, str) or not raw_slot.strip():
+                    raise ValueError("slot must be nonblank")
+                slot = raw_slot.strip()
+                raw_venue_level = row.get("observed_venue_level")
+                observed_venue_level = (
+                    _parse_level(
+                        raw_venue_level, field="observed_venue_level"
+                    )
+                    if raw_venue_level and raw_venue_level.strip()
+                    else None
+                )
             except (KeyError, TypeError, ValueError):
                 invalid += 1
                 continue
@@ -115,8 +134,9 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
                     row_number=row_number,
                     cafe_id=cafe_id,
                     observed_at=observed_at,
-                    observed_level=observed_level,
                     slot=slot,
+                    observed_area_level=observed_area_level,
+                    observed_venue_level=observed_venue_level,
                 )
             )
     return valid, total, invalid
@@ -253,31 +273,54 @@ def spearman_rank_correlation(
     return None if denominator == 0 else numerator / denominator
 
 
-def summarize(points: Iterable[EvaluationPoint]) -> MetricSummary:
+def summarize(
+    points: Iterable[EvaluationPoint],
+    *,
+    target: Literal["area", "venue"] = "area",
+) -> MetricSummary:
     predicted = [
         point
         for point in points
         if point.predicted_score is not None and point.predicted_level is not None
+        and (
+            target == "area" or point.truth.observed_venue_level is not None
+        )
     ]
     if not predicted:
         return MetricSummary(0, None, None)
-    by_timestamp: dict[datetime, list[EvaluationPoint]] = defaultdict(list)
+    by_slot: dict[str, list[EvaluationPoint]] = defaultdict(list)
     for point in predicted:
-        by_timestamp[point.truth.observed_at].append(point)
-    timestamp_correlations: list[float] = []
-    for observed_at in sorted(by_timestamp):
-        timestamp_points = by_timestamp[observed_at]
+        if point.truth.slot:
+            by_slot[point.truth.slot].append(point)
+    slot_correlations: list[float] = []
+    for slot in sorted(by_slot):
+        slot_points = by_slot[slot]
         correlation = spearman_rank_correlation(
-            [point.predicted_score for point in timestamp_points],
-            [float(point.truth.observed_level) for point in timestamp_points],
+            [point.predicted_score for point in slot_points],
+            [
+                float(
+                    point.truth.observed_area_level
+                    if target == "area"
+                    else point.truth.observed_venue_level
+                )
+                for point in slot_points
+            ],
         )
         if correlation is not None:
-            timestamp_correlations.append(correlation)
+            slot_correlations.append(correlation)
     return MetricSummary(
         observations=len(predicted),
-        spearman=(mean(timestamp_correlations) if timestamp_correlations else None),
+        spearman=(mean(slot_correlations) if slot_correlations else None),
         adjacent_accuracy=sum(
-            abs(point.predicted_level - point.truth.observed_level) <= 1
+            abs(
+                point.predicted_level
+                - (
+                    point.truth.observed_area_level
+                    if target == "area"
+                    else point.truth.observed_venue_level
+                )
+            )
+            <= 1
             for point in predicted
         )
         / len(predicted),
@@ -297,6 +340,7 @@ def render_markdown(report: EvaluationReport) -> str:
         point for point in report.points if point.predicted_level is not None
     )
     overall = summarize(valid_predictions)
+    venue_utility = summarize(valid_predictions, target="venue")
     lines = [
         "# Cafe Crowd Evaluation",
         "",
@@ -306,7 +350,9 @@ def render_markdown(report: EvaluationReport) -> str:
         f"- Uncovered: {report.uncovered_rows}",
         f"- Invalid: {report.invalid_rows}",
         "",
-        "## Overall",
+        "## Primary surrounding-area metrics",
+        "",
+        "Ground truth: `observed_area_level`. This is the engine's primary validation target.",
         "",
         "| Observations | Spearman | Adjacent accuracy |",
         "| ---: | ---: | ---: |",
@@ -314,32 +360,31 @@ def render_markdown(report: EvaluationReport) -> str:
         f"{_metric(overall.adjacent_accuracy)} |",
     ]
 
-    by_slot: dict[tuple[datetime, str], list[EvaluationPoint]] = defaultdict(list)
+    by_slot: dict[str, list[EvaluationPoint]] = defaultdict(list)
     for point in valid_predictions:
-        if point.truth.slot is not None:
-            by_slot[(point.truth.observed_at, point.truth.slot)].append(point)
+        if point.truth.slot:
+            by_slot[point.truth.slot].append(point)
     if by_slot:
         lines.extend(
             [
                 "",
-                "## By slot",
+                "## Primary surrounding-area metrics by slot",
                 "",
-                "| Observed at | Slot | Observations | Spearman | Adjacent accuracy |",
-                "| --- | --- | ---: | ---: | ---: |",
+                "| Slot | Observations | Spearman | Adjacent accuracy |",
+                "| --- | ---: | ---: | ---: |",
             ]
         )
-        for observed_at, slot in sorted(by_slot):
-            metric = summarize(by_slot[(observed_at, slot)])
-            timestamp = observed_at.isoformat().replace("+00:00", "Z")
+        for slot in sorted(by_slot):
+            metric = summarize(by_slot[slot])
             lines.append(
-                f"| {timestamp} | {_escape_cell(slot)} | {metric.observations} | "
+                f"| {_escape_cell(slot)} | {metric.observations} | "
                 f"{_metric(metric.spearman)} | {_metric(metric.adjacent_accuracy)} |"
             )
 
     lines.extend(
         [
             "",
-            "## By primary distance",
+            "## Primary surrounding-area metrics by distance",
             "",
             "| Band | Observations | Spearman | Adjacent accuracy |",
             "| --- | ---: | ---: | ---: |",
@@ -365,6 +410,19 @@ def render_markdown(report: EvaluationReport) -> str:
             f"| {label} | {metric.observations} | {_metric(metric.spearman)} | "
             f"{_metric(metric.adjacent_accuracy)} |"
         )
+    lines.extend(
+        [
+            "",
+            "## Optional venue utility metrics",
+            "",
+            "Ground truth: nonblank `observed_venue_level`. These indirect product-utility metrics are separate from primary engine validation.",
+            "",
+            "| Observations | Spearman | Adjacent accuracy |",
+            "| ---: | ---: | ---: |",
+            f"| {venue_utility.observations} | {_metric(venue_utility.spearman)} | "
+            f"{_metric(venue_utility.adjacent_accuracy)} |",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 

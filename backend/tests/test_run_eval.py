@@ -118,10 +118,10 @@ def _seed_database(path: Path) -> str:
 def test_csv_contract_counts_bad_rows_and_normalizes_to_utc(tmp_path: Path) -> None:
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,observed_level,slot\n"
-        "1,2026-07-12T12:00:00+09:00,1,lunch\n"
-        "2,2026-07-12T03:00:00,4,lunch\n"
-        "3,2026-07-12T03:00:00Z,5,lunch\n",
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
+        "1,2026-07-12T12:00:00+09:00,lunch,1,\n"
+        "2,2026-07-12T03:00:00,lunch,4,2\n"
+        "3,2026-07-12T03:00:00Z,lunch,5,3\n",
         encoding="utf-8",
     )
 
@@ -131,14 +131,49 @@ def test_csv_contract_counts_bad_rows_and_normalizes_to_utc(tmp_path: Path) -> N
     assert invalid == 2
     assert len(observations) == 1
     assert observations[0].observed_at == NOW
+    assert observations[0].observed_area_level == 1
+    assert observations[0].observed_venue_level is None
 
 
 def test_csv_missing_required_column_fails_the_contract(tmp_path: Path) -> None:
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text("cafe_id,observed_at\n1,2026-07-12T03:00:00Z\n")
 
-    with pytest.raises(ValueError, match="observed_level"):
+    with pytest.raises(ValueError, match="observed_area_level.*slot|slot.*observed_area_level"):
         load_observations(csv_path)
+
+
+def test_csv_rejects_blank_slot_and_invalid_optional_venue_level(
+    tmp_path: Path,
+) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
+        "1,2026-07-12T03:00:00Z,,1,2\n"
+        "2,2026-07-12T03:00:00Z,lunch,4,5\n",
+        encoding="utf-8",
+    )
+
+    observations, total, invalid = load_observations(csv_path)
+
+    assert observations == []
+    assert total == 2
+    assert invalid == 2
+
+
+def test_csv_allows_missing_optional_venue_column(tmp_path: Path) -> None:
+    csv_path = tmp_path / "observations.csv"
+    csv_path.write_text(
+        "cafe_id,observed_at,slot,observed_area_level\n"
+        "1,2026-07-12T03:00:00Z,lunch,1\n",
+        encoding="utf-8",
+    )
+
+    observations, total, invalid = load_observations(csv_path)
+
+    assert total == 1
+    assert invalid == 0
+    assert observations[0].observed_venue_level is None
 
 
 def test_spearman_uses_average_ranks_and_handles_undefined_cases() -> None:
@@ -151,21 +186,57 @@ def test_spearman_uses_average_ranks_and_handles_undefined_cases() -> None:
         spearman_rank_correlation([1], [1, 2])
 
 
-def test_summary_macro_averages_timestamp_ranks_instead_of_pooling() -> None:
+def test_summary_macro_averages_slot_ranks_instead_of_timestamps() -> None:
     later = NOW + timedelta(hours=1)
     points = (
-        EvaluationPoint(GroundTruth(2, 1, NOW, 1, None), 1.0, 1, "covered", 1),
-        EvaluationPoint(GroundTruth(3, 2, NOW, 2, None), 2.0, 2, "covered", 1),
-        EvaluationPoint(GroundTruth(4, 1, later, 4, None), 3.0, 3, "covered", 1),
-        EvaluationPoint(GroundTruth(5, 2, later, 3, None), 4.0, 4, "covered", 1),
+        EvaluationPoint(GroundTruth(2, 1, NOW, "lunch", 1), 1.0, 1, "covered", 1),
+        EvaluationPoint(GroundTruth(3, 2, later, "lunch", 2), 2.0, 2, "covered", 1),
+        EvaluationPoint(GroundTruth(4, 1, NOW, "dinner", 4), 3.0, 3, "covered", 1),
+        EvaluationPoint(GroundTruth(5, 2, later, "dinner", 3), 4.0, 4, "covered", 1),
     )
 
     metric = summarize(points)
 
-    # Timestamp correlations are +1 and -1, hence macro mean 0.  Pooling all
+    # Slot correlations are +1 and -1, hence macro mean 0.  Pooling all
     # four rows would incorrectly report +0.8.
     assert metric.spearman == pytest.approx(0.0)
     assert metric.adjacent_accuracy == 1.0
+
+
+def test_summary_keeps_optional_venue_utility_separate() -> None:
+    points = (
+        EvaluationPoint(
+            GroundTruth(2, 1, NOW, "lunch", 1, 4),
+            1.0,
+            1,
+            "covered",
+            1,
+        ),
+        EvaluationPoint(
+            GroundTruth(3, 2, NOW, "lunch", 4, 1),
+            4.0,
+            4,
+            "covered",
+            1,
+        ),
+        EvaluationPoint(
+            GroundTruth(4, 3, NOW, "lunch", 2),
+            2.0,
+            2,
+            "covered",
+            1,
+        ),
+    )
+
+    area = summarize(points)
+    venue = summarize(points, target="venue")
+
+    assert area.observations == 3
+    assert area.spearman == pytest.approx(1.0)
+    assert area.adjacent_accuracy == 1.0
+    assert venue.observations == 2
+    assert venue.spearman == pytest.approx(-1.0)
+    assert venue.adjacent_accuracy == 0.0
 
 
 def test_evaluate_reconstructs_historical_snapshots_and_counts_outcomes(
@@ -174,10 +245,10 @@ def test_evaluate_reconstructs_historical_snapshots_and_counts_outcomes(
     database_url = _seed_database(tmp_path / "eval.db")
     engine = create_engine(database_url)
     truths = [
-        GroundTruth(2, 1, NOW, 1, "same slot"),
-        GroundTruth(3, 2, NOW, 4, "same slot"),
-        GroundTruth(4, 3, NOW, 2, None),
-        GroundTruth(5, 999, NOW, 2, None),
+        GroundTruth(2, 1, NOW, "same slot", 1, 2),
+        GroundTruth(3, 2, NOW, "same slot", 4, 3),
+        GroundTruth(4, 3, NOW, "same slot", 2),
+        GroundTruth(5, 999, NOW, "same slot", 2),
     ]
     with Session(engine) as session:
         report = evaluate(session, truths, total_rows=4, invalid_rows=0)
@@ -193,13 +264,16 @@ def test_evaluate_reconstructs_historical_snapshots_and_counts_outcomes(
     ]
     markdown = render_markdown(report)
     assert "| 2 | 1.000 | 1.000 |" in markdown
-    assert "| 2026-07-12T03:00:00Z | same slot | 2 | 1.000 | 1.000 |" in markdown
+    assert "| same slot | 2 | 1.000 | 1.000 |" in markdown
+    assert "## Primary surrounding-area metrics" in markdown
+    assert "## Optional venue utility metrics" in markdown
+    assert "| 2 | 1.000 | 1.000 |" in markdown
     assert "- Uncovered: 1" in markdown
     assert "- Invalid: 1" in markdown
 
 
 def test_render_markdown_splits_primary_distance_bands() -> None:
-    truth = GroundTruth(2, 1, NOW, 2, None)
+    truth = GroundTruth(2, 1, NOW, "lunch", 2)
     covered = EvaluationPoint(truth, 2.0, 2, "covered", 100.0)
     fringe = EvaluationPoint(truth, 3.0, 3, "fringe", 900.0)
     report = EvaluationReport(2, 0, 0, (covered, fringe))
@@ -217,9 +291,9 @@ def test_cli_prints_by_default_and_only_writes_with_output(
     database_url = _seed_database(tmp_path / "eval.db")
     csv_path = tmp_path / "observations.csv"
     csv_path.write_text(
-        "cafe_id,observed_at,observed_level,slot\n"
-        "1,2026-07-12T03:00:00Z,1,slot-a\n"
-        "2,2026-07-12T03:00:00Z,4,slot-a\n",
+        "cafe_id,observed_at,slot,observed_area_level,observed_venue_level\n"
+        "1,2026-07-12T03:00:00Z,slot-a,1,2\n"
+        "2,2026-07-12T03:00:00Z,slot-a,4,3\n",
         encoding="utf-8",
     )
 
