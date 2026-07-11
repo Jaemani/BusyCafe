@@ -1,8 +1,16 @@
 # cafe-crowd 임시 외부감사 자료
 
-> 상태: 외부 검토용 임시 문서
+> 상태: 외부 검토 완료, 대응 반영 중
 >
 > 기준일: 2026-07-12 (Asia/Seoul)
+>
+> 소유자: repository maintainer
+>
+> 기준 커밋: `4468dc8`
+>
+> 검토·처리 기한: 2026-08-12
+>
+> 감사 결과 대응: `audits/2026-07-12-external-review-response.md`
 >
 > 이 문서는 `docs/PLAN.md`를 대체하는 source of truth가 아니다. 현재 팀의 자체 평가를
 > 외부 감사자가 반박·수정할 수 있도록 사실, 미완료 항목과 재현 절차를 한곳에 모은다.
@@ -134,18 +142,20 @@
 출력하지 않는다.
 
 ```bash
-rtk git status --short
+git status --short
 
 cd backend
-rtk uv run pytest
-rtk uv run python -m compileall -q app scripts tests
+uv sync --extra dev
+uv run pytest
+uv run python -m compileall -q app scripts tests
 
 cd ../frontend
-rtk npm run typecheck
-rtk npm run build
+npm ci
+npm run typecheck
+npm run build
 
-rtk proxy curl -sS https://busy-cafe.vercel.app/api/health
-rtk proxy curl -sS -o /dev/null -w '%{http_code}\n' https://busy-cafe.vercel.app/
+curl -sS https://busy-cafe.vercel.app/api/health
+curl -sS -o /dev/null -w '%{http_code}\n' https://busy-cafe.vercel.app/
 ```
 
 추가 수동 검증:
@@ -192,4 +202,4 @@ rtk proxy curl -sS -o /dev/null -w '%{http_code}\n' https://busy-cafe.vercel.app
 - 사고 기록: [INCIDENTS.md](INCIDENTS.md)
 - 실시간 운영 결정: [ADR-0005](adr/ADR-0005-live-production-runtime.md)
 - 유니버설 확장 결정: [ADR-0006](adr/ADR-0006-universal-expansion-tracks.md)
-- 기준 커밋: `317e110`, `f12a6db`, `5609477`, `a9bf121`, `b4f97be`
+- 감사 기준 커밋: `4468dc8`

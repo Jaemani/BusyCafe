@@ -379,3 +379,26 @@
 - 검증: source/license 필수값, 원본 의미 보존, UTC, coverage 상태, extra field 차단을 포함한
   focused tests 8건 PASS.
 - 판정: PASS. provider adapter, DB persistence 및 외부 API 연동은 아직 추가하지 않았다.
+
+## 2026-07-12 — 외부감사 대응 검증
+
+- 감사 결과를 `docs/audits/2026-07-12-external-review-response.md`에 수용·보류·기각으로
+  구분해 기록했다. ADR-0007은 구현 병렬화를 허용하되 공개·승격 게이트는 선행 DoD가
+  통과할 때까지 차단하도록 규칙을 정정했다. Phase 6 기준선 전까지 신규 국내·해외 확장
+  구현과 확장 문서 작성은 동결했다.
+- `run_eval.py`는 관측 시각보다 나중에 계산된 점수를 사용하지 않는 historical no-leak
+  조회와 관측 timestamp별 Spearman을 동일 가중치로 합산하는 macro 평가를 구현했다.
+  회귀 테스트 추가 시 백엔드 전체 104개가 통과했고, 출처 API 테스트까지 포함한 최종
+  결과는 105개 통과다.
+- CI에 PostgreSQL 17 service를 추가하고 Alembic migration을 실제 DB에 적용한 뒤
+  스키마를 확인하도록 구성했다. workflow YAML 검증과 관련 로컬 테스트는 통과했으며,
+  원격 CI workflow 실행 결과는 아직 확인하지 않았다.
+- README의 외부 재현·Quickstart 명령에서 로컬 전용 `rtk` 의존을 제거하고 표준
+  `git`, `uv`, `npm`, `curl` 명령만 사용하도록 정리했다.
+- `/api/sources`와 지도 헤더에 서울특별시 OA-21285, Overture Places 및 전체 라이선스
+  링크를 추가했다. MapLibre attribution의 `compact-show`와 `open` 상태를 강제로 제거하던
+  코드와 강제 숨김 CSS를 삭제해 라이브러리 기본 동작을 복원했다.
+- 프론트엔드 TypeScript typecheck와 production build는 통과했다. attribution의 최초 표시,
+  접힘·펼침과 모바일 배치는 실제 브라우저 수동 검증이 남아 있다.
+- 코드 라이선스 선택과 루트 `LICENSE` 추가는 저장소 소유자의 `[HUMAN]` 결정이 필요해
+  미완료 상태다.

@@ -1,101 +1,108 @@
-# cafe-crowd
+# BusyCafe
 
-서울 실시간 도시데이터의 지역 혼잡도를 카페 위치에 공간 매핑해, 지금 주변에서 상대적으로 한산할 가능성이 높은 카페를 근거와 함께 보여주는 지도 서비스입니다.
+서울시의 지역 혼잡도를 카페 위치에 매핑해, 지금 주변에서 상대적으로 한산할 가능성이
+높은 카페를 근거와 함께 보여주는 지도 서비스입니다. 표시되는 값은 매장 좌석 점유율이
+아니라 **카페 주변 지역의 혼잡도 추정치**입니다.
 
-Phase 0 실측 검증을 완료했고 Phase 1 인제스트 파이프라인을 구현 중입니다.
+**공개 프리뷰:** https://busy-cafe.vercel.app
 
-## 문서
+> 현재 공개 프리뷰는 배포 시점의 읽기 전용 SQLite 스냅샷입니다. 로컬 수집기의 10분
+> 갱신이 공개 URL에 자동 반영되지는 않습니다. 관리형 PostgreSQL과 운영 worker 전환이
+> 끝나기 전에는 실시간 서비스로 간주하지 않습니다.
 
-- [`docs/PLAN.md`](docs/PLAN.md): 제품 및 구현 계획의 source of truth
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): 고도화 트랙의 우선순위와 공통 확장 로드맵
-- [`Track 1 — 정확도`](docs/tracks/TRACK-1-ACCURACY.md): 엔진 신뢰도와 정확도 개선
-- [`Track 2 — 국내 확장`](docs/tracks/TRACK-2-KOREA.md): 서울에서 국내 도시로 확장
-- [`Track 3 — 해외 확장`](docs/tracks/TRACK-3-GLOBAL.md): 유니버설 구조와 해외 도시 확장
-- [`docs/VERIFICATION.md`](docs/VERIFICATION.md): Phase별 실측 결과와 DoD 기록
-- [`docs/DECISIONS.md`](docs/DECISIONS.md): 주요 기술·제품 의사결정 기록(ADR)
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md): 사용자 관점의 앱 변경 내역
-- [`docs/INCIDENTS.md`](docs/INCIDENTS.md): 중요한 장애와 실수, 재발 방지 조치
+## 현재 제공하는 기능
 
-## 개발 원칙
+- MapLibre/OpenFreeMap 기반 서울 지도와 카페 클러스터
+- Overture Places에서 선별한 서울 카페 원장
+- 서울시 주요 장소 121개의 혼잡도 수집 파이프라인
+- 거리, 데이터 신선도와 기여 핫스팟 수를 반영한 결정적 IDW 점수
+- 카페별 주변 혼잡도, coverage, 신뢰도와 근거 핫스팟 표시
+- 지도 영역 조회 API와 상태 확인 API
 
-- 추정치를 실제 매장 점유율처럼 표현하지 않습니다.
-- 계획과 실측 결과가 충돌하면 먼저 `docs/PLAN.md`를 고치고 `docs/VERIFICATION.md`에 근거를 남깁니다.
-- 비밀값은 `.env`에만 두고 Git에 커밋하지 않습니다.
-- 외부 API를 사용하는 테스트는 금지하고, 검증 과정에서 저장한 fixture로 테스트합니다.
-- 앱 업데이트, 주요 의사결정, 중요한 실수와 후속 조치를 문서화하고 Git으로 버전 관리합니다.
+현재 신뢰도는 실제 적중 확률이 아니라 **입력 근거의 충분도**입니다. 지역 보행 혼잡과
+카페 좌석 여유의 상관은 아직 현장 관측으로 검증되지 않았습니다.
 
-## 현재 상태
+## 로컬 Quickstart
 
-MapLibre/OpenFreeMap 지도, Overture 고신뢰 서울 카페 4,933건 cache, 공식 121개
-핫스팟 seed, IDW score materialize와 FastAPI bbox API가 연결됐습니다. 잘못된 OSM
-타일 POI와 Kakao runtime 의존은 제거했습니다. 공개 URL은 읽기 전용 스냅샷이며,
-실시간 production 전환 경로와 운영 제약은
-[`ADR-0005`](docs/adr/ADR-0005-live-production-runtime.md)에 기록합니다.
+Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22+와 Docker가 필요합니다.
+저장소를 clone한 뒤 루트에서 다음 세 명령을 각각 실행합니다. 두 번째와 세 번째 명령은
+서버가 계속 실행되므로 별도 터미널을 사용합니다.
 
-## 로컬 준비
+```bash
+docker compose up -d postgres
+```
 
-백엔드는 Python 3.12+와 `uv`, 프론트엔드는 Node.js 22+를 기준으로 합니다.
+```bash
+cd backend && cp .env.example .env && uv sync --extra dev && uv run alembic -c alembic.ini upgrade head && uv run uvicorn app.main:app --host 127.0.0.1 --port 8190
+```
+
+```bash
+cd frontend && cp .env.example .env && npm ci && npm run dev
+```
+
+브라우저에서 `http://127.0.0.1:5188`을 엽니다. 새 로컬 DB는 비어 있으므로 지도와 API
+동작만 확인할 수 있습니다. 실제 데이터를 수집하려면 `backend/.env`에 발급받은
+`SEOUL_API_KEY`를 넣고 아래 데이터 적재 절차를 따르세요. 비밀값은 채팅, 이슈, 문서,
+커밋 또는 HTTP 로그에 남기지 않습니다.
+
+기본 검증 명령은 다음과 같습니다. 테스트는 저장된 fixture만 사용하며 외부 API를
+호출하지 않습니다.
 
 ```bash
 cd backend
-cp .env.example .env
-rtk uv sync --extra dev
-rtk uv run pytest
+uv run pytest
+uv run python -m compileall -q app scripts tests
+
+cd ../frontend
+npm run typecheck
+npm run build
 ```
 
-```bash
-cd frontend
-cp .env.example .env
-rtk npm install
-rtk npm run build
-rtk npm run dev
+## 아키텍처
+
+```text
+서울 실시간 도시데이터 ──> 분리 ingest worker ──> snapshot 저장소
+Overture 카페 원장 ──────────────────────────────> PostgreSQL/SQLite
+                                                   │
+브라우저(MapLibre) <── FastAPI cache-only API <────┘
 ```
 
-프론트 개발 서버는 다른 로컬 서비스와 충돌하지 않도록
-`http://127.0.0.1:5188`을 고정 사용하며, 포트가 이미 사용 중이면 즉시 실패합니다.
+요청 경로에서는 서울시나 POI 제공자를 직접 호출하지 않습니다. 수집과 제공을 분리하고,
+스냅샷과 모델 버전을 저장해 같은 입력에는 같은 결과가 나오도록 합니다. 공개 Vercel
+프리뷰는 이 구조의 읽기 전용 스냅샷 경로만 사용합니다.
 
-로컬 PostgreSQL은 Docker가 설치된 환경에서 `rtk docker compose up -d postgres`로
-시작할 수 있습니다.
+## 데이터 적재와 실행
 
-## API 키
-
-제품 실행에 필요한 외부 비밀값은 `backend/.env`의 `SEOUL_API_KEY`입니다. Kakao
-REST/JavaScript 키는 현 제품 지도·POI 경로에서 사용하지 않습니다. 키는 채팅,
-문서, 이슈, 커밋과 HTTP 요청 로그에 남기지 마세요.
-
-실측 fixture와 공식 마스터 원본은 이미 커밋되어 있습니다. 갱신할 때는 기존 원본을
-검토·이동한 뒤 검증/다운로드 스크립트를 명시적으로 실행해야 하며 자동 덮어쓰기는
-허용되지 않습니다.
-
-## 데이터베이스와 인제스트
+핫스팟 seed는 기본적으로 dry-run이며, 출력된 대상을 사람이 확인한 뒤에만 `--apply`를
+사용합니다.
 
 ```bash
 cd backend
-rtk uv run alembic -c alembic.ini upgrade head
-rtk uv run python scripts/seed_hotspots.py
+uv run python scripts/seed_hotspots.py
+uv run python scripts/seed_hotspots.py --apply
+uv run python scripts/seed_cafes.py --download --download-only
+uv run python scripts/seed_cafes.py --apply
+uv run python scripts/materialize_scores.py
+uv run python -m app.ingest.worker --once
 ```
 
-`seed_hotspots.py`의 기본 동작은 dry-run입니다. 출력된 대상 목록을 사람이 확인한
-후에만 다음 명령으로 적용합니다.
+지속 수집 worker는 API 서버와 별도 프로세스로 실행합니다.
 
 ```bash
-rtk uv run python scripts/seed_hotspots.py --apply
-rtk uv run python scripts/seed_cafes.py --download --download-only
-rtk uv run python scripts/seed_cafes.py --apply
-rtk uv run python scripts/materialize_scores.py
-rtk uv run python -m app.ingest.worker --once
-rtk uv run python -m app.ingest.worker
+cd backend
+uv run python -m app.ingest.worker
 ```
 
-마지막 명령은 API 서버와 분리된 단일 worker를 실행하며 10분마다 폴링합니다.
-응답의 장소 코드·이름이 요청 대상과 다르거나 스키마 파싱이 실패하면 snapshot을
-만들지 않고 원본을 `hotspot_parse_failures`에 보존합니다.
+## 주요 문서
 
-인증키 값은 문서나 이슈에 붙여 넣지 마세요.
+- [제품·구현 계획](docs/PLAN.md)
+- [실측과 DoD 기록](docs/VERIFICATION.md)
+- [변경 이력](docs/CHANGELOG.md)
+- [중요 사고와 재발 방지](docs/INCIDENTS.md)
+- [설계 결정](docs/DECISIONS.md)
+- [데이터 라이선스·출처표시 감사](docs/LICENSE_ATTRIBUTION_AUDIT.md)
+- [고도화 로드맵](docs/ROADMAP.md)
+- [기여 가이드](CONTRIBUTING.md)
 
-개발 미리보기 API는 `8190`, Vite는 `5188`을 사용하며 Vite가 same-origin `/api`를
-프록시합니다. 기존 로컬 서비스나 Tailscale 443 Funnel 설정은 변경하지 않습니다.
-
-```bash
-rtk proxy env DATABASE_URL=sqlite+pysqlite:///data/preview.db uv run uvicorn app.main:app --host 127.0.0.1 --port 8190
-```
+계획과 실측이 충돌하면 실측을 근거로 계획과 검증 기록을 함께 갱신합니다. 사용자 영향은
+변경 이력에, 중요한 기술 결정은 ADR에, 실수와 후속 조치는 인시던트 문서에 남깁니다.
