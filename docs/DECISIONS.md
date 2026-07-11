@@ -47,6 +47,8 @@
 - [ADR-0002: 공식 핫스팟 폴리곤에서 대표 좌표 산출](adr/ADR-0002-hotspot-location.md) — 2026-07-11, Accepted
 - [ADR-0003: MapLibre/OpenFreeMap 지도와 Overture 캐시 원장](adr/ADR-0003-maplibre-overture-catalog.md) — 2026-07-11, Accepted
 - [ADR-0004: 121개 전체 폴링과 cache-first 읽기 경로](adr/ADR-0004-seoulwide-polling-cache.md) — 2026-07-11, Accepted
+- [ADR-0005: 관리형 PostgreSQL과 분리 worker 기반 실시간 운영](adr/ADR-0005-live-production-runtime.md) — 2026-07-11, Accepted
+- [ADR-0006: 세 개 제품 트랙과 유니버설 혼잡 데이터 계약](adr/ADR-0006-universal-expansion-tracks.md) — 2026-07-11, Accepted
 
 ## 현재 제품 경로 요약
 
@@ -56,6 +58,8 @@
 | 카페 원장 | Overture Places release를 PostgreSQL에 cache, 서울 인허가로 보정 | viewport마다 외부 POI 검색 금지 |
 | 혼잡도 | 서울 공식 121개 장소, 10분 non-overlapping polling | 과거 `≤12곳` 범위는 legacy 결정 |
 | 외부 매장 링크 | 검증된 provider ID/canonical direct detail URL만 표시 | 이름/좌표 검색 링크·스크레이핑·추측 매칭 금지 |
+| 제품 모드 | 카페 찾기·지역 밀집도·데이터 커버리지 | 데이터 없는 영역의 임의 보간 금지 |
+| 지역 확장 | `RegionProfile`과 공급자 어댑터를 국내·해외가 공유 | 도시명 기반 코어 분기 금지 |
 
 Kakao Local의 실응답 fixture와 키/도메인 활성화 기록은 Phase 0의 역사적 검증 증거다.
 ADR-0003가 대체한 제품 POI 경로로 해석하지 않는다.

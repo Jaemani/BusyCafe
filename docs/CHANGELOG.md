@@ -18,6 +18,7 @@
 - MapLibre/OpenFreeMap 서울 지도, 클러스터, 내 위치 버튼과 모바일 상세 패널
 - Overture Places `2026-06-17.0` 고신뢰 서울 카페 4,933건 서버 cache ingest
 - 공식 121개 핫스팟 전체 seed, 결정적 IDW score materialize, cache-only FastAPI bbox API
+- 세 개 고도화 트랙 및 유니버설 확장 로드맵 문서화
 
 ### Changed
 
