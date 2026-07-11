@@ -48,17 +48,13 @@ body {
 .brand { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
 
 .brand-mark {
-  display: grid;
   flex: 0 0 auto;
   width: 2.55rem;
   height: 2.55rem;
-  place-items: center;
   border-radius: 0.8rem;
-  color: #fff;
-  background: var(--forest);
-  font-family: Georgia, serif;
-  font-size: 1.35rem;
-  font-style: italic;
+  object-fit: cover;
+  background: #fffdf8;
+  box-shadow: inset 0 0 0 1px rgb(70 49 28 / 8%);
 }
 
 .eyebrow {
