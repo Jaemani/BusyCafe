@@ -26,6 +26,17 @@ SEOUL_RESPONSE_START_INDEX: Final = 1
 SEOUL_RESPONSE_END_INDEX: Final = 5
 SEOUL_VERIFY_AREA_NAME: Final = "광화문광장"
 
+# Official Seoul major-place master attachments (dataset OA-21285).
+SEOUL_DATAFILE_DOWNLOAD_URL: Final = (
+    "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do"
+)
+SEOUL_HOTSPOT_MASTER_INF_ID: Final = "OA-21285"
+SEOUL_HOTSPOT_MASTER_INF_SEQ: Final = 2
+SEOUL_HOTSPOT_LIST_SEQ: Final = 23
+SEOUL_HOTSPOT_AREAS_SEQ: Final = 24
+SEOUL_HOTSPOT_LIST_PATH: Final = FIXTURES_DIR / "seoul_hotspots_master.xlsx"
+SEOUL_HOTSPOT_AREAS_PATH: Final = FIXTURES_DIR / "seoul_hotspot_areas.zip"
+
 KAKAO_LOCAL_BASE_URL: Final = "https://dapi.kakao.com"
 KAKAO_CATEGORY_PATH: Final = "/v2/local/search/category.json"
 KAKAO_CAFE_CATEGORY_CODE: Final = "CE7"

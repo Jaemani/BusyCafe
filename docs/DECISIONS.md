@@ -44,6 +44,7 @@
 ## 채택된 결정
 
 - [ADR-0001: PostgreSQL을 기본 데이터베이스로 사용](adr/ADR-0001-primary-database.md) — 2026-07-11, Accepted
+- [ADR-0002: 공식 핫스팟 폴리곤에서 대표 좌표 산출](adr/ADR-0002-hotspot-location.md) — 2026-07-11, Accepted
 
 ## 초기 결정 후보
 

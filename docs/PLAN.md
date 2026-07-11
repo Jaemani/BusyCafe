@@ -1,10 +1,15 @@
-# cafe-crowd — 카페 혼잡도 맵 개발 계획서 (v1.1)
+# cafe-crowd — 카페 혼잡도 맵 개발 계획서 (v1.2)
 
 > **한 줄 정의**: 서울 주요 상권의 실시간 지역 혼잡도(서울 실시간 도시데이터)를 카페 위치에 공간 매핑하여, "지금 이 근처에서 상대적으로 한산할 카페"를 근거와 함께 보여주는 준실시간 지도 서비스.
 
 > **v1.1 (2026-07-11)**: 운영 저장소를 PostgreSQL로 확정하고 ingest worker를 API
 > 프로세스에서 분리했다. uncovered NULL 규칙과 timezone-aware 시각 저장을 DDL에
-> 반영했다. API 관련 `[VERIFY]` 항목은 아직 실측 전이며 변경하지 않았다.
+> 반영했다. API 관련 검증 태그는 당시 실측 전이어서 변경하지 않았다.
+
+> **v1.2 (2026-07-11)**: 서울·카카오 실응답, 라벨 4종, 호출 단위, 121개 장소
+> 목록과 WGS84 영역을 검증했다. 초기 서울 중첩 응답 가정을 평면 구조로 수정하고,
+> 공식 폴리곤의 내부 대표점을 사용하는 위치 산출 결정을 반영했다. 일일 쿼터와
+> 폴링 주기만 사용자 포털 확인 대기 상태다.
 
 ---
 
@@ -35,7 +40,7 @@
 
 ### 1.3 MVP 스코프
 
-- **지역**: 서울, 핫스팟이 커버하는 동네 2~3곳으로 시작. 기본 중심 핫스팟은 실 API 호출로 확인한 `성수카페거리`(`POI068`), `홍대 관광특구`(`POI007`), `연남동`(`POI073`) 주변. 각 동네 반경 내 추가 폴링 대상은 121개 장소 마스터 확보 후 config에 확정한다. [VERIFY]
+- **지역**: 서울, 핫스팟이 커버하는 동네 2~3곳으로 시작. 기본 중심 핫스팟은 실 API와 공식 마스터에서 확인한 `성수카페거리`(`POI068`), `홍대 관광특구`(`POI007`), `연남동`(`POI073`) 주변. 각 동네 반경 내 추가 폴링 대상은 Phase 1의 대표점 산출 후 config에 확정한다.
 - **사용자 플로우**: 지도 열기 → 카페 마커의 4단계 색상으로 주변 혼잡도 확인 → 마커 클릭 → 근거 패널(기준 핫스팟, 거리, 레벨, 갱신 시각, 12시간 추이, 1시간 뒤 예측).
 
 ---
@@ -46,7 +51,7 @@
 |---|---|---|---|---|
 | 서울 실시간 도시데이터 (열린데이터광장) | 핫스팟별 실시간 인구 혼잡도 + 12h 예측 | 인구 5분 / 상권 10분 | REST API, 인증키 | P0~P1 |
 | 카카오 로컬 API (카테고리 CE7) | 카페 POI (이름·좌표·place_id) | 온디맨드 | REST API, REST 키 | P2 |
-| 서울시 주요 장소(핫스팟) 마스터 | 핫스팟 코드·명칭·좌표 | 정적 | 열린데이터광장 파일 다운로드 | P1 |
+| 서울시 주요 장소(핫스팟) 마스터 | 핫스팟 코드·명칭·WGS84 영역 | 정적 | 열린데이터광장 OA-21285 첨부 파일 | P1 |
 | 지방행정 인허가(휴게음식점) — 공공데이터포털 | 폐업 카페 필터 | 일 단위 | REST API | Backlog |
 | 서울 생활인구 (집계구·시간대별) | "평소 대비" 베이스라인 | 시간별 (며칠 지연 공개) | 파일/API | Backlog |
 | 기상청 단기예보 | 날씨 보정 | 시간별 | REST API | Backlog |
@@ -63,7 +68,7 @@
   - `AREA_PPLTN_MIN`, `AREA_PPLTN_MAX` — 실시간 인구 추정 구간
   - `PPLTN_TIME` — 데이터 기준 시각
   - `FCST_YN`, `FCST_PPLTN[]` — 실측 응답에 12개 예측 레코드. 각 레코드는 `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
-- 호출 단위: **장소 1곳당 1콜**. 일괄 조회 없음 [VERIFY].
+- 호출 단위 [VERIFIED 2026-07-11]: 공식 OA-21285 설명에 따라 **장소 1곳당 1콜**, 일괄 호출 불가. 장소명 또는 장소코드 중 하나로 호출한다.
 - **쿼터 제약 (중요)**: 열린데이터광장 인증키에는 기본 일일 트래픽 한도가 있다(한도 수치는 Phase 0에서 실측/문서 확인 — 통상 수백~수천 건 수준이며 상향 신청 가능). 121곳 × 5분 폴링 = 34,848콜/일은 불가능할 가능성이 높다. **대응 전략(이 순서로)**:
   1. 폴링 대상을 MVP 동네의 핫스팟만으로 한정 (≤12곳)
   2. 폴링 주기 10분 (요구사항상 허용) → 12곳 × 144회 = 1,728콜/일
@@ -77,6 +82,13 @@
   - 파라미터: `category_group_code=CE7`, `x`(경도), `y`(위도), `radius`(m, 최대 20000), `page`, `size`(≤15)
 - 응답 구조 [VERIFIED 2026-07-11]: root `meta` + `documents[]`. `meta`는 `total_count`, `pageable_count`, `is_end`, `same_name`; document는 `id`, `place_name`, `category_*`, 주소, 전화, `x`, `y`, `place_url`, `distance`를 포함했다.
 - **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 쿼리 조건당 최대 **45건**(15건 × 3페이지)까지만 노출되므로 밀집 지역에서는 반드시 **재귀 4분할 스윕**을 구현한다: `total_count > 45`이면 검색 원을 4개 사분면 원으로 쪼개 재귀 호출, `is_end`까지 페이지 순회, `kakao_place_id`로 dedupe.
+
+### 2.3 서울시 주요 121장소 마스터
+
+- 공식 데이터셋: [서울시 실시간 도시데이터 OA-21285](https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do)
+- [VERIFIED 2026-07-11] 첨부 `서울시 주요 121장소 목록.xlsx`(seq 23)와 `서울시 주요 121장소 영역.zip`(seq 24), 게시일 2026-04-02를 확인했다.
+- [VERIFIED 2026-07-11] XLSX는 `CATEGORY`, `NO`, `AREA_CD`, `AREA_NM`, `ENG_NM`의 121개 레코드다. 영역 ZIP은 같은 121개 장소의 Shapefile(`.shp/.shx/.dbf/.prj/.cpg`)이며 WGS84 경위도(`GCS_WGS_1984`)다.
+- 목록에는 중심 좌표가 없으므로 Phase 1에서 WGS84 폴리곤의 내부 대표점(`representative_point`)을 `hotspots.lat/lng`로 사용한다. Kakao 키워드 좌표는 공식 geometry가 없거나 손상된 경우에만 fallback하고 수동 검수한다. 결정 근거는 `docs/adr/ADR-0002-hotspot-location.md`에 기록한다.
 
 ---
 
@@ -159,7 +171,7 @@ cafe-crowd/
 ```sql
 CREATE TABLE hotspots (
   id INTEGER PRIMARY KEY,
-  area_cd TEXT UNIQUE,          -- 광화문광장 실측값: POI088; 전체 마스터는 [VERIFY]
+  area_cd TEXT UNIQUE,          -- 공식 마스터의 POI001~POI131 중 121개 코드
   name TEXT NOT NULL,           -- API 호출에 쓰는 정확한 AREA_NM
   category TEXT,                -- 관광특구/발달상권/인구밀집지역 등
   lat REAL NOT NULL,
@@ -264,13 +276,13 @@ DoD:
 
 - [ ] fixtures 2종 이상 커밋됨
 - [ ] `docs/VERIFICATION.md`에 확정 스키마·라벨 문자열·쿼터 한도·폴링 주기 결정 기록
-- [ ] 문서의 [VERIFY] 항목이 전부 해소되어 본 문서 갱신됨
+- [x] 문서의 [VERIFY] 항목이 전부 해소되어 본 문서 갱신됨
 
 ### Phase 1 — 핫스팟 인제스트 파이프라인
 
 작업:
 
-1. `seed_hotspots.py`: 장소 마스터 → `hotspots` 적재. 좌표 누락 시 카카오 키워드 검색으로 중심좌표 보정 후 **수동 검수 목록 출력** [HUMAN 확인 1회]
+1. `seed_hotspots.py`: XLSX 장소 마스터와 WGS84 Shapefile을 `AREA_CD`로 결합하고 각 폴리곤의 내부 대표점을 `hotspots.lat/lng`로 적재. geometry 누락·손상 시에만 카카오 키워드 검색 fallback 후 **수동 검수 목록 출력** [HUMAN 확인 1회]
 2. `TARGET_NEIGHBORHOODS` 반경 내 핫스팟에 `is_polled=1` 설정 (≤12곳 확인)
 3. `ingest/poller.py`와 단일 `ingest/worker.py`: APScheduler로 `POLL_INTERVAL_MIN`마다 폴링 대상 순회 호출 → 파싱 → `hotspot_snapshots` append. 실패 시 3회 지수 백오프, 최종 실패는 로그만 남기고 다음 대상 진행. FastAPI 프로세스에서는 스케줄러를 기동하지 않는다.
 4. 파서 유닛테스트 (fixture 기반)

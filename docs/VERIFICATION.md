@@ -6,7 +6,7 @@
 
 | Phase | 상태 | 완료일 | 근거 |
 |---|---|---|---|
-| Phase 0 | 진행 중 (HUMAN 대기) | - | 키 없이 가능한 스캐폴딩/테스트 완료, API 키 발급 및 실측 전 |
+| Phase 0 | 진행 중 (HUMAN 쿼터 확인 대기) | - | API/마스터 실측 완료, 일일 쿼터와 폴링 주기 미확정 |
 | Phase 1 | 대기 | - | Phase 0 미완료 |
 | Phase 2 | 대기 | - | Phase 1 미완료 |
 | Phase 3 | 대기 | - | Phase 2 미완료 |
@@ -42,10 +42,7 @@
 
 다음 내용은 실제 API 응답과 공식 계정 화면/문서를 확인하기 전까지 확정하지 않는다.
 
-- 서울 실시간 도시데이터의 장소 1곳당 1콜·일괄 조회 불가 여부
-- 121개 장소의 정확한 명칭·코드·좌표와 마스터 파일 확보 경로
 - 인증키 일일 쿼터와 이에 따른 폴링 주기
-- MVP 중심 3곳 외 반경 내 추가 폴링 핫스팟의 정확한 표기·좌표
 
 ## 2026-07-11 — Phase 0 / 첫 실 API 호출
 
@@ -56,9 +53,9 @@
 - 실행 명령: `rtk uv run python scripts/verify_apis.py --service all`
 - 기대 결과: 서울·카카오 원본 fixture 각각 1개 저장
 - 실제 결과: 첫 호출에서 서울 HTTP 정상 및 `citydata_sample.json` 저장. 카카오는 Map/Local 활성화 전 403을 반환했으나, 사용자 활성화 후 재호출하여 `kakao_ce7_sample.json`과 summary 저장
-- 판정: PASS (두 API 원본 확보); Phase 0의 쿼터와 장소 마스터는 계속 진행 중
+- 판정: PASS (두 API 원본 확보); Phase 0의 쿼터 확인은 계속 진행 중
 - 계획과의 차이: 서울 응답은 예상한 `LIVE_PPLTN_STTS` 중첩이 아니라 `SeoulRtd.citydata_ppltn[]`의 평면 레코드. root 성공 결과도 `RESULT.CODE`/`RESULT.MESSAGE` 형태의 키 사용
-- 후속 조치: 두 실측 모델의 fixture 기반 회귀 테스트 유지. 쿼터와 장소 마스터 확인
+- 후속 조치: 두 실측 모델의 fixture 기반 회귀 테스트 유지. 포털 일일 쿼터 확인
 - 관련 결정/인시던트: `docs/INCIDENTS.md`의 INC-2026-001
 - 회귀 검증: 실측 fixture 기반 backend 13 tests passed, Python compileall, TypeScript typecheck, Vite production build 통과
 
@@ -68,7 +65,8 @@
 - area: `광화문광장` / `POI088`
 - 현재 및 12개 forecast에서 관측한 라벨: `여유`, `보통`
 - forecast item 키: `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
-- 아직 미확정: 일괄 조회 불가 여부, 쿼터, 장소 마스터, 중심 3곳 외 추가 폴링 핫스팟
+- 아직 미확정: 쿼터와 그에 따른 폴링 주기, 중심 3곳 반경 내 실제 폴링 대상(Phase 1에서 대표점 산출 후 확정)
+- 공식 OA-21285 설명에서 장소당 1콜·일괄 호출 불가와 장소명/코드 호출을 확인
 
 ### 확인된 카카오 값
 
@@ -93,7 +91,22 @@
 - [x] 카카오 CE7 원본 fixture 저장 및 실측 parser 회귀 테스트
 - [x] 혼잡도 라벨 4종 실 API 확인
 - [ ] 쿼터와 폴링 주기 확정
-- [ ] 121개 장소 마스터 확보 경로 및 MVP 정확 명칭 확정
+- [x] 121개 장소 목록/영역 원본 확보, 컬럼·포맷·좌표계 확인
+
+### 공식 OA-21285 첨부 확인
+
+- 페이지: `https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do`
+- 목록: `서울시 주요 121장소 목록.xlsx`, seq 23, 2026-04-02
+- 영역: `서울시 주요 121장소 영역.zip`, seq 24, 2026-04-02
+- POST 다운로드 endpoint의 HTTP 200, Content-Disposition, Content-Length를 확인
+- 재현 가능한 `scripts/download_hotspot_master.py`로 두 원본 다운로드 완료
+- XLSX: 121 records, `CATEGORY/NO/AREA_CD/AREA_NM/ENG_NM`, 5 categories
+- 영역 ZIP: 121-record Shapefile, DBF `AREA_CD/CATEGORY/AREA_NM`, UTF-8, WGS84
+- XLSX와 Shapefile DBF의 `AREA_CD` 집합은 각각 121개이며 누락·추가 없이 완전히 일치
+- SHA-256 XLSX: `60aedf332efef1535623e22c14af2acd6b3ccfa35e60423fbbea8cc8188f1ff7`
+- SHA-256 ZIP: `fda69cd2ee3812103931cfd0ef1a0146336f06a23b6e1c2e4f9e0653620262ac`
+- 계획과의 차이: 목록에 중심 좌표가 없고 별도 폴리곤으로 제공됨. Phase 1은 공식 폴리곤의 내부 대표점을 사용하도록 변경
+- 관련 결정: `docs/adr/ADR-0002-hotspot-location.md`
 
 ## 2026-07-11 — Phase 0 / 기본 저장소 설계 변경
 

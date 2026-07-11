@@ -33,18 +33,18 @@ Phase 0의 키 없이 가능한 스캐폴딩과 검증 도구까지 준비됐습
 ```bash
 cd backend
 cp .env.example .env
-uv sync --extra dev
-uv run pytest
+rtk uv sync --extra dev
+rtk uv run pytest
 ```
 
 ```bash
 cd frontend
 cp .env.example .env
-npm install
-npm run build
+rtk npm install
+rtk npm run build
 ```
 
-로컬 PostgreSQL은 Docker가 설치된 환경에서 `docker compose up -d postgres`로
+로컬 PostgreSQL은 Docker가 설치된 환경에서 `rtk docker compose up -d postgres`로
 시작할 수 있습니다. 현재 Phase 0 검증 도구 자체는 데이터베이스를 요구하지 않습니다.
 
 ## API 키 준비 후
@@ -55,7 +55,8 @@ npm run build
 
 ```bash
 cd backend
-uv run python scripts/verify_apis.py --service all
+rtk uv run python scripts/verify_apis.py --service all
+rtk uv run python scripts/download_hotspot_master.py --file all
 ```
 
 스크립트는 원본 JSON을 provisional 스키마 검증보다 먼저 저장하고 기존 결과를
