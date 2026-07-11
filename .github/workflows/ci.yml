@@ -10,6 +10,22 @@ permissions:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cafe_crowd_test
+          POSTGRES_USER: cafe_crowd
+          POSTGRES_PASSWORD: cafe_crowd_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cafe_crowd -d cafe_crowd_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg://cafe_crowd:cafe_crowd_test@127.0.0.1:5432/cafe_crowd_test
     defaults:
       run:
         working-directory: backend
@@ -25,6 +41,17 @@ jobs:
       - run: uv run pytest
       - run: uv run python -m compileall -q app scripts tests
       - run: uv run alembic -c alembic.ini upgrade head --sql > /dev/null
+      - run: uv run alembic -c alembic.ini upgrade head
+      - run: uv run alembic -c alembic.ini current --check-heads
+      - name: Smoke-test migrated schema
+        run: >-
+          uv run python -c
+          "import os;
+          from sqlalchemy import create_engine, inspect;
+          required = {'alembic_version', 'hotspots', 'hotspot_snapshots', 'hotspot_parse_failures', 'cafes', 'cafe_scores'};
+          actual = set(inspect(create_engine(os.environ['DATABASE_URL']).connect()).get_table_names());
+          missing = required - actual;
+          assert not missing, f'missing migrated tables: {sorted(missing)}'"
 
   frontend:
     runs-on: ubuntu-latest
