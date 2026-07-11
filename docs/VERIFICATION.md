@@ -493,6 +493,23 @@
 - 판정: 코드 경로 PASS, direct connection from GitHub BLOCKED. GitHub `DATABASE_URL`을
   Supabase Session pooler connection string으로 교체한 뒤 dry-run을 재실행한다. Vercel은
   serverless용 Transaction pooler를 유지하고 `PRODUCTION_ENABLED`는 계속 미설정 상태다.
+
+### Session pooler 재검증
+
+- run: GitHub Actions `29166166360`, `bootstrap-production.yml`, `apply=false`
+- 연결: GitHub `Production` environment의 Session pooler로 remote PostgreSQL 연결 PASS.
+  secret 값과 connection URL은 로그에 출력하지 않았다.
+- migration: production DB에 Alembic `20260712_0004` head 적용 및 `--check-heads` PASS.
+- hotspot dry-run: source 121, would insert/update 121/0, unchanged 0,
+  polling targets 121/121.
+- Overture download: release `2026-06-17.0`, 4,933건. cache SHA-256
+  `5115e468e6ea34a4859fb9391914a5a9c82c9c2e99d7ba09c8fe8b3d7d8d184e`로
+  기존 로컬 검증 cache와 완전히 일치했다.
+- cafe dry-run: source/active 4,933/4,933,
+  inserted/updated/unchanged/deactivated 4,933/0/0/0.
+- dry-run 후 production DB summary: hotspots 0, polled 0, active cafes 0,
+  ingest cycle 없음. schema 외 seed·서울 API write가 없음을 확인했다.
+- 판정: migration과 두 seed dry-run PASS. `apply=true`는 HUMAN 검토·승인 대기다.
 - 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
   `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
   실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.

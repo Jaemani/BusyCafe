@@ -167,7 +167,7 @@ Alembic에도 psycopg 3 transaction-pooler 호환 설정을 적용했다. raw `p
 - [x] runtime과 migration URL 정규화 단일화
 - [x] `postgresql://`, `postgres://`, explicit psycopg, SQLite 회귀 테스트
 - [x] raw Supabase 형식으로 Alembic PostgreSQL SQL render 검증
-- [ ] Session pooler로 실제 remote migration dry-run 통과
+- [x] Session pooler로 실제 remote migration dry-run 통과 — run `29166166360`
 
 ### 교훈
 
