@@ -305,7 +305,8 @@
 - 배포 URL: `https://busy-cafe.vercel.app`
 - production deployment: `https://busy-cafe-fdx012hxi-jaemanis-projects.vercel.app`가
   Vercel에서 `Ready` 상태임을 확인했다.
-- `.vercelignore` 적용 후 최신 production `https://busy-cafe-lpih2yfxk-jaemanis-projects.vercel.app`가 `Ready`이며, function bundle은 19.88MB에서 13.26MB로 감소했다. 정확한 `busy-cafe.vercel.app` alias를 재연결한 뒤 홈·API HTTP 200과 bbox `model_version=v1-idw-point`를 확인했다.
+- `.vercelignore` 적용 deployment `https://busy-cafe-lpih2yfxk-jaemanis-projects.vercel.app`에서 function bundle이 19.88MB에서 13.26MB로 감소한 것을 확인했다.
+- 최신 production `https://busy-cafe-cn3jj4vfe-jaemanis-projects.vercel.app`는 `Ready`이고 function bundle은 13.59MB다. 정확한 `busy-cafe.vercel.app` alias의 health는 `last_ingest_at=2026-07-11T15:55:04.362435Z`, `snapshots_last_hour=242`, `cafes_count=4933`을 반환하며, bbox API는 `model_version=v1-idw-point`를 반환한다.
 - rename 검증(2026-07-12): 오타가 있던 Vercel 프로젝트 `budy-cafe`를 `busy-cafe`로
   변경하고 새 production deployment와 alias를 연결했다.
 - 초기 수동 alias는 SSO로 HTTP 302를 반환했다. 공개 접근 정책을 복원한 뒤
@@ -361,6 +362,8 @@
 - 재기동 확인: worker session 13858에서 scheduler started, API session 50211에서 local health
   `snapshots_last_hour=121`, `last_ingest_at=2026-07-11T15:42:09.249470Z`를 확인했다. 카페 응답은
   `model_version=v1-idw-point`를 반환했다.
+- 자동 cycle: 2026-07-12 00:54:53 KST에 scheduler가 실행한 순회가
+  `targets=121, saved=121, failed=0`으로 완료됐고, 다음 실행은 01:04:53 KST로 예약됐다.
 - 판정: PASS. confidence 공식은 변경하지 않았다.
 - 관련 인시던트: `INC-2026-009`
 
