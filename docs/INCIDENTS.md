@@ -96,6 +96,46 @@ preflight step의 working directory를 workspace root로 명시했다. `PRODUCTI
 
 workflow의 skip 경로도 실제 runner의 checkout 전 상태에서 실행 가능한 독립 경로여야 한다.
 
+## INC-2026-011 — Vercel Preview 환경변수 제거가 Production 값까지 삭제
+
+- 상태: Resolved (올바른 pooled URL 재등록 대기)
+- 심각도: SEV-3
+- 시작/감지/해결 시각(KST): 2026-07-12
+- 작성자: Codex
+- 관련 상태: Vercel `busy-cafe`, `DATABASE_URL` 미설정
+
+### 요약
+
+사용자가 Vercel `DATABASE_URL`을 Preview와 Production에 함께 등록한 상태에서 Preview의
+production DB 접근만 제거하려 했다. `vercel env rm DATABASE_URL preview --yes`가 환경별
+binding만 제거할 것으로 가정했지만 실제로는 변수 전체를 삭제했다. 당시 공개 deployment는
+managed DB를 사용하지 않는 snapshot이어서 API와 사용자 데이터 영향은 없었다.
+
+### 근본 원인
+
+CLI의 삭제 범위를 help 또는 dry-run으로 확인하지 않고 환경 인자가 안전하게 scope를
+제한한다고 가정했다. 암호화된 기존 값은 CLI로 다시 읽을 수 없으므로 자동 복원도 불가능했다.
+
+### 대응과 복구
+
+즉시 `vercel env ls`에서 변수가 없음을 확인하고 공개 `/api/health`가 HTTP 200,
+`data_mode=snapshot`, `cafes_count=4933`을 유지하는지 검증했다. 삭제된 값은 serverless에
+부적합할 수 있는 direct connection string이었으므로 복원하지 않는다. 사용자가 Supabase의
+pooled connection string을 Production 전용으로 다시 등록한 뒤 새 deployment에서 연결을
+검증한다.
+
+### 재발 방지 조치
+
+- [x] 삭제 직후 전체 environment 목록과 공개 health 확인
+- [x] 운영 Runbook에 Supabase Project URL/publishable key가 DB URL이 아님을 명시
+- [ ] pooled `DATABASE_URL`을 Production 전용으로 등록하고 Preview 미노출 확인
+- [ ] Vercel 환경변수 변경 전 CLI scope를 help로 확인하고 복구값 준비
+
+### 교훈
+
+암호화되어 다시 읽을 수 없는 설정을 삭제할 때는 scope 가정을 금지하고, 복구 가능한 새 값을
+먼저 준비해야 한다.
+
 ## INC-2026-001 — 추정 스키마가 원본 fixture 저장을 막을 수 있었던 설계
 
 - 상태: Resolved

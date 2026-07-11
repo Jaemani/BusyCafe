@@ -15,6 +15,10 @@
   공급자가 권장하는 direct/write TLS URL을 사용한다. 두 URL은 같은 production DB를
   가리켜야 한다.
 
+GitHub secrets는 repository의 `Production` environment에 저장하고 poll job도 같은
+environment를 명시한다. Supabase의 `Project URL`(`https://...supabase.co`)과 publishable
+key는 PostgreSQL connection string이 아니므로 `DATABASE_URL`에 넣지 않는다.
+
 비밀값은 명령 인자, 로그, 문서, 이슈 또는 채팅에 출력하지 않는다. 로컬에서는 shell
 환경변수나 커밋되지 않는 `.env`만 사용한다.
 

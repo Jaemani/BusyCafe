@@ -463,7 +463,13 @@
   monitor run `29164392552`에서 PASS했다.
 - GitHub repository variable `PRODUCTION_HEALTH_URL`은
   `https://busy-cafe.vercel.app/api/health`로 등록했다. `PRODUCTION_ENABLED`와 production
-  secrets는 아직 없으므로 monitor와 poll은 계속 비활성이다.
+  활성화 변수는 아직 없으므로 monitor와 poll은 계속 비활성이다.
+- Supabase 설정 점검에서 GitHub `Production` environment에 `DATABASE_URL`과
+  `SEOUL_API_KEY` 이름이 존재함을 확인했다. poll job은 이 environment를 명시하도록 수정했다.
+  사용자가 넣은 기존 `DATABASE_URL` 값은 Project URL이어서 PostgreSQL 연결값으로 사용할 수
+  없으며 교체 대기다. Vercel의 direct URL 제거 중 CLI scope 오판으로 Production 값도 함께
+  삭제됐으나 공개 snapshot health는 HTTP 200과 카페 4,933개를 유지했다. `INC-2026-011`에
+  기록했고 올바른 pooled Production URL 재등록 전에는 redeploy와 live 승격을 하지 않는다.
 - 발견한 workflow 오류: 이전 revision의 poll run `29162731378`은 checkout 전에 기본
   `backend/` working directory를 사용해 skip 분기 자체가 실패했다. 현행 preflight는 root에서
   실행하며 `INC-2026-010`에 원인과 회귀 검증을 기록했다.
