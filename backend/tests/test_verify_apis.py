@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,9 +10,11 @@ from scripts import verify_apis
 
 
 def test_preflight_reports_missing_keys(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("SEOUL_API_KEY", "")
-    monkeypatch.delenv("KAKAO_REST_KEY", raising=False)
-    verify_apis.get_settings.cache_clear()
+    monkeypatch.setattr(
+        verify_apis,
+        "get_settings",
+        lambda: SimpleNamespace(seoul_api_key=None, kakao_rest_key=None),
+    )
     with pytest.raises(RuntimeError, match="KAKAO_REST_KEY"):
         verify_apis._preflight(["kakao"])
 
@@ -22,6 +25,17 @@ def test_atomic_create_never_overwrites(tmp_path: Path) -> None:
     with pytest.raises(FileExistsError):
         verify_apis._atomic_create_json(destination, {"version": 2})
     assert '"version": 1' in destination.read_text(encoding="utf-8")
+
+
+def test_summary_uses_measured_flat_seoul_fixture() -> None:
+    fixture_path = verify_apis.FIXTURE_FILES["seoul"]
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+
+    summary = verify_apis._summary({"seoul": payload})
+
+    assert summary.seoul_area_name == "광화문광장"
+    assert summary.seoul_area_code == "POI088"
+    assert summary.observed_seoul_labels == ["보통", "여유"]
 
 
 def test_main_preserves_raw_fixture_when_provisional_parsing_fails(

@@ -43,10 +43,10 @@ def _build_url(api_key: str, area_name: str) -> str:
 
 
 def _find_area_record(payload: Any) -> dict[str, Any]:
-    """Find an AREA_NM record across known/provisional Seoul envelopes."""
+    """Find the measured flat population record in Seoul response envelopes."""
 
     if isinstance(payload, dict):
-        if "AREA_NM" in payload and "LIVE_PPLTN_STTS" in payload:
+        if "AREA_NM" in payload and "AREA_CONGEST_LVL" in payload:
             return payload
         for value in payload.values():
             try:
@@ -66,9 +66,13 @@ def _raise_for_api_error(payload: Any) -> None:
     if isinstance(payload, dict):
         result = payload.get("RESULT")
         if isinstance(result, dict):
-            code = result.get("CODE")
+            code = result.get("CODE") or result.get("RESULT.CODE")
             if code and code != "INFO-000":
-                message = result.get("MESSAGE", "unknown Seoul API error")
+                message = (
+                    result.get("MESSAGE")
+                    or result.get("RESULT.MESSAGE")
+                    or "unknown Seoul API error"
+                )
                 raise SeoulAPIError(f"Seoul API error {code}: {message}")
         for value in payload.values():
             _raise_for_api_error(value)

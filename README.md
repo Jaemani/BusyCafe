@@ -49,9 +49,9 @@ npm run build
 
 ## API 키 준비 후
 
-발급받은 값을 `backend/.env`에만 넣고 채팅, 문서, 이슈, 커밋에는 붙여 넣지
-마세요. 카카오 JavaScript 키는 `frontend/.env`의 `VITE_KAKAO_JS_KEY`에도
-넣습니다.
+발급받은 `SEOUL_API_KEY`, `KAKAO_REST_KEY`는 `backend/.env`에만 넣고 채팅,
+문서, 이슈, 커밋에는 붙여 넣지 마세요. 카카오 JavaScript 키는 백엔드에 필요
+없으며 `frontend/.env`의 `VITE_KAKAO_JS_KEY`에만 넣습니다.
 
 ```bash
 cd backend

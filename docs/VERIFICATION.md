@@ -42,12 +42,57 @@
 
 다음 내용은 실제 API 응답과 공식 계정 화면/문서를 확인하기 전까지 확정하지 않는다.
 
-- 서울 실시간 도시데이터 엔드포인트 패턴과 호출 단위
-- 응답 필드명, 중첩 구조, 혼잡도 라벨 4종, 예측 구조
+- 서울 실시간 도시데이터의 장소 1곳당 1콜·일괄 조회 불가 여부
 - 121개 장소의 정확한 명칭·코드·좌표와 마스터 파일 확보 경로
 - 인증키 일일 쿼터와 이에 따른 폴링 주기
-- 카카오 CE7 응답 구조와 검색·페이지 제한의 실제 동작
-- MVP 대상 핫스팟의 정확한 API 표기
+- MVP 중심 3곳 외 반경 내 추가 폴링 핫스팟의 정확한 표기·좌표
+
+## 2026-07-11 — Phase 0 / 첫 실 API 호출
+
+- 실행 환경: 로컬 `.env`, 키 값은 출력·기록하지 않음
+- 검증자: Codex
+- 관련 커밋: 다음 fixture/schema 커밋에 연결 예정
+- 입력/fixture: 서울 `광화문광장`, 카카오 광화문 인근 CE7 반경 1,000m
+- 실행 명령: `rtk uv run python scripts/verify_apis.py --service all`
+- 기대 결과: 서울·카카오 원본 fixture 각각 1개 저장
+- 실제 결과: 첫 호출에서 서울 HTTP 정상 및 `citydata_sample.json` 저장. 카카오는 Map/Local 활성화 전 403을 반환했으나, 사용자 활성화 후 재호출하여 `kakao_ce7_sample.json`과 summary 저장
+- 판정: PASS (두 API 원본 확보); Phase 0의 쿼터와 장소 마스터는 계속 진행 중
+- 계획과의 차이: 서울 응답은 예상한 `LIVE_PPLTN_STTS` 중첩이 아니라 `SeoulRtd.citydata_ppltn[]`의 평면 레코드. root 성공 결과도 `RESULT.CODE`/`RESULT.MESSAGE` 형태의 키 사용
+- 후속 조치: 두 실측 모델의 fixture 기반 회귀 테스트 유지. 쿼터와 장소 마스터 확인
+- 관련 결정/인시던트: `docs/INCIDENTS.md`의 INC-2026-001
+
+### 확인된 서울 값
+
+- endpoint/service: `citydata_ppltn`, AREA_NM 경로 호출
+- area: `광화문광장` / `POI088`
+- 현재 및 12개 forecast에서 관측한 라벨: `여유`, `보통`
+- forecast item 키: `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
+- 아직 미확정: 일괄 조회 불가 여부, 쿼터, 장소 마스터, 중심 3곳 외 추가 폴링 핫스팟
+
+### 확인된 카카오 값
+
+- Map/Local 제품 활성화 전 REST Local API는 `OPEN_MAP_AND_LOCAL` 403 반환
+- CE7 반경 1,000m: `total_count=761`, `pageable_count=45`, page 1 문서 15개
+- size 15의 page 3: 문서 15개, `is_end=true`
+- 응답 root와 document 필드는 `docs/PLAN.md` §2.2에 반영
+
+### MVP 중심 핫스팟 제어 호출
+
+쿼터 미확정 상태이므로 세 후보를 각 1회만 호출했으며, 응답은 실측 서울 parser로
+검증했다. 광범위한 장소 탐색은 수행하지 않았다.
+
+- `성수카페거리` → `POI068`, `약간 붐빔`, `2026-07-11 16:30`
+- `홍대 관광특구` → `POI007`, `붐빔`, `2026-07-11 16:30`
+- `연남동` → `POI073`, `약간 붐빔`, `2026-07-11 16:30`
+- 광화문 fixture의 현재/forecast `보통`, `여유`와 합쳐 라벨 4종을 모두 실측 확인
+
+### 현재 Phase 0 DoD
+
+- [x] 서울 원본 fixture 저장 및 실측 parser 회귀 테스트
+- [x] 카카오 CE7 원본 fixture 저장 및 실측 parser 회귀 테스트
+- [x] 혼잡도 라벨 4종 실 API 확인
+- [ ] 쿼터와 폴링 주기 확정
+- [ ] 121개 장소 마스터 확보 경로 및 MVP 정확 명칭 확정
 
 ## 2026-07-11 — Phase 0 / 기본 저장소 설계 변경
 

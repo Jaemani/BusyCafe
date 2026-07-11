@@ -1,0 +1,10 @@
+{
+  "generated_at": "2026-07-11T08:00:34.012087Z",
+  "services": [
+    "kakao"
+  ],
+  "observed_seoul_labels": [],
+  "seoul_area_name": null,
+  "seoul_area_code": null,
+  "kakao_result_count": 15
+}

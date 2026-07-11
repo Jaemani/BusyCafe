@@ -1,10 +1,6 @@
-"""Provisional external API and verification schemas.
+"""External API schemas.
 
-The Seoul envelope is deliberately normalized by the client because Open Data
-responses may include header records in the same list as the data record. The
-field models below encode the plan's ``[VERIFY]`` assumptions only; they are not
-an authoritative contract yet. Unknown fields are preserved until actual raw
-fixtures are reviewed and the fixture-backed schema is finalized.
+The Seoul and Kakao models are backed by raw responses measured on 2026-07-11.
 """
 
 from __future__ import annotations
@@ -17,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.config import CONGESTION_LEVELS
 
 
-# Provisional labels from PLAN.md. Confirm all four against observed API data
-# before treating this Literal as the finalized upstream contract.
+# Two labels were observed in the first Seoul fixture. Confirm the remaining
+# two against additional observed data or official material during Phase 0.
 CongestionLabel = Literal["여유", "보통", "약간 붐빔", "붐빔"]
 
 
@@ -41,7 +37,11 @@ class SeoulForecastPopulation(ExternalModel):
         return value
 
 
-class SeoulLivePopulationStatus(ExternalModel):
+class SeoulAreaPopulation(ExternalModel):
+    """One flat population record returned by ``citydata_ppltn``."""
+
+    area_name: str = Field(alias="AREA_NM", min_length=1)
+    area_code: str = Field(alias="AREA_CD", min_length=1)
     congestion_level: CongestionLabel = Field(alias="AREA_CONGEST_LVL")
     population_min: int = Field(alias="AREA_PPLTN_MIN", ge=0)
     population_max: int = Field(alias="AREA_PPLTN_MAX", ge=0)
@@ -62,21 +62,6 @@ class SeoulLivePopulationStatus(ExternalModel):
     @property
     def numeric_level(self) -> int:
         return CONGESTION_LEVELS[self.congestion_level]
-
-
-class SeoulAreaPopulation(ExternalModel):
-    area_name: str = Field(alias="AREA_NM", min_length=1)
-    area_code: str = Field(alias="AREA_CD", min_length=1)
-    live_status: list[SeoulLivePopulationStatus] = Field(alias="LIVE_PPLTN_STTS")
-
-    @field_validator("live_status")
-    @classmethod
-    def live_status_must_not_be_empty(
-        cls, value: list[SeoulLivePopulationStatus]
-    ) -> list[SeoulLivePopulationStatus]:
-        if not value:
-            raise ValueError("LIVE_PPLTN_STTS must contain at least one item")
-        return value
 
 
 class KakaoMeta(ExternalModel):

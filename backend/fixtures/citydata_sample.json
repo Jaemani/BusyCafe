@@ -1,0 +1,105 @@
+{
+  "SeoulRtd.citydata_ppltn": [
+    {
+      "AREA_NM": "광화문광장",
+      "AREA_CD": "POI088",
+      "AREA_CONGEST_LVL": "보통",
+      "AREA_CONGEST_MSG": "사람이 몰려있을 수 있지만 크게 붐비지는 않아요. 도보 이동에 큰 제약이 없어요.",
+      "AREA_PPLTN_MIN": "6500",
+      "AREA_PPLTN_MAX": "7000",
+      "MALE_PPLTN_RATE": "42.3",
+      "FEMALE_PPLTN_RATE": "57.7",
+      "PPLTN_RATE_0": "2.3",
+      "PPLTN_RATE_10": "7.4",
+      "PPLTN_RATE_20": "19.6",
+      "PPLTN_RATE_30": "20.6",
+      "PPLTN_RATE_40": "21.2",
+      "PPLTN_RATE_50": "15.2",
+      "PPLTN_RATE_60": "8.8",
+      "PPLTN_RATE_70": "4.9",
+      "RESNT_PPLTN_RATE": "14.0",
+      "NON_RESNT_PPLTN_RATE": "86.0",
+      "REPLACE_YN": "N",
+      "PPLTN_TIME": "2026-07-11 16:25",
+      "FCST_YN": "Y",
+      "FCST_PPLTN": [
+        {
+          "FCST_TIME": "2026-07-11 17:00",
+          "FCST_CONGEST_LVL": "보통",
+          "FCST_PPLTN_MIN": "6500",
+          "FCST_PPLTN_MAX": "7000"
+        },
+        {
+          "FCST_TIME": "2026-07-11 18:00",
+          "FCST_CONGEST_LVL": "보통",
+          "FCST_PPLTN_MIN": "6000",
+          "FCST_PPLTN_MAX": "6500"
+        },
+        {
+          "FCST_TIME": "2026-07-11 19:00",
+          "FCST_CONGEST_LVL": "보통",
+          "FCST_PPLTN_MIN": "5000",
+          "FCST_PPLTN_MAX": "5500"
+        },
+        {
+          "FCST_TIME": "2026-07-11 20:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "4000",
+          "FCST_PPLTN_MAX": "4500"
+        },
+        {
+          "FCST_TIME": "2026-07-11 21:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "3000",
+          "FCST_PPLTN_MAX": "3500"
+        },
+        {
+          "FCST_TIME": "2026-07-11 22:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "2000",
+          "FCST_PPLTN_MAX": "2500"
+        },
+        {
+          "FCST_TIME": "2026-07-11 23:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "1000",
+          "FCST_PPLTN_MAX": "1500"
+        },
+        {
+          "FCST_TIME": "2026-07-12 00:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "1000",
+          "FCST_PPLTN_MAX": "1500"
+        },
+        {
+          "FCST_TIME": "2026-07-12 01:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "800",
+          "FCST_PPLTN_MAX": "900"
+        },
+        {
+          "FCST_TIME": "2026-07-12 02:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "600",
+          "FCST_PPLTN_MAX": "700"
+        },
+        {
+          "FCST_TIME": "2026-07-12 03:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "500",
+          "FCST_PPLTN_MAX": "600"
+        },
+        {
+          "FCST_TIME": "2026-07-12 04:00",
+          "FCST_CONGEST_LVL": "여유",
+          "FCST_PPLTN_MIN": "500",
+          "FCST_PPLTN_MAX": "600"
+        }
+      ]
+    }
+  ],
+  "RESULT": {
+    "RESULT.CODE": "INFO-000",
+    "RESULT.MESSAGE": "정상 처리되었습니다."
+  }
+}

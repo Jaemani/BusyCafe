@@ -13,8 +13,11 @@
 ### Changed
 
 - 운영 기본 저장소를 SQLite에서 PostgreSQL로 변경하고 향후 PostGIS 확장 경로를 문서화
+- Kakao JavaScript 키를 프론트엔드에서만 관리하도록 중복 백엔드 설정 제거
 
 ### Fixed
+
+- 서울 인구 API의 실제 평면 응답 구조와 dotted `RESULT` 키를 반영하도록 provisional 스키마 수정
 
 ### Removed
 

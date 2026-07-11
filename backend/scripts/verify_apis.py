@@ -159,12 +159,8 @@ def _summary(payloads: dict[str, dict[str, Any]]) -> VerificationSummary:
         summary.seoul_area_name = area.area_name
         summary.seoul_area_code = area.area_code
         summary.observed_seoul_labels = sorted(
-            {status.congestion_level for status in area.live_status}
-            | {
-                forecast.congestion_level
-                for status in area.live_status
-                for forecast in status.forecast
-            }
+            {area.congestion_level}
+            | {forecast.congestion_level for forecast in area.forecast}
         )
     if kakao_payload := payloads.get("kakao"):
         summary.kakao_result_count = len(parse_category(kakao_payload).documents)
@@ -187,7 +183,7 @@ def main() -> int:
                 _atomic_create_json(
                     SUMMARY_FILES[service], summary.model_dump(mode="json")
                 )
-            except (ValidationError, RuntimeError, ValueError) as exc:
+            except Exception as exc:
                 _atomic_create_text(VALIDATION_ERROR_FILES[service], str(exc))
                 validation_failures.append((service, exc))
     except (RuntimeError, ValidationError, ValueError) as exc:
@@ -211,10 +207,11 @@ def main() -> int:
     for service in services:
         print(f"  - {FIXTURE_FILES[service]}")
         print(f"  - {SUMMARY_FILES[service]}")
-    print(
-        "Observed labels are only evidence from this sample; confirm all four "
-        "labels before removing [VERIFY]."
-    )
+    if "seoul" in services:
+        print(
+            "Observed labels are only evidence from this sample; confirm all four "
+            "labels before removing [VERIFY]."
+        )
     return 0
 
 

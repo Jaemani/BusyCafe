@@ -89,10 +89,8 @@ class Settings(BaseSettings):
 
     seoul_api_key: SecretStr | None = None
     kakao_rest_key: SecretStr | None = None
-    kakao_js_key: SecretStr | None = None
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
-

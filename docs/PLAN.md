@@ -35,7 +35,7 @@
 
 ### 1.3 MVP 스코프
 
-- **지역**: 서울, 핫스팟이 커버하는 동네 2~3곳으로 시작. 기본값: `성수 카페거리`, `홍대 관광특구`, `연남동` 주변. [VERIFY] 정확한 핫스팟 명칭은 121개 장소 마스터에서 확인 후 config에 확정.
+- **지역**: 서울, 핫스팟이 커버하는 동네 2~3곳으로 시작. 기본 중심 핫스팟은 실 API 호출로 확인한 `성수카페거리`(`POI068`), `홍대 관광특구`(`POI007`), `연남동`(`POI073`) 주변. 각 동네 반경 내 추가 폴링 대상은 121개 장소 마스터 확보 후 config에 확정한다. [VERIFY]
 - **사용자 플로우**: 지도 열기 → 카페 마커의 4단계 색상으로 주변 혼잡도 확인 → 마커 클릭 → 근거 패널(기준 핫스팟, 거리, 레벨, 갱신 시각, 12시간 추이, 1시간 뒤 예측).
 
 ---
@@ -55,15 +55,14 @@
 
 - 발급: 서울열린데이터광장(data.seoul.go.kr) 회원가입 → 일반 인증키 발급. **[HUMAN]**
 - 대상: 서울시 주요 **121개 장소**(관광특구·발달상권·인구밀집지역 등). 실시간 인구는 KT·SKT 기지국 신호 5분 단위 집계 기반.
-- 엔드포인트 패턴 [VERIFY — Phase 0에서 실측 확정]:
-  - 인구 전용: `http://openapi.seoul.go.kr:8088/{KEY}/json/citydata_ppltn/1/5/{AREA_NM 또는 AREA_CD}`
-  - 통합: `http://openapi.seoul.go.kr:8088/{KEY}/json/citydata/1/5/{AREA_NM}`
-- 주요 응답 필드 [VERIFY]:
+- 인구 전용 엔드포인트 [VERIFIED 2026-07-11]: `http://openapi.seoul.go.kr:8088/{KEY}/json/citydata_ppltn/1/5/{AREA_NM}`. `광화문광장` AREA_NM 호출로 정상 응답을 확인했다. 통합 `citydata` 엔드포인트는 사용하지 않으며 계획의 추정 경로에서 제거한다.
+- 실제 응답 구조 [VERIFIED 2026-07-11]: root의 `SeoulRtd.citydata_ppltn[]`에 장소별 인구 필드가 직접 들어가는 평면 레코드다. 성공 결과는 별도 root `RESULT`에 `RESULT.CODE`, `RESULT.MESSAGE` 키로 제공됐다. 계획에 있던 `LIVE_PPLTN_STTS` 중첩 가정은 폐기한다.
+- 주요 응답 필드 [VERIFIED 2026-07-11]:
   - `AREA_NM`, `AREA_CD` — 장소명/코드
-  - `AREA_CONGEST_LVL` — 혼잡도 레벨: `여유` / `보통` / `약간 붐빔` / `붐빔`
+  - `AREA_CONGEST_LVL` — 혼잡도 레벨 `여유` / `보통` / `약간 붐빔` / `붐빔`. 광화문 fixture와 MVP 대상 3곳의 제어된 실호출에서 4종을 모두 확인했다. [VERIFIED 2026-07-11]
   - `AREA_PPLTN_MIN`, `AREA_PPLTN_MAX` — 실시간 인구 추정 구간
   - `PPLTN_TIME` — 데이터 기준 시각
-  - `FCST_YN`, `FCST_PPLTN[]` — 향후 12시간 예측 (시각별 `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN/MAX`)
+  - `FCST_YN`, `FCST_PPLTN[]` — 실측 응답에 12개 예측 레코드. 각 레코드는 `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
 - 호출 단위: **장소 1곳당 1콜**. 일괄 조회 없음 [VERIFY].
 - **쿼터 제약 (중요)**: 열린데이터광장 인증키에는 기본 일일 트래픽 한도가 있다(한도 수치는 Phase 0에서 실측/문서 확인 — 통상 수백~수천 건 수준이며 상향 신청 가능). 121곳 × 5분 폴링 = 34,848콜/일은 불가능할 가능성이 높다. **대응 전략(이 순서로)**:
   1. 폴링 대상을 MVP 동네의 핫스팟만으로 한정 (≤12곳)
@@ -72,11 +71,12 @@
 
 ### 2.2 카카오 로컬 API
 
-- 발급: developers.kakao.com 앱 생성 → REST API 키. 지도 SDK용 JavaScript 키 + 사이트 도메인 등록도 함께. **[HUMAN]**
-- 카테고리 검색: `GET https://dapi.kakao.com/v2/local/search/category.json`
+- 발급: developers.kakao.com 앱 생성 → REST API 키. 지도 SDK용 JavaScript 키 + 사이트 도메인 등록도 함께. **[HUMAN]** Map/Local 제품 사용 활성화가 별도로 필요하며, 미활성화 시 `disabled OPEN_MAP_AND_LOCAL service` 403을 반환한다. JavaScript 키는 프론트에만 두고 REST 키는 백엔드에만 둔다.
+- 카테고리 검색 [VERIFIED 2026-07-11]: `GET https://dapi.kakao.com/v2/local/search/category.json`
   - 헤더: `Authorization: KakaoAK {REST_KEY}`
   - 파라미터: `category_group_code=CE7`, `x`(경도), `y`(위도), `radius`(m, 최대 20000), `page`, `size`(≤15)
-- **핵심 제약**: 쿼리 조건당 최대 **45건**(15건 × 3페이지)까지만 반환. → 밀집 지역에서는 반드시 **재귀 4분할 스윕**을 구현한다: `total_count > 45`이면 검색 원을 4개 사분면 원으로 쪼개 재귀 호출, `is_end`까지 페이지 순회, `kakao_place_id`로 dedupe.
+- 응답 구조 [VERIFIED 2026-07-11]: root `meta` + `documents[]`. `meta`는 `total_count`, `pageable_count`, `is_end`, `same_name`; document는 `id`, `place_name`, `category_*`, 주소, 전화, `x`, `y`, `place_url`, `distance`를 포함했다.
+- **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 쿼리 조건당 최대 **45건**(15건 × 3페이지)까지만 노출되므로 밀집 지역에서는 반드시 **재귀 4분할 스윕**을 구현한다: `total_count > 45`이면 검색 원을 4개 사분면 원으로 쪼개 재귀 호출, `is_end`까지 페이지 순회, `kakao_place_id`로 dedupe.
 
 ---
 
@@ -159,7 +159,7 @@ cafe-crowd/
 ```sql
 CREATE TABLE hotspots (
   id INTEGER PRIMARY KEY,
-  area_cd TEXT UNIQUE,          -- 예: POI014 [VERIFY]
+  area_cd TEXT UNIQUE,          -- 광화문광장 실측값: POI088; 전체 마스터는 [VERIFY]
   name TEXT NOT NULL,           -- API 호출에 쓰는 정확한 AREA_NM
   category TEXT,                -- 관광특구/발달상권/인구밀집지역 등
   lat REAL NOT NULL,

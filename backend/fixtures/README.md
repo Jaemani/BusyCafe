@@ -1,7 +1,10 @@
 # API fixtures
 
-This directory intentionally contains no fabricated API snapshots. Run
-`python scripts/verify_apis.py` with issued credentials to create:
+This directory contains no fabricated API snapshots. The measured Seoul raw
+fixture was captured on 2026-07-11. Kakao remains pending because the app's
+Map/Local service returned a disabled-service 403. Run
+`python scripts/verify_apis.py` with issued credentials to create missing
+service outputs:
 
 - `citydata_sample.json`
 - `kakao_ce7_sample.json`
