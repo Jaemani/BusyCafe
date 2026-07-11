@@ -98,3 +98,70 @@ class VerificationSummary(BaseModel):
     seoul_area_name: str | None = None
     seoul_area_code: str | None = None
     kakao_result_count: int | None = None
+
+
+class EvidenceResponse(BaseModel):
+    hotspot_name: str | None = None
+    distance_m: float | None = None
+    observed_at: datetime | None = None
+
+
+class ExternalLinksResponse(BaseModel):
+    """Only provider-verified, direct place-detail URLs are exposed."""
+
+    naver: str | None = None
+    kakao: str | None = None
+    google: str | None = None
+
+
+class CafeMapResponse(BaseModel):
+    id: int
+    name: str
+    lat: float
+    lng: float
+    road_address: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    source_label: str
+    level: int | None = None
+    score: float | None = None
+    confidence: float | None = None
+    confidence_tier: str | None = None
+    coverage: Literal["covered", "fringe", "uncovered"]
+    evidence: EvidenceResponse
+    external_links: ExternalLinksResponse
+
+
+class ContributorResponse(BaseModel):
+    hotspot_id: int
+    distance_m: float
+    level: int
+    weight: float
+
+
+class TrendPointResponse(BaseModel):
+    observed_at: datetime
+    level: int
+
+
+class CafeDetailResponse(CafeMapResponse):
+    primary_hotspot_id: int | None = None
+    contributors: list[ContributorResponse] = Field(default_factory=list)
+    trend_12h: list[TrendPointResponse] = Field(default_factory=list)
+    forecast_1h: dict[str, Any] | None = None
+
+
+class HotspotStatusResponse(BaseModel):
+    id: int
+    area_cd: str
+    name: str
+    lat: float
+    lng: float
+    observed_at: datetime | None = None
+    level: int | None = None
+
+
+class HealthResponse(BaseModel):
+    last_ingest_at: datetime | None = None
+    snapshots_last_hour: int
+    cafes_count: int

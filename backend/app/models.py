@@ -31,6 +31,9 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 JSON_VALUE = JSON().with_variant(JSONB(), "postgresql")
+NULLABLE_JSON_VALUE = JSON(none_as_null=True).with_variant(
+    JSONB(none_as_null=True), "postgresql"
+)
 
 
 class Base(DeclarativeBase):
@@ -145,21 +148,31 @@ class Cafe(Base):
     __table_args__ = (
         CheckConstraint("lat BETWEEN -90 AND 90", name="lat_range"),
         CheckConstraint("lng BETWEEN -180 AND 180", name="lng_range"),
+        CheckConstraint(
+            "source_confidence BETWEEN 0.0 AND 1.0", name="source_confidence_range"
+        ),
         Index("ix_cafes_bbox", "lng", "lat"),
-        Index("ix_cafes_neighborhood_active", "neighborhood", "active"),
+        Index("ix_cafes_active_bbox", "active", "lng", "lat"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kakao_place_id: Mapped[str] = mapped_column(
+    # Overture GERS ID is the durable identity for our POI cache. Provider
+    # identifiers for outbound detail links are optional and never decide map
+    # coordinates or the canonical name.
+    overture_id: Mapped[str] = mapped_column(
         String(64), unique=True, nullable=False
     )
+    source_release: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    primary_category: Mapped[str] = mapped_column(String(100), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lng: Mapped[float] = mapped_column(Float, nullable=False)
     road_address: Mapped[str | None] = mapped_column(String(500))
     phone: Mapped[str | None] = mapped_column(String(64))
-    place_url: Mapped[str | None] = mapped_column(String(500))
-    neighborhood: Mapped[str | None] = mapped_column(String(64))
+    website: Mapped[str | None] = mapped_column(String(500))
+    source_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_VALUE)
+    external_links_json: Mapped[dict[str, str] | None] = mapped_column(JSON_VALUE)
     active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=text("true")
     )
@@ -223,7 +236,9 @@ class CafeScore(Base):
         ForeignKey("hotspots.id"), nullable=True
     )
     primary_distance_m: Mapped[float | None] = mapped_column(Float)
-    contributors_json: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON_VALUE)
+    contributors_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        NULLABLE_JSON_VALUE
+    )
 
     cafe: Mapped[Cafe] = relationship(back_populates="score")
     primary_hotspot: Mapped[Hotspot | None] = relationship(

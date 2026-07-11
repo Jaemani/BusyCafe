@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,11 +14,8 @@ from app.config import (
     MAX_POLLED_HOTSPOTS,
     SEOUL_HOTSPOT_AREAS_PATH,
     SEOUL_HOTSPOT_LIST_PATH,
-    TARGET_NEIGHBORHOODS,
-    Neighborhood,
 )
 from app.database import create_db_engine
-from app.geo import haversine_m
 from app.ingest.hotspot_master import HotspotMasterRecord, load_hotspot_master
 from app.models import Hotspot
 
@@ -28,19 +25,12 @@ class HotspotSeedError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class NeighborhoodDistance:
-    key: str
-    distance_m: float
-
-
-@dataclass(frozen=True, slots=True)
 class ManualReviewRow:
     area_cd: str
     name: str
     category: str
     lat: float
     lng: float
-    neighborhoods: tuple[NeighborhoodDistance, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,54 +49,26 @@ class SeedReport:
         return tuple(row.area_cd for row in self.manual_review)
 
 
-def _neighborhood_distances(
-    record: HotspotMasterRecord,
-    neighborhoods: Mapping[str, Neighborhood],
-) -> tuple[NeighborhoodDistance, ...]:
-    matches = [
-        NeighborhoodDistance(
-            key=key,
-            distance_m=haversine_m(
-                record.lat, record.lng, neighborhood.lat, neighborhood.lng
-            ),
-        )
-        for key, neighborhood in neighborhoods.items()
-    ]
-    return tuple(sorted(matches, key=lambda item: item.key))
-
-
 def select_polled_hotspots(
     records: Sequence[HotspotMasterRecord],
     *,
-    neighborhoods: Mapping[str, Neighborhood] = TARGET_NEIGHBORHOODS,
     max_polled_hotspots: int = MAX_POLLED_HOTSPOTS,
 ) -> tuple[ManualReviewRow, ...]:
-    """Select the union of hotspot points inside any target neighborhood."""
+    """Select the complete verified official master for Seoul-wide polling."""
 
     if max_polled_hotspots < 1:
         raise ValueError("max_polled_hotspots must be positive")
-    if not neighborhoods:
-        raise ValueError("at least one target neighborhood is required")
 
-    selected: list[ManualReviewRow] = []
-    for record in sorted(records, key=lambda item: item.area_cd):
-        distances = _neighborhood_distances(record, neighborhoods)
-        matches = tuple(
-            item
-            for item in distances
-            if item.distance_m <= neighborhoods[item.key].radius_m
+    selected = [
+        ManualReviewRow(
+            area_cd=record.area_cd,
+            name=record.name,
+            category=record.category,
+            lat=record.lat,
+            lng=record.lng,
         )
-        if matches:
-            selected.append(
-                ManualReviewRow(
-                    area_cd=record.area_cd,
-                    name=record.name,
-                    category=record.category,
-                    lat=record.lat,
-                    lng=record.lng,
-                    neighborhoods=matches,
-                )
-            )
+        for record in sorted(records, key=lambda item: item.area_cd)
+    ]
 
     if len(selected) > max_polled_hotspots:
         codes = ", ".join(row.area_cd for row in selected)
@@ -121,7 +83,6 @@ def seed_hotspots(
     session: Session,
     records: Sequence[HotspotMasterRecord],
     *,
-    neighborhoods: Mapping[str, Neighborhood] = TARGET_NEIGHBORHOODS,
     max_polled_hotspots: int = MAX_POLLED_HOTSPOTS,
     dry_run: bool = False,
 ) -> SeedReport:
@@ -147,7 +108,6 @@ def seed_hotspots(
 
     review_rows = select_polled_hotspots(
         records,
-        neighborhoods=neighborhoods,
         max_polled_hotspots=max_polled_hotspots,
     )
     polled_codes = {row.area_cd for row in review_rows}
@@ -211,16 +171,12 @@ def format_report(report: SeedReport) -> str:
             f"polling targets: {report.polled_count}/"
             f"{report.max_polled_hotspots}"
         ),
-        "manual review required:",
+        "official polling scope:",
     ]
     lines.extend(
         (
             f"- {row.area_cd} | {row.name} | {row.category} | "
-            f"{row.lat:.6f},{row.lng:.6f} | "
-            + ", ".join(
-                f"{item.key}={item.distance_m:.0f}m"
-                for item in row.neighborhoods
-            )
+            f"{row.lat:.6f},{row.lng:.6f}"
         )
         for row in report.manual_review
     )

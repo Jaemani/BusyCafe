@@ -17,11 +17,15 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.clients.seoul_citydata import SeoulCityDataClient
+from app.clients.seoul_citydata import (
+    SeoulCityDataClient,
+    suppress_secret_bearing_http_logs,
+)
 from app.config import POLL_INTERVAL_MIN, Settings, get_settings
 from app.database import create_db_engine
 from app.ingest.poller import PollReport, PopulationClient, poll_once
 from app.ingest.repository import SnapshotRepository
+from app.scoring.engine import materialize_all
 
 
 LOGGER = logging.getLogger(__name__)
@@ -33,12 +37,15 @@ def run_poll_cycle(
     client: PopulationClient,
 ) -> PollReport:
     repository = SnapshotRepository(session_factory)
-    return poll_once(
+    report = poll_once(
         repository.load_poll_targets(),
         client=client,
         save_snapshot=repository.save_snapshot,
         save_parse_failure=repository.save_parse_failure,
     )
+    with session_factory() as session:
+        materialize_all(session)
+    return report
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -64,6 +71,7 @@ def main(
     scheduler_factory: Callable[..., Any] = BlockingScheduler,
 ) -> int:
     args = _parser().parse_args(argv)
+    suppress_secret_bearing_http_logs()
     settings = settings_loader()
     if settings.seoul_api_key is None:
         raise SystemExit("SEOUL_API_KEY is required for the ingest worker")

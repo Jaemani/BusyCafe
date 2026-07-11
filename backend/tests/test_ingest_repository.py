@@ -21,7 +21,7 @@ from app.ingest.poller import (
     build_snapshot_record,
 )
 from app.ingest.repository import SnapshotRepository
-from app.ingest.worker import main, run_poll_cycle
+from app.ingest.worker import main, run_poll_cycle, suppress_secret_bearing_http_logs
 from app.models import Base, Hotspot, HotspotParseFailure, HotspotSnapshot
 
 
@@ -236,3 +236,14 @@ def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
     with Session(check_engine) as session:
         assert session.scalar(select(func.count()).select_from(HotspotSnapshot)) == 1
     check_engine.dispose()
+
+
+def test_worker_suppresses_http_client_request_urls() -> None:
+    import logging
+
+    logging.getLogger("httpx").setLevel(logging.INFO)
+    logging.getLogger("httpcore").setLevel(logging.INFO)
+    suppress_secret_bearing_http_logs()
+
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("httpcore").level == logging.WARNING

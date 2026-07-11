@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import quote
 
@@ -22,6 +23,13 @@ from app.schemas import SeoulAreaPopulation
 
 class SeoulAPIError(RuntimeError):
     """Raised when the Seoul API returns an HTTP or semantic error."""
+
+
+def suppress_secret_bearing_http_logs() -> None:
+    """Prevent path-embedded API keys from appearing in HTTP client logs."""
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 def _timeout() -> httpx.Timeout:
@@ -90,6 +98,7 @@ class SeoulCityDataClient:
     ) -> None:
         if not api_key.strip():
             raise ValueError("api_key must not be empty")
+        suppress_secret_bearing_http_logs()
         self._api_key = api_key
         self._transport = transport
 

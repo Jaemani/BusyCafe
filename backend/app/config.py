@@ -6,7 +6,6 @@ the plan remain configurable until Phase 0 verification is recorded.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Final
@@ -18,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BACKEND_DIR: Final = Path(__file__).resolve().parents[1]
 FIXTURES_DIR: Final = BACKEND_DIR / "fixtures"
 
-# External API configuration. These endpoints are provisional until Phase 0.
+# Seoul endpoint and schema were measured in Phase 0.
 SEOUL_API_BASE_URL: Final = "http://openapi.seoul.go.kr:8088"
 SEOUL_CITYDATA_SERVICE: Final = "citydata_ppltn"
 SEOUL_RESPONSE_FORMAT: Final = "json"
@@ -37,6 +36,7 @@ SEOUL_HOTSPOT_AREAS_SEQ: Final = 24
 SEOUL_HOTSPOT_LIST_PATH: Final = FIXTURES_DIR / "seoul_hotspots_master.xlsx"
 SEOUL_HOTSPOT_AREAS_PATH: Final = FIXTURES_DIR / "seoul_hotspot_areas.zip"
 
+# Legacy Phase 0 verification only; not part of the product runtime.
 KAKAO_LOCAL_BASE_URL: Final = "https://dapi.kakao.com"
 KAKAO_CATEGORY_PATH: Final = "/v2/local/search/category.json"
 KAKAO_CAFE_CATEGORY_CODE: Final = "CE7"
@@ -65,28 +65,40 @@ TAU_MIN: Final = 15
 CONF_HIGH: Final = 0.55
 CONF_MID: Final = 0.30
 STALE_WARN_MIN: Final = 25
-MAX_POLLED_HOTSPOTS: Final = 12
+MAX_CAFES_PER_VIEWPORT: Final = 5_000
+FRONTEND_CORS_ORIGINS: Final = (
+    "http://localhost:5188",
+    "http://127.0.0.1:5188",
+)
+TAILNET_CORS_ORIGIN_REGEX: Final = r"https://[a-z0-9-]+\.tail2743ae\.ts\.net(?::8443)?"
+OFFICIAL_HOTSPOT_COUNT: Final = 121
+MAX_POLLED_HOTSPOTS: Final = OFFICIAL_HOTSPOT_COUNT
+
+# Coarse Seoul guard used only to limit bulk POI ingest and reject accidental
+# worldwide queries. Precise administrative-boundary filtering is a Phase 2
+# verification item.
+SEOUL_BBOX: Final = (126.76, 37.41, 127.20, 37.72)
+
+# Overture is fetched only by an operator-run monthly ingest. User requests
+# never touch this source: the result is materialized in PostgreSQL first.
+OVERTURE_RELEASE: Final = "2026-06-17.0"
+OVERTURE_S3_URI_TEMPLATE: Final = (
+    "s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*"
+)
+OVERTURE_MIN_CONFIDENCE: Final = 0.80
+OVERTURE_CAFE_CATEGORIES: Final = (
+    "cafe",
+    "coffee_shop",
+    "bubble_tea",
+    "tea_room",
+    "coffee_roastery",
+)
 
 CONGESTION_LEVELS: Final = {
     "여유": 1,
     "보통": 2,
     "약간 붐빔": 3,
     "붐빔": 4,
-}
-
-
-@dataclass(frozen=True, slots=True)
-class Neighborhood:
-    lat: float
-    lng: float
-    radius_m: int
-
-
-# Provisional centers/radii; confirm against the hotspot master in Phase 0/1.
-TARGET_NEIGHBORHOODS: Final = {
-    "seongsu": Neighborhood(lat=37.5446, lng=127.0557, radius_m=1_500),
-    "hongdae": Neighborhood(lat=37.5563, lng=126.9236, radius_m=1_500),
-    "yeonnam": Neighborhood(lat=37.5621, lng=126.9254, radius_m=1_500),
 }
 
 
@@ -100,7 +112,7 @@ class Settings(BaseSettings):
     )
 
     seoul_api_key: SecretStr | None = None
-    kakao_rest_key: SecretStr | None = None
+    kakao_rest_key: SecretStr | None = None  # legacy verify_apis.py only
     database_url: str = (
         "postgresql+psycopg://cafe_crowd:cafe_crowd_dev@localhost:5432/cafe_crowd"
     )

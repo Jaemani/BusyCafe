@@ -33,6 +33,7 @@ frontend/dist/
 *.db-journal
 *.pid
 logs/
+backend/data/
 
 # IDE / OS
 .DS_Store

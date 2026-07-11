@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
-from app.config import MAX_POLLED_HOTSPOTS, Neighborhood
+from app.config import MAX_POLLED_HOTSPOTS, OFFICIAL_HOTSPOT_COUNT
 from app.geo import haversine_m
 from app.ingest.hotspot_master import load_hotspot_master
 from app.models import Base, Hotspot
@@ -22,20 +22,6 @@ from scripts.seed_hotspots import (
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 XLSX = FIXTURES / "seoul_hotspots_master.xlsx"
 SHAPEFILE_ZIP = FIXTURES / "seoul_hotspot_areas.zip"
-EXPECTED_POLLED_CODES = (
-    "POI007",
-    "POI015",
-    "POI025",
-    "POI040",
-    "POI053",
-    "POI055",
-    "POI068",
-    "POI073",
-    "POI101",
-    "POI122",
-)
-
-
 @pytest.fixture
 def engine():
     db_engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -57,22 +43,19 @@ def test_haversine_is_deterministic_symmetric_and_zero_for_same_point() -> None:
     assert distance == pytest.approx(7_269.4, abs=1.0)
 
 
-def test_actual_master_selects_exact_expected_polling_union(official_records) -> None:
+def test_actual_master_selects_all_official_hotspots(official_records) -> None:
     selected = select_polled_hotspots(official_records)
 
-    assert len(selected) == 10
-    assert tuple(row.area_cd for row in selected) == EXPECTED_POLLED_CODES
-    assert len(selected) <= MAX_POLLED_HOTSPOTS
-    assert all(row.neighborhoods for row in selected)
+    assert len(selected) == OFFICIAL_HOTSPOT_COUNT
+    assert tuple(row.area_cd for row in selected) == tuple(
+        sorted(record.area_cd for record in official_records)
+    )
+    assert len(selected) == MAX_POLLED_HOTSPOTS
 
 
 def test_maximum_polling_target_count_is_enforced(official_records) -> None:
-    all_seoul = {
-        "all": Neighborhood(lat=37.56, lng=126.98, radius_m=50_000),
-    }
-
-    with pytest.raises(HotspotSeedError, match="exceeding MAX_POLLED_HOTSPOTS=12"):
-        select_polled_hotspots(official_records, neighborhoods=all_seoul)
+    with pytest.raises(HotspotSeedError, match="exceeding MAX_POLLED_HOTSPOTS=120"):
+        select_polled_hotspots(official_records, max_polled_hotspots=120)
 
 
 def test_seed_is_idempotent_and_upserts_all_121_hotspots(
@@ -94,7 +77,7 @@ def test_seed_is_idempotent_and_upserts_all_121_hotspots(
                 .where(Hotspot.is_polled.is_(True))
                 .order_by(Hotspot.area_cd)
             )
-        ) == EXPECTED_POLLED_CODES
+        ) == tuple(sorted(record.area_cd for record in official_records))
 
 
 def test_seed_updates_changed_fields_without_creating_duplicates(
@@ -105,7 +88,7 @@ def test_seed_updates_changed_fields_without_creating_duplicates(
         hotspot = session.scalar(select(Hotspot).where(Hotspot.area_cd == "POI001"))
         assert hotspot is not None
         hotspot.name = "오래된 이름"
-        hotspot.is_polled = True
+        hotspot.is_polled = False
         session.commit()
 
         report = seed_hotspots(session, official_records)
@@ -113,7 +96,7 @@ def test_seed_updates_changed_fields_without_creating_duplicates(
         assert report.inserted_count == 0
         assert report.updated_count == 1
         assert hotspot.name == "강남 MICE 관광특구"
-        assert hotspot.is_polled is False
+        assert hotspot.is_polled is True
         assert session.scalar(select(func.count()).select_from(Hotspot)) == 121
 
 
@@ -169,8 +152,8 @@ def test_dry_run_reports_without_writing_and_prints_manual_review(
         assert report.inserted_count == 121
         assert session.scalar(select(func.count()).select_from(Hotspot)) == 0
         assert "mode: dry-run" in rendered
-        assert "polling targets: 10/12" in rendered
-        assert "manual review required:" in rendered
+        assert "polling targets: 121/121" in rendered
+        assert "official polling scope:" in rendered
         assert "POI007 | 홍대 관광특구" in rendered
 
 
@@ -214,5 +197,5 @@ def test_cli_apply_writes_all_verified_records(tmp_path: Path, capsys) -> None:
             select(func.count())
             .select_from(Hotspot)
             .where(Hotspot.is_polled.is_(True))
-        ) == 10
+        ) == OFFICIAL_HOTSPOT_COUNT
     check_engine.dispose()

@@ -46,7 +46,10 @@ def hotspot(**overrides) -> Hotspot:
 
 def cafe(**overrides) -> Cafe:
     values = {
-        "kakao_place_id": "12345",
+        "overture_id": "overture:test-12345",
+        "source_release": "2026-06-17.0",
+        "source_confidence": 0.9,
+        "primary_category": "cafe",
         "name": "테스트 카페",
         "lat": 37.571,
         "lng": 126.981,
@@ -129,7 +132,7 @@ def test_valid_uncovered_and_covered_scores_round_trip(engine):
     with Session(engine) as session:
         place = hotspot()
         uncovered_cafe = cafe()
-        covered_cafe = cafe(kakao_place_id="67890", name="커버 카페")
+        covered_cafe = cafe(overture_id="overture:test-67890", name="커버 카페")
         session.add_all([place, uncovered_cafe, covered_cafe])
         session.flush()
         session.add_all(
@@ -250,6 +253,6 @@ def test_expected_query_indexes_exist(engine):
     }
 
     assert "ix_cafes_bbox" in cafe_indexes
-    assert "ix_cafes_neighborhood_active" in cafe_indexes
+    assert "ix_cafes_active_bbox" in cafe_indexes
     assert "ix_snap_hotspot_time" in snapshot_indexes
     assert "ix_parse_failure_hotspot_time" in failure_indexes
