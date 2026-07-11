@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.database import create_db_engine
+from app.database import create_db_engine, normalize_database_url
 
 
 @pytest.mark.parametrize(
@@ -39,6 +39,24 @@ def test_create_db_engine_normalizes_postgres_urls(
         pool_pre_ping=True,
         connect_args={"prepare_threshold": None},
     )
+
+
+@pytest.mark.parametrize(
+    ("database_url", "expected_url"),
+    [
+        ("postgresql://user@host/db", "postgresql+psycopg://user@host/db"),
+        ("postgres://user@host/db", "postgresql+psycopg://user@host/db"),
+        (
+            "postgresql+psycopg://user@host/db",
+            "postgresql+psycopg://user@host/db",
+        ),
+        ("sqlite:///local.db", "sqlite:///local.db"),
+    ],
+)
+def test_normalize_database_url_is_shared_with_migrations(
+    database_url: str, expected_url: str
+) -> None:
+    assert normalize_database_url(database_url) == expected_url
 
 
 def test_create_db_engine_preserves_sqlite_configuration() -> None:

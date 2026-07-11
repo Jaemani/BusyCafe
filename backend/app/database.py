@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config import get_settings
 
 
-def _normalize_database_url(database_url: str) -> str:
+def normalize_database_url(database_url: str) -> str:
     """Select psycopg 3 without altering the URL's credentials or query string."""
 
     if database_url.startswith("postgresql://"):
@@ -23,7 +23,7 @@ def _normalize_database_url(database_url: str) -> str:
 def create_db_engine(database_url: str | None = None) -> Engine:
     """Create an engine suitable for production or isolated SQLite tests."""
 
-    url = _normalize_database_url(database_url or get_settings().database_url)
+    url = normalize_database_url(database_url or get_settings().database_url)
     if url.startswith("sqlite"):
         connect_args = {"check_same_thread": False}
     elif url.startswith("postgresql+psycopg://"):
