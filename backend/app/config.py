@@ -54,7 +54,8 @@ HTTP_MAX_RETRIES: Final = 3
 HTTP_RETRY_BASE_DELAY_SECONDS: Final = 0.5
 HTTP_USER_AGENT: Final = "cafe-crowd/0.1"
 
-# Scoring and polling defaults. Phase 6 may tune these values.
+# Polling interval confirmed after the portal reported no call-count limit.
+# Scoring defaults remain subject to Phase 6 calibration.
 POLL_INTERVAL_MIN: Final = 10
 R_MAX_M: Final = 1_500
 COVERED_M: Final = 600

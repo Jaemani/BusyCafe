@@ -15,6 +15,7 @@
 
 - 운영 기본 저장소를 SQLite에서 PostgreSQL로 변경하고 향후 PostGIS 확장 경로를 문서화
 - Kakao JavaScript 키를 프론트엔드에서만 관리하도록 중복 백엔드 설정 제거
+- 서울 OpenAPI 호출 횟수 무제한 확인에 따라 MVP 폴링 주기를 10분으로 확정
 
 ### Fixed
 
