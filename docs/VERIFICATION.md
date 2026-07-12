@@ -876,3 +876,41 @@
   heatmap으로 확장하지 않는다. 이후에도 활동도는 별도 `/api/activity` 계약으로 제공한다
 - 판정: PASS(shadow 및 의미 수정). 공개 모델·기본 레이어 승격은 Phase 6와 source별
   empirical gate 통과 전까지 차단한다
+
+## 2026-07-13 — activity shadow 계약 강화와 offline 250m cell artifact
+
+- 실행 환경: macOS, backend/, Python 3.14, uv/pytest
+- 입력: 고정 합성 observation·baseline fixture와 테스트용 compact Parquet·버전 지정 달력.
+  실 API와 네트워크 호출은 사용하지 않았다
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+- 실제 결과: backend **429 passed**, compileall PASS
+- activity shadow 강화:
+  - 여러 셀의 raw 관측값과 raw 기준선은 같은 source 안에서도 제품 값으로 집계하지 않고,
+    각 contributor가 자기 기준선과 비교해 만든 source-local anomaly만 결합한다. raw 값은
+    contributor별 근거로 보존하고 단일 contributor일 때만 estimate의 raw 필드에 노출한다
+  - 모든 결합 contributor는 같은 `source_id`, observation type과 `source_version`을
+    가져야 한다. fresh와 stale 입력이 섞인 estimate도 별도 계산을 요구하며 거부한다
+  - 만료된 forecast와 생성 시점보다 앞선 forecast target을 거부한다. baseline은 model·
+    source·달력 버전, source hash, window, bucket, 표본 수, fallback과 masking 비율을
+    구조화해 보존하고, cutoff가 관측일 이후이거나 window 종료와 다르면 누수 가능 입력으로
+    보고 fail-closed 처리한다
+- offline artifact 구현:
+  - `scripts/build_activity_artifact.py`는 compact 생활인구 Parquet과 명시적 target date·
+    hour, `source_version`, 버전 지정 달력을 받아 셀별 GeoJSON FeatureCollection을
+    결정적으로 생성한다. target 이후 이력은 기준선에서 제외한다
+  - 셀 polygon은 decoder가 산출한 네 모서리를 그대로 닫힌 quadrilateral로 사용하고
+    `CELL_GEOMETRY_VERSION`을 provenance에 기록한다. 공식 격자 파일 전수 대조 전까지
+    이 geometry는 shadow-unverified이며 공개 활동도 또는 위치 정확도 근거로 승격하지 않는다
+  - 현재 관측이 마스킹되면 값을 대치하지 않고 `baseline_only`, 현재 행이 없으면
+    `baseline_only`, 기준선까지 없으면 `unsupported`로 표현한다. 각 상태에서 현재 값과
+    anomaly를 만들어내지 않는다
+  - feature 순서와 JSON key를 고정해 동일 입력의 byte output을 결정적으로 유지한다.
+    기본은 dry-run이고 `--apply`만 `.part`를 거쳐 원자적으로 게시하며, 기존 output과
+    partial file이 있으면 덮어쓰지 않고 실패한다
+- 공개 영향: API, DB schema, UI와 공개 `v1-idw-point`는 변경하지 않았다. 417-test 단계에서
+  통과한 기존 frontend typecheck/build 이후 frontend 변경도 없다. 이번 artifact는 offline
+  shadow 산출물이며 heatmap이나 공개 preview를 추가하지 않았다
+- 판정: PASS(shadow 계약과 offline artifact 자동 검증). 공식 격자 전수 대조와 empirical
+  평가 전까지 공개 `/api/activity`, heatmap과 기본 레이어 승격은 계속 차단한다
