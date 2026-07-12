@@ -611,3 +611,7 @@
   10분/25분 freshness 운영 경로로 FAIL. ADR-0008에 따라 전용 상시 Docker worker 배포와
   1시간 6 complete-cycle 검증이 `[HUMAN]` 블로커다. Phase 6와 확장 track 승격은 계속
   차단한다.
+- 최종 코드 배포: CI run `29182162571` PASS 뒤 deployment
+  `dpl_HbFmuwuBjdVgR8an4Xb7aLTh7Ywb`
+  (`busy-cafe-hlp4q9ntg-jaemanis-projects.vercel.app`)의 health와 cafe detail을 direct로
+  검증하고 exact `busy-cafe.vercel.app` alias를 이 deployment로 이동했다.
