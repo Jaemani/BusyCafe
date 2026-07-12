@@ -86,6 +86,28 @@ def test_seoul_client_does_not_leak_path_api_key_on_http_error() -> None:
     assert "do-not-leak" not in str(caught.value)
 
 
+def test_seoul_client_reuses_one_pool_and_closes_it() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=RAW_PAYLOAD)
+
+    client = SeoulCityDataClient(
+        "secret-key", transport=httpx.MockTransport(handler)
+    )
+    pooled_client = client._client
+
+    client.fetch_population_raw("광화문광장")
+    client.fetch_population_raw("홍대 관광특구")
+    client.close()
+
+    assert calls == 2
+    assert client._client is pooled_client
+    assert pooled_client.is_closed
+
+
 def test_kakao_client_sends_auth_header_and_parameters() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Authorization"] == "KakaoAK rest-key"
