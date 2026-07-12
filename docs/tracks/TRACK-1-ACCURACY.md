@@ -30,6 +30,17 @@
 
 ## 단계별 작업 패키지
 
+### 2026-07-12 구현 상태
+
+- A1: historical no-leak evaluator, 이중 관측자 입력, paired shadow 비교와 fail-closed
+  promotion gate 구현 완료. 실제 primary 관측은 `[HUMAN]` 대기다.
+- A2: `v2-polygon-shadow` 순수 scorer와 공식 geometry loader 구현 완료. 공개 v1, DB와 API는
+  변경하지 않았다. 구조 비교는 `docs/SHADOW_REPORT.md`에 기록했다.
+- A3: 최소 3주 snapshot 조건 미충족으로 시작하지 않는다.
+- A4: 공간 적합성, contributor별 신선도, level·시각 합의도, cycle 건강도와 검증 표본
+  충분도를 분리한 Confidence V2 shadow 구현 완료. `calibrated_probability=None`이다.
+- A5: Phase 6 정답 데이터와 최소 2주 shadow 비교가 없어 대기다.
+
 ### A1. 기준선과 재현 가능한 평가
 
 - 현재 IDW를 `model_version=v1-idw-point`로 고정하고 입력 스냅샷, config, 결과를 재생할 수 있게 한다.
@@ -98,3 +109,5 @@
 - Phase 6의 주 평가 라벨을 지역 보행 혼잡으로 교체하고, 좌석 점유는 “한산할 카페 추천”의 간접 효용 지표로 별도 유지한다.
 - 폴리곤 기반 모델을 v2의 첫 challenger로 삼고, ML은 A1~A4 데이터·검증 기반이 갖춰질 때까지 보류한다.
 - 신뢰도 V2 구성요소와 `model_version`을 저장하되, 외부 API 필드 변경은 소비자 호환성을 보장하는 버전 정책과 함께 진행한다.
+- v2의 coverage 확대와 score 변화는 정확도 증거로 해석하지 않는다. 기존 Phase 6 기준선과
+  결과 확인 후 만든 divergence 감사 목록을 분리해 선택 편향을 막는다.

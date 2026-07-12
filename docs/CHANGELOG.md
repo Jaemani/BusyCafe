@@ -11,6 +11,9 @@
 - live health의 complete-cycle freshness를 이용한 프론트 갱신 지연 표시
 - Phase 6의 두 관측자 독립 라벨과 quadratic weighted Cohen's kappa 평가
 - DB write 없는 GitHub runner 서울 API canary와 독립 poll/monitor 운영 게이트
+- 공식 121개 polygon의 포함·겹침·경계거리를 사용하는 offline `v2-polygon-shadow`
+- 입력 품질과 정확도 확률을 분리한 Confidence V2 구성요소
+- v1/v2 historical paired evaluator, fail-closed promotion gate와 전 카페 구조 비교 도구
 
 ### Changed
 
