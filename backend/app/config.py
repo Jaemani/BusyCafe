@@ -49,6 +49,10 @@ SEOUL_HOTSPOT_AREAS_PATH: Final = FIXTURES_DIR / "seoul_hotspot_areas.zip"
 SEOUL_LIVING_POPULATION_INF_ID: Final = "OA-22784"
 SEOUL_LIVING_POPULATION_INF_SEQ: Final = 1
 LIVING_POPULATION_DATA_DIR: Final = BACKEND_DIR / "data" / "living_population"
+LIVING_POPULATION_HISTORY_START_MONTH: Final = "202301"
+LIVING_POPULATION_BACKFILL_MANIFEST_FILENAME: Final = "backfill_manifest.json"
+LIVING_POPULATION_BACKFILL_MANIFEST_SCHEMA_VERSION: Final = 1
+LIVING_POPULATION_HASH_CHUNK_BYTES: Final = 1024 * 1024
 
 # Legacy Phase 0 verification only; not part of the product runtime.
 KAKAO_LOCAL_BASE_URL: Final = "https://dapi.kakao.com"
@@ -121,6 +125,18 @@ DENSITY_SHADOW_LOG_EPSILON: Final = 1e-9
 # OA-21285 polygons fall well inside it.
 DENSITY_SHADOW_AREA_MIN_M2: Final = 1e2
 DENSITY_SHADOW_AREA_MAX_M2: Final = 1e8
+# Offline-only temporal baseline challenger.  These provisional defaults are
+# isolated from public v1 and must not be promoted before the pre-registered
+# living-population correlation and Phase 6 gates pass.
+TEMPORAL_BASELINE_SHADOW_MODEL_VERSION: Final = "v1-temporal-baseline-shadow"
+TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS: Final = 84
+TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS: Final = 28.0
+TEMPORAL_BASELINE_SHADOW_MIN_BUCKET_RAW_N: Final = 3
+TEMPORAL_BASELINE_SHADOW_SHRINKAGE_PRIOR_EFFECTIVE_N: Final = 4.0
+# The verified OA-22784 source masks low-population totals with ``*``.  The
+# pre-registered primary analysis substitutes 2.0 people and repeats with 0.0
+# and 3.0 as sensitivity bounds; callers can override this shadow-only value.
+TEMPORAL_BASELINE_SHADOW_MASKED_IMPUTATION: Final = 2.0
 SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
 # Confidence V2 remains a shadow input-quality score until empirical
 # calibration passes Track 1 Gate D. These weights intentionally exclude the

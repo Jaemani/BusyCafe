@@ -39,6 +39,7 @@ def test_builds_monthly_target_with_confirmed_seq_rule() -> None:
         {"date": "2026070a"},
         {"date": "19990708"},
         {"date": "20261308"},
+        {"date": "20260230"},
         {"month": "20266"},
         {"month": "202613"},
         {"month": "199906"},

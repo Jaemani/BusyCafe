@@ -21,11 +21,38 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.clients.seoul_living_population_files import (  # noqa: E402
+    DownloadedFileInfo,
+    DownloadTarget,
     SeoulLivingPopulationFilesClient,
     SeoulLivingPopulationFilesError,
     build_download_target,
 )
 from app.config import LIVING_POPULATION_DATA_DIR  # noqa: E402
+
+
+def download_one(
+    client: SeoulLivingPopulationFilesClient,
+    target: DownloadTarget,
+    destination: Path,
+) -> DownloadedFileInfo:
+    """Download and atomically publish one target without overwriting files."""
+
+    if destination.exists():
+        raise RuntimeError(f"destination already exists: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    part_path = destination.with_name(destination.name + ".part")
+    if part_path.exists():
+        raise RuntimeError(
+            f"stale partial file exists, inspect and remove: {part_path}"
+        )
+    try:
+        info = client.download_to(target, part_path)
+        # Fails if the destination appears after preflight, preserving the
+        # no-overwrite contract without relying on a check-then-replace race.
+        os.link(part_path, destination)
+        return info
+    finally:
+        part_path.unlink(missing_ok=True)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -56,20 +83,8 @@ def main(argv: list[str] | None = None) -> int:
             print("dry-run: pass --apply to download")
             return 0
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        part_path = destination.with_name(destination.name + ".part")
-        if part_path.exists():
-            raise RuntimeError(
-                f"stale partial file exists, inspect and remove: {part_path}"
-            )
         client = SeoulLivingPopulationFilesClient()
-        try:
-            info = client.download_to(target, part_path)
-            # Publish atomically; os.link fails if the destination appeared
-            # after the check above, preserving no-overwrite safety.
-            os.link(part_path, destination)
-        finally:
-            part_path.unlink(missing_ok=True)
+        info = download_one(client, target, destination)
         print(
             f"created {destination} ({info.size_bytes} bytes, "
             f"sha256 {info.sha256})"

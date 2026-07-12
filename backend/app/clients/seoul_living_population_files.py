@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import date as calendar_date
 from email.message import Message
 from pathlib import Path
 
@@ -69,8 +70,12 @@ def build_download_target(
             raise ValueError("date must be YYYYMMDD digits")
         if not date.startswith("20"):
             raise ValueError("date must be a 20xx calendar date")
-        if not 1 <= int(date[4:6]) <= 12 or not 1 <= int(date[6:8]) <= 31:
-            raise ValueError("date must be a plausible calendar date")
+        try:
+            calendar_date.fromisoformat(
+                f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+            )
+        except ValueError:
+            raise ValueError("date must be a valid calendar date") from None
         return DownloadTarget(
             seq=date[2:], expected_filename=f"250_LOCAL_RESD_{date}.zip"
         )
