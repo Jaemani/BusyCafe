@@ -20,6 +20,10 @@
   `v3-density-shadow` 채점기. v2 polygon 공간 선택과 국소 equirectangular 면적 근사를
   공유하고, ppltn 결측 관측은 제외·집계하며, 보정된 기준선 전에는 1~4 레벨 매핑을
   의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
+- 생활인구 대량 파일 다운로더(`scripts/download_living_population.py` +
+  `clients/seoul_living_population_files.py`): dry-run 기본, `.part` 원자적 게시,
+  덮어쓰기 거부. seq 파생 규칙(일별 YYMMDD·월별 YYMM)을 실다운로드로 이중 확인.
+  파일 실측에서 cp949 인코딩과 `생활인구합계`의 `*` 마스킹 확인
 - 국가 격자 `CELL_ID` 디코더(`app/ingest/national_grid.py`): 순수 EPSG:5179 역TM
   구현으로 250m 셀을 WGS84 중심·경계로 변환. 실데이터 817셀 표본 검증
   (bbox 817/817, 종로구 정합, 인접 간격 250.56m) — 공식 격자 경계 전수 대조는 `[VERIFY]`

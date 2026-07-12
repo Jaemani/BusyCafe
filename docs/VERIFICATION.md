@@ -704,3 +704,30 @@
   geometry가 점수 계산에 들어가기 전 필수
 - 계획과의 차이: 구현 에이전트가 세션 한도로 2회 중단되어 테스트·검증·문서는
   오케스트레이터가 직접 완료했다. 표본이 종로·용산 구간에 한정(정렬 첫 1000행)
+
+## 2026-07-12 — 생활인구 대량 파일 다운로더와 파일 스키마 실측
+
+- 실행 환경: backend/, uv, pytest + 명시적 검증 실다운로드 1회
+- 검증자: Claude (Fable — sonnet 에이전트가 세션 한도로 중단, config 상수와 URL
+  실검증 기록을 이어받아 완료)
+- 관련 커밋: 이 커밋
+- 실행 명령: `nio_download.do`에 `infId=OA-22784, infSeq=1, seq=260708` POST ·
+  `rtk proxy uv run python -m pytest tests` · dry-run
+  `scripts/download_living_population.py --date 20260708`
+- 기대 결과: 페이지 JS(`downloadFile('260708')`)에서 읽은 seq 파생 규칙이 실제 파일을
+  반환, 다운로더는 dry-run 기본·덮어쓰기 거부·부분 파일 미노출
+- 실제 결과:
+  - 일별 ZIP 실다운로드 15,037,162 bytes — 선행 에이전트가 기록한 실측치와 정확히
+    일치(이중 확인). SHA-256
+    `8ce3412e59c6c5dd0c11af1ec0c1932c4fc099f9446325e36961241ca96ff315`.
+    Content-Disposition 파일명 일치, ZIP 매직 정상
+  - 내부 CSV 실측: cp949 인코딩, 헤더
+    `일자, 시간, 행정동코드, 250M격자, 생활인구합계, 남/여 연령구간…`,
+    **`생활인구합계`도 `*` 마스킹 가능**(심야 저인구 셀), 행정동코드 후행 공백 —
+    상관 실험 설계의 마스킹 규칙을 관측 전 수정·확정했다
+  - 테스트: 315 passed(+21: target 파생 9, client 6, script 6), compileall PASS,
+    dry-run 출력 정상. 대량 파일은 gitignore된 `backend/data/living_population/`에만
+    저장된다
+- 판정: PASS. 월별 파일(448MB)의 실다운로드는 상관 실험 직전에 명시적으로 실행한다
+- 후속 조치: CELL_ID 디코더와 이 다운로더로 상관 실험 입력이 준비됨 — 남은 선행
+  조건은 worker 연속 수집(`[HUMAN]`)뿐이다
