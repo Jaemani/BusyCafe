@@ -1,0 +1,358 @@
+# 과거 데이터 기반 혼잡 베이스라인과 선행 사례 조사
+
+- 작성일: 2026-07-13
+- 상태: 조사·설계 제안. 공개 `v1-idw-point`에는 반영하지 않음
+- 범위: Track 1(서울 엔진 정확도)만 해당. 국내·해외 확장 Track 2/3은 동결 유지
+- 관련 문서: [생활인구 조사](2026-07-12-living-population.md),
+  [250m 격자 ADR](../adr/ADR-0009-living-population-250m-grid.md),
+  [베이스라인 상관 실험](2026-07-12-baseline-correlation-design.md),
+  [Track 1](../tracks/TRACK-1-ACCURACY.md),
+  [Phase 6 사전등록](../PHASE6_PREREGISTRATION.md)
+
+## 1. 결론
+
+과거 데이터는 지금 확보할 수 있다. 가장 직접적인 원천은 서울시 250m 격자 생활인구다.
+파일 목록 실측 기준 내국인 월별 파일은 2023-01부터 2026-06까지 **42개월** 존재한다.
+따라서 요일·시간대·계절의 평상시 공간 패턴은 worker가 수개월 쌓일 때까지 기다리지 않고
+만들 수 있다. 반면 서울 실시간 도시데이터(citydata)의 과거 일괄 아카이브나 기간 조회
+엔드포인트는 현재 공식 명세에서 확인되지 않았다. citydata의 실시간 이상치와 생활인구의
+관계를 학습·검증하는 겹침 이력은 우리가 append-only snapshot으로 직접 모아야 한다.
+
+권고 엔진은 단순한 “과거 평균 + 현재값”이 아니다.
+
+1. 250m 셀마다 요일·시간·공휴일 유형별 **평소 존재인구 베이스라인**을 만든다.
+2. citydata의 각 핫스팟이 자기 평소 패턴에서 얼마나 벗어났는지를 **동일 소스 안에서**
+   표준화한다.
+3. 그 실시간 이상치만 공간적으로 인접한 250m 셀에 전파한다.
+4. 지역 보행 혼잡 관측과 카페 좌석 관측으로 서로 다른 두 목표를 따로 평가한다.
+
+Google Maps의 Popular Times도 “장소별 평소 패턴”과 “현재가 평소 대비 얼마나 붐비는지”를
+구분한다. 다만 Google은 자사 위치 데이터 규모를 이용하고, BusyCafe는 공개 지역통계와
+정직한 불확실성 표시를 이용한다는 차이가 있다. Google Popular Times를 스크레이핑하거나
+비공식 API에 의존하지 않는다.
+
+## 2. 과거 데이터 원천 인벤토리
+
+`[VERIFIED]`는 공식 페이지 또는 실제 파일로 확인한 사항, `[VERIFY]`는 도입 전에 실응답·
+명세·계약을 추가 확인할 사항, `[HUMAN]`은 계정·계약·법률 판단이 필요한 사항이다.
+
+| 우선순위 | 원천 | 확보 가능 기간 | 공간/시간 단위 | 공개 지연 | 이용조건 | 권장 용도 | 상태 |
+|---|---|---|---|---|---|---|---|
+| P0 | 서울 250m 격자 내국인 생활인구 OA-22784 | 2023-01~2026-06 월별 42파일 `[VERIFIED 2026-07-12]` | 250m 셀, 1시간 | Sheet/API 약 4일; 파일 최신성은 목록 기준 | 공공누리 1유형, 출처표시 | 요일×시간×계절 베이스라인, 지연 백테스트 | 파일 1건·스키마·`cp949`·마스킹 실측 완료 |
+| P0 | 장기/단기체류 외국인 생활인구 OA-22785/OA-22786 | 과거 월별 파일 제공 `[VERIFY: 시작월·누락월 전수목록]` | 250m 셀, 1시간 `[VERIFY: 실제 두 파일]` | 내국인과 유사할 가능성 `[VERIFY]` | 공공누리 유형 개별 메타 확인 `[VERIFY]` | 관광특구·상권의 외국인 수요 ablation | 원본 미확보 |
+| P0 | 서울 실시간 도시데이터 | 공식 API는 현재 관측과 12시간 예측 | 121개 공식 핫스팟, 약 5분 | 준실시간 | 서울 열린데이터 이용조건 | 실시간 이상치, 공개 v1의 현재 신호 | 자체 snapshot만 과거 이력으로 사용 |
+| P1 | 한국천문연구원 특일 정보 API | 연도별 달력 생성 가능 | 전국, 날짜 | 사전 공표 | 공공데이터포털 이용조건 `[VERIFY]` | 법정·대체공휴일, 명절·연휴 파생 | API 응답 fixture 필요 |
+| P1 | 기상청 ASOS 시간자료 | 장기 관측 이력 제공 | 관측소, 1시간 | 관측 후 공개 | 기상자료개방포털 조건 `[VERIFY]` | 강수·기온·적설 ablation, 평가 시 actual/serving 시 forecast 분리 | 서울 관측소·결측 규칙 확정 필요 |
+| P2 | 서울교통공사 역별 시간대별 승하차 OA-12252 | 장기 파일/API 제공 `[VERIFY: 시작일·누락]` | 역, 1시간 | 소스별 상이 | 개별 데이터셋 조건 `[VERIFY]` | 역세권 유동량 보조 신호 | 원본 fixture 필요 |
+| P2 | 서울시 버스 정류장별 시간대별 승하차 OA-12913 | 장기 파일/API 제공 `[VERIFY: 시작일·누락]` | 정류장, 1시간 | 소스별 상이 | 개별 데이터셋 조건 `[VERIFY]` | 지하철 밖 유입 보조 신호 | 원본 fixture 필요 |
+| P3 | 서울 상권분석 길단위인구 OA-15568 | 과거 분기 자료 `[VERIFY]` | 상권/길단위, 시간대별 집계 `[VERIFY]` | 분기 | 개별 데이터셋 조건 `[VERIFY]` | 통신기반 생활인구와 다른 공간 집계 challenger | 정의·중복계보 확인 필요 |
+| P3 | 서울 상권분석 추정매출 OA-15572 | 분기별 과거 자료 | 상권/점포군, 분기 | 수개월 | 개별 데이터셋 조건 `[VERIFY]` | 지역별 구조적 수요 prior, POI 품질 감사 | 실시간 feature로는 사용하지 않음 |
+| P3 | 수도권 생활이동 OA-22298 | 과거 파일 제공 | 도착지, 성·연령, 시간대 `[VERIFY]` | 지연 공개 | 개별 데이터셋 조건 `[VERIFY]` | “존재”가 아닌 이동 흐름의 보조 가설 | 공간 해상도·개편 영향 확인 필요 |
+| P3 | 서울시 문화행사 OA-15486 | 행사 일정 이력·예정 `[VERIFY: 보존범위]` | 장소/기간 | 등록 시점 | 개별 데이터셋 조건 `[VERIFY]` | 대형 행사 이상치 설명 | 예상 관객수·취소 정보 품질 확인 필요 |
+
+공식 근거:
+
+- 서울 생활인구 정의와 데이터셋 목록:
+  <https://data.seoul.go.kr/dataVisual/seoul/seoulLivingPopulation.do>
+- 250m 내국인 OA-22784:
+  <https://data.seoul.go.kr/dataList/OA-22784/S/1/datasetView.do>
+- 250m 장기·단기체류 외국인 OA-22785/OA-22786:
+  <https://data.seoul.go.kr/dataList/OA-22785/S/1/datasetView.do>,
+  <https://data.seoul.go.kr/dataList/OA-22786/S/1/datasetView.do>
+- 서울 실시간 도시데이터 OA-21285:
+  <https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do>
+- 생활인구 개편·집계구 서비스 중지 공지:
+  <https://data.seoul.go.kr/together/notice/boardView.do?seq=721010a1522630fbf7a78d381a8326ee>
+- 공공데이터포털 한국천문연구원 특일 정보:
+  <https://www.data.go.kr/data/15012690/openapi.do> `[VERIFY: 최신 서비스 ID와 운영계정 호출]`
+- 기상자료개방포털 ASOS 시간자료:
+  <https://data.kma.go.kr/data/grnd/selectAsosRltmList.do?pgmNo=36>
+- 공공데이터포털 ASOS 시간자료 조회서비스:
+  <https://www.data.go.kr/data/15057210/openapi.do>
+- 서울 지하철·버스 시간대별 승하차 OA-12252/OA-12913:
+  <https://data.seoul.go.kr/dataList/OA-12252/S/1/datasetView.do>,
+  <https://data.seoul.go.kr/dataList/OA-12913/S/1/datasetView.do>
+- 서울 상권분석 길단위인구·추정매출 OA-15568/OA-15572:
+  <https://data.seoul.go.kr/dataList/OA-15568/S/1/datasetView.do>,
+  <https://data.seoul.go.kr/dataList/OA-15572/S/1/datasetView.do>
+- 수도권 생활이동 OA-22298, 서울시 문화행사 OA-15486:
+  <https://data.seoul.go.kr/dataList/OA-22298/S/1/datasetView.do>,
+  <https://data.seoul.go.kr/dataList/OA-15486/S/1/datasetView.do>
+- 서울 열린데이터 이용조건:
+  <https://data.seoul.go.kr/etc/openInfo.do>
+
+### 2.1 citydata 과거 이력의 한계
+
+현재 검증한 citydata 응답에는 현재 `PPLTN_TIME` 관측과 미래 예측이 있고, 임의의 과거
+기간을 요청하는 인자는 없다. 더 직접적으로 OA-21285 페이지의 공식 FAQ는 분단위 대용량
+실시간 데이터를 API-to-API로 받아 **과거 데이터를 별도 적재할 수 없어 제공이
+불가능하다**고 명시한다. 근거는 OA-21285 페이지 FAQ의 “실시간 데이터 서비스의 경우 과거
+데이터를 제공받을 수 있나요?” 항목이다.
+<https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do>
+
+따라서 공식 과거 citydata를 제품 일정의 입력으로 가정하지 않는다. FAQ가 안내한 원천부서
+별도 제공 가능성은 문의할 수 있지만 결과는 `[VERIFY][HUMAN]`이며, 자체 append-only
+snapshot 수집을 대체하지 않는다.
+
+이 제약은 두 종류의 역사를 구분하게 한다.
+
+- 42개월 생활인구: 장기적인 평소 공간·시간 패턴을 지금 계산할 수 있다.
+- 자체 citydata snapshot: 실시간 이상치 전파 계수와 신선도 성능을 앞으로 검증한다.
+
+## 3. 요일·공휴일·시간 기준선
+
+단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,
+토요일 오후, 대체공휴일은 발생 과정이 다르다. 1차 후보는 다음 계층이다.
+
+1. `hour_of_week`: 월요일 00시부터 일요일 23시까지 168개 슬롯
+2. `day_type`: 일반 평일, 토요일, 일요일, 공식 공휴일, 3일 이상 연휴
+3. `holiday_context`: 연휴 전날, 연휴 첫날/중간일/마지막 날, 징검다리 평일
+4. `season`: 월 또는 계절. 장기 추세가 크면 최근 8~12주에 더 높은 가중치
+
+공휴일을 처음부터 “어린이날”, “추석 둘째 날”처럼 각각 독립 그룹으로 만들면 표본이 너무
+작다. 현재 구현된 shadow는 `log1p(인구)` 공간에서 최근 관측에 지수 가중한 평균·분산을
+구하고 세부 버킷을 상위 버킷에 부분 수축한다. fallback 순서는
+`ISO 요일+day_type → day_type → 공휴일의 명목 요일 → 같은 시각 전체`다. 대체공휴일은
+별도 임의 타입이 아니라 공식 `public_holidays` 집합에 포함해야 한다. 중앙값·절사평균·
+사분위 범위는 이 기준 모델과 비교할 challenger이지 현재 구현이라고 표현하지 않는다.
+일반일 provisional 기본은 84일 창·28일 반감기이고, 희소한 공휴일·연휴는 과거 반복을
+빌릴 수 있도록 1,095일 창·365일 반감기를 별도로 쓴다. 이 값들은 calibration 전에는
+공개 모델 파라미터가 아니며 모든 실행에서 실제 적용값을 provenance에 남긴다.
+마스킹된 총계는 이미 사전 확정한 기본값 2.0과 0/3 민감도 분석을 그대로 쓴다.
+
+내국인만 합산한 모델을 기준으로 다음 네 가지를 같은 검증셋에서 비교한다.
+
+- L: 내국인
+- LL: 내국인 + 장기체류 외국인
+- LS: 내국인 + 단기체류 외국인
+- LLS: 세 집단 전체
+
+세 파일의 모집단이 상호배타적인지, 시간·격자 정의와 마스킹 규칙이 동일한지는 원본과
+명세로 확인하기 전 합산하지 않는다 `[VERIFY]`. 예상 가설은 단기체류 외국인이 관광특구
+프로파일을 개선하고 주거지역에는 효과가 작다는 것이다. 이 가설이 맞지 않으면 내국인
+기준선을 유지한다.
+
+## 4. 제안하는 2층 엔진
+
+### 4.1 베이스라인 층
+
+셀 `c`, 시각 `t`에 대해 과거 생활인구의 조건부 중심값을 `B(c,t)`로 둔다. 현재 shadow의
+`B`는 `log1p` 변환과 최근성 가중 평균·분산, 계층적 fallback/부분 수축으로 계산한다.
+조건은 요일·시간·공휴일 맥락·계절이다. `B`는 카페 좌석 점유율이 아니라 **그 셀에 평소
+존재하는 인구**다.
+
+서로 다른 산출체계의 원시 숫자를 직접 나누면 안 된다. citydata의 `ppltn_mid`와 생활인구
+총계는 공간단위와 추계 방식이 다르므로 다음처럼 각 소스 안에서 먼저 정규화한다.
+
+```text
+hotspot_anomaly(h,t)
+  = robust_standardize(citydata(h,t), historical_citydata_profile(h,t))
+
+cell_estimate(c,t)
+  = living_population_baseline(c,t)
+    × bounded_transform(weighted_nearby_hotspot_anomalies)
+```
+
+citydata 자체 이력이 아직 짧을 때는 anomaly 계수를 학습했다고 표현하지 않는다. 7일
+겹침으로 방향성만 탐색하고, 최소 4주 전에는 shadow 결과만 만든다. 실제 공개 승격은
+8~12주와 Phase 6 관측을 요구한다.
+
+또한 이 상관은 독립적인 정답 검증이 아니다. 서울 생활인구는 서울시·KT 통신데이터 기반이고,
+citydata 인구도 이동통신 기지국 신호를 이용한다. 두 지표는 통신계열 원천과 보정 과정의
+공통 편향을 일부 공유할 수 있어 상관이 실제 보행 혼잡 정확도를 과대평가할 수 있다.
+OA-22784와 OA-21285의 공식 정의를 근거로, 7일 상관 실험은 **두 소스의 호환성 gate**로만
+해석한다. 독립 정확도 근거는 Phase 6 현장 보행 관측 또는 계보가 다른 검증 소스에서 얻는다.
+<https://data.seoul.go.kr/dataVisual/seoul/seoulLivingPopulation.do>,
+<https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do>
+
+### 4.2 실시간 이상치 층
+
+- 카페 또는 셀이 공식 핫스팟 폴리곤 내부면 해당 핫스팟을 우선한다.
+- 외부면 대표점이 아니라 폴리곤 경계거리와 교차면적을 사용한다.
+- contributor별 신선도, 레벨·시각 합의도, 수집 cycle 건강도를 별도로 보존한다.
+- citydata 이상치는 상한·하한을 둬 장애나 단일 급등이 서울 전체로 번지지 않게 한다.
+- `uncovered`는 계속 NULL이며 베이스라인만으로 “실시간” 색을 칠하지 않는다.
+
+공개 `v1-idw-point`는 이 연구 때문에 바뀌지 않는다. v2/v3 shadow가 사전등록된 gate를
+통과해야만 model version을 승격한다.
+
+## 5. 미래 정보 누출 방지
+
+과거 파일이 많다고 평가가 자동으로 타당해지지는 않는다. 다음 규칙을 고정한다.
+
+1. 시점 `t` 예측의 베이스라인은 `t` 이전에 제품이 실제로 취득 가능했던 파일만 사용한다.
+2. 공개가 4일 지연된 생활인구를 `t` 당일 feature처럼 사용하지 않는다. 이는 baseline 학습과
+   지연 평가에만 쓴다.
+3. 무작위 행 분할을 금지하고 rolling-origin 방식으로 train/calibration/test 날짜를 나눈다.
+4. 동일 월 파일의 수정본은 `fetched_at`, URL, 크기, SHA-256으로 버전 고정한다.
+5. 실제 날씨(actual weather)를 과거 평가에 쓸 때, 운영 비교군은 그 시점에 이용 가능했던
+   예보만 사용한다. actual을 운영 feature처럼 쓰면 미래 누출이다.
+6. 공휴일 달력은 사전 확정 정보이므로 사용 가능하지만, 사후 지정·취소 이력은 당시
+   가용 버전을 보존한다.
+7. 파라미터·feature 선택에 쓴 기간과 최종 test 기간을 분리하고, test 결과를 본 뒤 같은
+   기간에 재튜닝하지 않는다.
+
+## 6. 선행 플랫폼에서 가져올 것과 가져오지 않을 것
+
+### Google Maps Popular Times
+
+Google의 공식 설명은 Popular Times가 위치 기록(Location History)을 켠 사용자의 집계·
+익명화된 방문 데이터에서 시간대별 전형적 혼잡을 만들고, 충분한 방문 데이터가 있는
+곳에는 live busyness를 평소 수준과 비교해 보여준다고 설명한다. 같은 글은 COVID-19 시기의
+급격한 패턴 변화에 적응하려 최근 4~6주 데이터에 더 높은 비중을 두었다고 밝힌다.
+BusyCafe가 참고할 핵심은 **장소별 기준선과 현재 이상치를 분리**하고, 표본이 충분한 곳만
+표시하는 제품 원칙이다.
+
+출처: Google 공식 블로그,
+<https://blog.google/products-and-platforms/products/maps/maps101-popular-times-and-live-busyness-information/>
+공식 블로그가 연결한 Business 도움말도 함께 보존한다.
+<https://support.google.com/business/answer/6263531?hl=en>
+
+그러나 Google Places API의 공식 Place Details 필드에는 Popular Times가 문서화돼 있지
+않다(`[VERIFY]`: 문서는 변경될 수 있으므로 도입 검토 때 재확인).
+<https://developers.google.com/maps/documentation/places/web-service/place-details>
+따라서 HTML 스크레이핑·비공식 엔드포인트·역공학은 정확도, ToS, 차단 위험 때문에 사용하지
+않는다. Google Maps Platform 약관도 함께 검토해야 한다.
+<https://cloud.google.com/maps-platform/terms>
+
+### Foursquare와 상용 foot-traffic 플랫폼
+
+Foursquare의 Place Details 스키마에는 `popularity` 숫자와 `hours_popular` 시간 배열이
+문서화돼 있다. 이는 Google 비공식 스크레이핑보다 검토 가능한 공식 API 후보지만, 두 필드의
+정확한 의미·시간 정규화·가용 요금제, 대한민국 coverage, 표본 편향, cache/재배포 권리는
+계약과 실응답으로 확인해야 한다 `[VERIFY][HUMAN]`.
+
+- Foursquare Places 속성: <https://docs.foursquare.com/data-products/docs/places-attributes>
+- Foursquare Place Details(`popularity`, `hours_popular`):
+  <https://docs.foursquare.com/fsq-developers-places/reference/place-details>
+- Foursquare Analytics 개요: <https://docs.foursquare.com/analytics-products/docs/overview>
+
+Placer.ai, BestTime 같은 상용 서비스도 유동량·혼잡 예측을 표방하지만 대한민국 coverage와
+원천 데이터 계보, 카페 단위 재배포 권리가 확인되지 않았다 `[VERIFY][HUMAN]`. 이들은
+공공데이터 모델의 대체제가 아니라 **동일 카페·동일 시각의 유료 표본을 받아 외부 타당도와
+비용 대비 개선폭을 검증하는 challenger**로만 고려한다.
+
+- Placer.ai 제품 개요: <https://www.placer.ai/platform/overview>
+- BestTime 제품 페이지: <https://besttime.app/> `[VERIFY: 원천·한국 coverage·약관]`
+
+### 연구 문헌
+
+BusyCafe에 직접 적용할 수 있는 공통 원리는 다음과 같다.
+
+- ST-ResNet은 도시를 격자로 나누고 최근성(closeness), 주기(period), 장기 추세(trend)와
+  날씨·휴일 같은 외생변수를 결합한다. 이는 250m 격자, 요일×시간 baseline, 날씨/공휴일
+  ablation의 근거가 된다. 다만 대규모 학습자료를 전제로 하므로 지금 바로 신경망을
+  도입하라는 근거는 아니다. Zhang et al., “Deep Spatio-Temporal Residual Networks for
+  Citywide Crowd Flows Prediction,” AAAI 2017,
+  <https://doi.org/10.1609/aaai.v31i1.10735>.
+- 도시 컴퓨팅 연구는 교통·이동·POI·기상 같은 이질적 소스를 공간·시간 정합한 뒤 도시
+  현상을 추론하는 방법과 데이터 품질 문제를 정리한다. Zheng et al., “Urban Computing:
+  Concepts, Methodologies, and Applications,” ACM TIST 2014,
+  <https://doi.org/10.1145/2629592>.
+- Prophet의 실무 예측 구조는 여러 계절성과 휴일 효과를 명시적으로 분리한다. 여기서는
+  Prophet 자체 채택보다 “요일·연간 계절·휴일을 별도 성분으로 검증한다”는 설계 참고다.
+  Taylor and Letham, “Forecasting at Scale,” The American Statistician 2018,
+  <https://doi.org/10.1080/00031305.2017.1380080>.
+- 사람 이동에는 높은 규칙성이 있지만 개인·표본·공간 집계 수준에 따라 예측 가능성의
+  상한이 달라진다. 정확도를 보장하는 인용이 아니라, 경험적 gate와 uncovered 처리가
+  필요한 이유다. Song et al., “Limits of Predictability in Human Mobility,” Science 2010,
+  <https://doi.org/10.1126/science.1177170>.
+- 신규 장소의 활동 패턴은 주변 장소, 범주와 지역의 기존 시간 패턴으로 추정할 수 있다는
+  연구가 있다. 이는 과거가 없는 신규 카페에 셀·범주 prior를 쓰는 challenger 근거지만,
+  서울 데이터로 다시 검증해야 한다. D’Silva et al., “Predicting the temporal activity
+  patterns of new venues,” EPJ Data Science 2018,
+  <https://doi.org/10.1140/epjds/s13688-018-0142-z>.
+- 이동통신 자료로 동적 인구지도를 만들 때 정적 인구자료와 통신활동의 보정 관계를 먼저
+  추정해야 한다. 이는 기지국 신호를 곧바로 보행 인원으로 해석하지 않는 근거다. Deville
+  et al., “Dynamic population mapping using mobile phone data,” PNAS 2014,
+  <https://doi.org/10.1073/pnas.1408439111>.
+- 시공간 자료에 일반 random cross-validation을 쓰면 가까운 시점·공간이 train/test에
+  함께 들어가 성능이 낙관적으로 보일 수 있다. rolling-origin과 공간/시간 block 평가의
+  방법론적 근거다. Roberts et al., “Cross-validation strategies for data with temporal,
+  spatial, hierarchical, or phylogenetic structure,” Ecography 2017,
+  <https://doi.org/10.1111/ecog.02881>.
+
+## 7. Feature 우선순위와 가설
+
+한 번에 하나의 feature군만 추가해 같은 고정 검증셋에서 ablation한다.
+
+| 순서 | 가설 | 실험 | 채택 조건 |
+|---|---|---|---|
+| H1 | 요일×시간 기준선이 단순 시간 평균보다 낫다 | `hour` vs `hour_of_week` | 전체·주말 Spearman 개선, tail 회귀 없음 |
+| H2 | 공휴일·대체휴일·연휴 맥락이 공휴일 오차를 줄인다 | H1 + holiday hierarchy | 공휴일 MAE/순위 개선, 일반일 회귀 없음 |
+| H3 | 단기체류 외국인은 관광특구 설명력을 높인다 | L/LL/LS/LLS 비교 | 관광특구 개선 + 비관광 지역 악화 없음 |
+| H4 | 최근 계절 가중이 42개월 전체 동일가중보다 현재 패턴에 가깝다 | expanding vs rolling 8/12주 vs 감쇠 | 홀드아웃 개선, 계절 전환 급등 recall 유지 |
+| H5 | 강수·폭염·한파·적설은 보행 혼잡과 카페 선택을 바꾼다 | 기상 feature 단독 추가 | forecast-available 평가에서 개선할 때만 채택 |
+| H6 | 지하철 승하차는 역세권 단기 유입을 설명한다 | 역거리×시간대 승하차 | 역세권 층 개선, 비역세권 회귀 없음 |
+| H7 | 생활이동 OD는 생활인구보다 보행 “흐름”에 가깝다 | OD 단독 challenger | citydata/현장 보행 라벨 상관이 생활인구보다 높을 때 채택 |
+| H8 | 분기 매출은 지역의 구조적 상업 수요를 설명한다 | 정적 prior 단독 | 시간 변화가 아닌 공간 bias만 개선할 때 제한 사용 |
+| H9 | 핫스팟 범주별 anomaly 전파계수가 다르다 | 관광/상권/밀집 분리 | 충분한 표본과 시간 test에서 일관될 때만 분리 |
+| H10 | 지역 혼잡과 카페 내부 좌석 혼잡의 관계는 시간·매장형태별로 다르다 | Phase 6 두 라벨 동시 수집 | 지역 엔진과 추천 효용을 별도 metric으로 유지 |
+
+이 표의 “개선”은 전체 평균만 뜻하지 않는다. Track 1의 거리·coverage·평일/주말·야간
+분해와 기존 안전성 guardrail을 모두 통과해야 한다.
+
+## 8. 데이터 기간과 승격 gate
+
+42개월 생활인구가 있어도 citydata와 현장 관측의 겹침이 짧으면 모델 승격 증거가 되지
+않는다.
+
+| Gate | 최소 자료 | 허용되는 결론 | 제품 행동 |
+|---|---|---|---|
+| G0 원천 | 원본 URL·크기·SHA-256·라이선스·스키마 fixture | 재현 가능한 입력 확보 | parser/aggregate 구현 가능 |
+| G1 품질 | 월별 누락, 셀 coverage, 마스킹률, 시간대·좌표 검증 | baseline 계산 가능 여부 | 실패 월 제외 규칙을 사전 기록 |
+| G2 탐색 | citydata 연속 7일 + 동일 시각 생활인구 | 상관 방향, 파이프라인 결함 발견 | **공개값 변경 금지** |
+| G3 최소 비교 | 연속 4주 + 사전 고정 test + Phase 6 일부 | feature ablation의 초기 안정성 | shadow 유지, 확률 표현 금지 |
+| G4 승격 후보 | 8~12주 연속 + 주말/공휴일/기상 층 표본 + Phase 6 | v1/v2/v3 비교와 calibration | 사전등록 gate 통과 시에만 승격 |
+| G5 운영 | 최소 2주 shadow, rollback·신선도·비용 측정 | 실제 운영 적합성 | model_version 단위 점진 승격 |
+
+7일은 탐색용이지 최소 학습기간이 아니다. 4주는 “비교를 시작할 수 있는 최소”, 8~12주는
+일반 주간 패턴의 promotion 후보 기준이다. 공휴일별 모델은 8~12주로도 표본이 부족하므로
+계층적 묶음을 유지하고, 특수 공휴일을 독립 분리하려면 여러 해의 관측 또는 외부 검증이
+필요하다.
+
+## 9. 빠르고 비용 효율적인 구축 방식
+
+월별 원본 전체를 PostgreSQL row로 적재하면 비용만 커지고 요청 경로가 느려진다. 처리와
+서빙을 분리한다.
+
+1. 원본 ZIP/CSV는 immutable object/local archive에 두고 URL·SHA-256 manifest를 저장한다.
+2. 기존 strict Python parser는 원본 스키마·날짜·시간·CELL_ID·마스킹을 표본/경계 행에서
+   검증하는 품질 gate로 유지한다. 모든 행을 Python 객체로 만들며 월별 수억 건을 합산하는
+   실행 경로로 쓰지 않는다.
+3. DuckDB는 이미 backend 의존성이며 실파일 `cp949` 직접 읽기를 확인했다. 월별 대량 집계는
+   DuckDB의 set-based scan/group-by를 기본으로 하고, strict parser와 동일한 행 수·합계·
+   마스킹 수를 표본 월에서 대조한다. 다운로드와 계산은 요청 경로에서 실행하지 않는다.
+4. 연구 단계에는 핫스팟과 교차하거나 평가에 필요한 셀만 추출한다. 서울 전체 밀도맵이
+   필요해지면 별도 columnar partition을 만든다.
+5. DB에는 원시 수억 행 대신 `cell × hour_of_week × day_type × season`의 집계값, 표본 수,
+   산포, masking 비율, dataset version만 저장한다.
+6. 계산 결과는 `baseline_version`으로 immutable하게 게시하고 API worker는 최신 승인
+   버전을 읽기만 한다.
+7. DuckDB scan과 집계 결과를 측정한 뒤에만 Parquet 중간 partition의 필요성을 판단한다.
+   Polars 같은 새 의존성은 동일 입력 벤치마크에서 시간·메모리 이득이 확인될 때만 검토한다.
+8. 일일 증분은 새 날짜만 반영하되, 과거 수정 파일이 발견되면 해당 partition을 SHA 기준으로
+   재빌드한다. 결정적 full rebuild 경로를 항상 유지한다.
+
+OA-22784 페이지의 월 파일 크기(약 380~600MB)를 42개월에 단순 적용하면 다운로드 원본은
+대략 16~25GB 규모다. 이는 계획용 추정치이며 실제 manifest의 총 bytes로 교체한다
+`[VERIFY]`. 전체 파일을 매 요청 읽지 않고 한 번 스트리밍 집계하면 운영 API 비용에는 거의
+영향을 주지 않는다.
+
+## 10. 즉시 실행 순서
+
+1. OA-22784 42개 월 파일 manifest를 고정하고 누락·중복·총 bytes를 검증한다.
+2. OA-22785/OA-22786 원본 각 1건을 확보해 내국인과 스키마·격자·모집단·라이선스를
+   비교한다 `[HUMAN: 필요 시 포털 로그인]`.
+3. 특일 정보와 ASOS 각 최소 fixture를 확보한 뒤에만 parser/schema를 확정한다.
+4. 현재 구현된 `B1=ISO weekday+day_type` shadow의 model version을 고정하고,
+   `B0=hour-only` 비교군 → 공식 달력을 넣은 `B2=holiday hierarchy` →
+   `B3=foreign ablation` 순서로 오프라인 비교한다.
+5. worker 연속 수집을 복구해 7일 상관 탐색을 실행한다. 결과를 본 뒤 판정 기준을 바꾸지
+   않는다.
+6. 4주 전에는 feature 승격 판단을 하지 않고, 8~12주 및 Phase 6까지 공개 v1을 유지한다.
+7. 기상·교통·매출·생활이동은 앞 단계가 통과한 뒤 한 종류씩 추가한다. 동시에 넣지 않는다.
+
+가장 빠른 길은 복잡한 ML이 아니라 **이미 있는 42개월을 정직하게 조건부 기준선으로 만들고,
+새로 모으는 실시간 신호와 현장 관측으로 한 가설씩 제거하는 것**이다. 실패한 feature도
+가설·입력 버전·코드 commit·결과·폐기 이유를 남긴다.

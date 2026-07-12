@@ -36,6 +36,13 @@
 - 핫스팟 polygon과 250m 생활인구 셀의 교차면적 가중치를 결정적으로 생성하는
   offline shadow 도구. 공식 격자 경계 전수 대조 전에는 provenance에 `unverified`를
   유지하고 공개 점수에 사용하지 않음
+- OA-22784 월별 이력을 범위 단위로 계획·수집하는 안전한 backfill CLI. dry-run 기본,
+  순차 다운로드, 원자 manifest, 무덮어쓰기, prior SHA-256 대조 resume 계약을 적용
+- 정확한 요일과 공휴일·3일 이상 연휴 유형을 분리하는 offline temporal-baseline shadow.
+  일반일은 최근 84일, 희소한 공휴일·연휴는 최대 3년의 `log1p` 생활인구를 서로 다른
+  반감기로 계층 수축하며 달력·원천 버전과 SHA-256을 provenance에 강제
+- 공식 과거 데이터와 선행 플랫폼·연구를 비교한 Track 1 리포트. citydata 공식 과거치가
+  제공되지 않음을 확인하고 42개월 생활인구 기준선 + 자체 citydata 이력 구조를 채택
 - 생활인구 베이스라인 단위를 250m 격자로 확정(ADR-0009, 사용자 승인). 기존
   `SEOUL_API_KEY`로 `Se250MSpopLocalResd` 실호출 검증(XML 정상·JSON 포털 결함),
   원본 5행 fixture와 SHA-256 보존
@@ -56,6 +63,8 @@
 - 서울 API client를 4개 bounded connection pool로 재사용하고, fetch 결과는 대상 순서대로
   검증한 뒤 snapshot을 한 transaction으로 저장
 - score materialize 조회를 계산에 필요한 좌표·레벨·PK로 제한
+- 요일×시간 모델의 7일 상관 실험을 탐색 gate로 한정. feature 비교는 최소 4주,
+  공개 승격 후보는 권장 8~12주 연속 snapshot과 Phase 6 관측을 요구
 
 ### Fixed
 

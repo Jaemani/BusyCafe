@@ -768,3 +768,41 @@
   `snapshots_last_hour=0`
 - 판정: FAIL — live PostgreSQL read는 동작하지만 현재 데이터는 준실시간이 아니다.
   ADR-0008의 전용 상시 worker 배포·1시간 6회 complete 검증 전까지 실시간 승격 금지
+
+## 2026-07-13 — 과거 데이터·선행사례 조사와 temporal baseline shadow
+
+- 관련 커밋: 구현 `e6e26d7`, 희소 공휴일 창 보완 `7e7cecb`; 조사 근거는
+  `docs/research/2026-07-13-historical-baseline-and-prior-art.md`
+- 공식 웹 실측:
+  - OA-22784 파일 페이지에서 월별 `250_LOCAL_RESD_202301.zip`부터
+    `250_LOCAL_RESD_202606.zip`까지 **42개**를 확인
+  - OA-21285 FAQ에서 분단위 대용량 실시간 데이터는 과거를 별도 적재하지 않아 제공이
+    불가능하다는 답변을 확인. 원천부서 별도 문의 가능성만 `[VERIFY][HUMAN]`으로 유지
+  - Google Business 공식 도움말에서 최근 수개월의 요일·시간별 평균 popularity와
+    평소 대비 live visit overlay 구조를 확인. 공식 Places API에 없는 Popular Times를
+    스크레이핑하지 않는 기존 정책 유지
+- 구현:
+  - `download_living_population_history.py`: inclusive 월 범위, dry-run 기본, 순차 apply,
+    `.part` 원자 게시, 무덮어쓰기, range·entry·기존 size/SHA 검증 resume, 원자 manifest
+  - `temporal_baseline_shadow.py`: ISO 요일과 일반/토/일/공휴일/연휴를 분리하고
+    `exact → day type → nominal weekday → hour` 계층 fallback·shrinkage 수행
+  - 일반일은 84일/28일 반감기, 희소 공휴일·연휴는 1,095일/365일 반감기를 provisional
+    기본값으로 분리하고 실제 적용값을 provenance에 기록
+  - 예측 target의 cutoff 이후 행은 배제하고, `log1p` 최근성 가중 평균·산포·raw/effective
+    표본 수·마스킹 비율·fallback 깊이·달력/원천/SHA provenance를 반환
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+  - `cd backend && uv run python scripts/download_living_population_history.py --start-month 202301 --end-month 202606`
+- 실제 결과: **375 passed**, compileall PASS, 42개월 dry-run PASS. dry-run은 네트워크와
+  파일 쓰기를 수행하지 않았다. 기존 Starlette/httpx deprecation warning 1건은 유지
+- 판정: PASS(shadow 기반). 공개 `v1-idw-point`, DB schema와 API 응답은 변경하지 않았다
+- gate 정정: 7일은 각 요일이 1회뿐이므로 fusion 탐색에만 사용한다. 최소 4주부터 feature
+  비교, 권장 8~12주와 Phase 6 관측 후에만 공개 승격 후보를 판단한다
+- 의미상 제한: 생활인구와 citydata는 통신계열 upstream 편향을 공유할 수 있어 둘의 높은
+  상관은 독립 정확도 증거가 아니다. Phase 6 현장 관측을 계속 최종 gate로 사용한다
+- 미실행 `[HUMAN]`: 약 16~25GB로 추정되는 42개월 `--apply`, 한국천문연 특일 API와
+  ASOS 활용신청·fixture, OA-22785/22786 외국인 원본 확보, 전용 citydata worker 배포
+- 계획과의 차이: 월별 full download 전 parser를 만들지 않는다는 ADR-0009 초안은 일별
+  full ZIP 실측 후 strict parser를 허용하도록 갱신했다. 첫 월 backfill의 계약 대조가
+  통과하기 전에는 역사 집계를 시작하지 않는다
