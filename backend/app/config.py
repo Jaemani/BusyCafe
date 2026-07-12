@@ -152,6 +152,13 @@ TEMPORAL_BASELINE_SHADOW_SHRINKAGE_PRIOR_EFFECTIVE_N: Final = 4.0
 # pre-registered primary analysis substitutes 2.0 people and repeats with 0.0
 # and 3.0 as sensitivity bounds; callers can override this shadow-only value.
 TEMPORAL_BASELINE_SHADOW_MASKED_IMPUTATION: Final = 2.0
+# Offline-only city-activity contract.  It intentionally exposes a source-local
+# anomaly rather than an uncalibrated 0..100 index.  Standardized anomalies are
+# clipped only to keep pathological low-dispersion inputs from dominating
+# shadow comparisons; promotion requires an empirical calibration gate.
+ACTIVITY_SHADOW_MODEL_VERSION: Final = "v1-city-activity-shadow"
+ACTIVITY_SHADOW_MIN_LOG_DISPERSION: Final = 1e-6
+ACTIVITY_SHADOW_STANDARDIZED_ANOMALY_CAP: Final = 5.0
 SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
 # Confidence V2 remains a shadow input-quality score until empirical
 # calibration passes Track 1 Gate D. These weights intentionally exclude the
