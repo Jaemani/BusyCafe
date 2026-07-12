@@ -43,6 +43,10 @@
   반감기로 계층 수축하며 달력·원천 버전과 SHA-256을 provenance에 강제
 - 공식 과거 데이터와 선행 플랫폼·연구를 비교한 Track 1 리포트. citydata 공식 과거치가
   제공되지 않음을 확인하고 42개월 생활인구 기준선 + 자체 citydata 이력 구조를 채택
+- DuckDB 기반 생활인구 compactor. 전체 CP949 원본을 strict 검증하고 allowlist 셀만
+  결정적 Parquet으로 축약하며 입력·출력 SHA, 행 수, 스키마와 누락 셀을 manifest에 기록
+- 국내·해외 확장 feasibility 리포트와 ADR-0010. 전국/전세계 단일 실시간 피드 가정을
+  폐기하고 부산 보행자 API와 Melbourne pedestrian sensor를 두 번째 provider 후보로 선정
 - 생활인구 베이스라인 단위를 250m 격자로 확정(ADR-0009, 사용자 승인). 기존
   `SEOUL_API_KEY`로 `Se250MSpopLocalResd` 실호출 검증(XML 정상·JSON 포털 결함),
   원본 5행 fixture와 SHA-256 보존
@@ -68,6 +72,8 @@
 
 ### Fixed
 
+- Overture 지역 seed가 DB 전체 카페를 조회해 다른 지역 카페까지 비활성화할 수 있던
+  범위를 명시적 edge-inclusive bbox로 제한. 범위 밖 입력은 DB mutation 전에 전체 거부
 - 외부 API가 연속 실패할 때 최악 85분까지 retry할 수 있던 poll을 5-target circuit으로 제한
 - GitHub job timeout이 durable ingest cycle을 `running`으로 남기던 interrupt cleanup
 - poll 중단 시 미커밋 snapshot을 `saved`로 과대 계상할 수 있던 cycle counter

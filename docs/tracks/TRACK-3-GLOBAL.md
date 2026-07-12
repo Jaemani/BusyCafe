@@ -1,9 +1,13 @@
 # Track 3 — 해외 확대와 유니버설 도시 혼잡 플랫폼
 
-- 상태: Active plan
+- 상태: Feasibility complete, runtime implementation frozen
 - 작성일: 2026-07-11
 - 선행 조건: Track 1의 신뢰도 모델과 Track 2의 국내 확장 검증
 - 결정 상태: 공통 아키텍처와 단계는 ADR-0006에서 채택했다. 도시별 데이터의 권리, 품질, 갱신 주기와 비용은 실제 자료와 응답을 확인하기 전까지 `[VERIFY]`로 유지한다.
+
+> **2026-07-13 순서 변경:** ADR-0010이 contract-first 순서를 대체한다. 현재
+> `universal_contracts.py`는 experimental seam inventory이며, Melbourne 등 두 번째
+> provider의 실응답 fixture 전에는 필드·Protocol·DB migration을 확장하지 않는다.
 
 ## 1. 목표
 

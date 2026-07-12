@@ -806,3 +806,43 @@
 - 계획과의 차이: 월별 full download 전 parser를 만들지 않는다는 ADR-0009 초안은 일별
   full ZIP 실측 후 strict parser를 허용하도록 갱신했다. 첫 월 backfill의 계약 대조가
   통과하기 전에는 역사 집계를 시작하지 않는다
+
+## 2026-07-13 — 국내·해외 확장 현실성 및 대량 집계 경로
+
+- 관련 커밋: DuckDB compactor `23f3442`, 지역 범위 POI 안전 수정 `128fb0e`,
+  결정·조사 문서는 ADR-0010과
+  `docs/research/2026-07-13-regional-expansion-feasibility.md`
+- 공식 소스 read-only 조사:
+  - 전국 시간×250m 생활/유동인구 공공 피드는 확인되지 않았다. 국토지리정보원 전국
+    인구격자는 정적 인구 통계이며 서울 생활인구의 대체재가 아니다
+  - 부산 스마트교차로 API에서 날짜·시간 입력, `walkCnt` 보행자수와 별도 위경도 API,
+    개발계정 500회/일 메타를 확인. 실제 cadence·coverage·pagination은 fixture 대기
+  - Melbourne 공식 API에서 sensor 위치 134개, 최근 응답 89개 sensor ID·2,135행,
+    2009년 이후 시간별 이력을 확인. `Past Hour` 응답이 약 2시간 39분 범위를 포함해
+    48시간 dedupe/지연 shadow를 선행 gate로 지정
+  - Foursquare current Place Details SSR OpenAPI에서 `hours_popular` array와
+    `popularity` double 필드 존재를 재확인. 전자는 인기 시간 구간, 후자는 의미 설명이
+    부족한 scalar이므로 live 혼잡으로 사용하지 않는다
+- 설계 판정:
+  - public v1과 서울 운영을 최우선으로 유지
+  - 국내 두 번째 provider fixture 후보는 부산, 해외 후보는 Melbourne
+  - `universal_contracts.py`는 런타임 import가 없는 experimental seam inventory로 동결.
+    두 번째 provider fixture 전 contract 필드·Protocol·DB migration 확장 금지
+  - 제품 상태는 향후 `catalog_only`, `baseline_only`, `live_supported`, `suspended`를
+    구분하고 과거 기준선을 “지금”으로 표현하지 않는다
+- 구현:
+  - `compact_living_population.py`는 모든 CP949 source row의 날짜·시간·행정동·CELL_ID·
+    총계·중복을 DuckDB set scan으로 검증하고 allowlist 셀만 Parquet으로 게시한다
+  - allowlist 셀이 일부라도 원본에 없으면 output 생성 전에 실패한다. 입력/allowlist/output
+    SHA-256, 크기, row counts, DuckDB/query/schema version을 원자 manifest로 보존한다
+  - Overture seed/deactivation은 호출자가 지정한 bbox 내부로 제한한다. A지역 seed 뒤
+    B지역 seed를 실행해도 A지역 cafe가 active 상태를 유지하는 회귀 테스트를 추가했다
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+  - 최소 CP949 fixture와 1-cell allowlist를 이용한 compactor dry-run
+- 실제 결과: **395 passed**, compileall PASS, compactor dry-run PASS. dry-run output 파일은
+  생성되지 않았다. 기존 Starlette/httpx deprecation warning 1건만 유지
+- 판정: PASS. 공개 API·score·DB schema 변경 없음
+- `[HUMAN]` 다음 입력: 부산 공공데이터포털 API 키, 두 도시 라이선스·파생 표시 최종 확인.
+  Melbourne 48시간 read-only shadow와 fixture 확보는 다음 구현 단계에서 진행 가능

@@ -1,8 +1,9 @@
-"""Provider-independent contracts for regional crowd observations.
+"""Experimental seams for provider-independent regional observations.
 
-These models define the boundary shared by domestic and international
-providers.  They intentionally contain no persistence, API, or provider
-integration behavior.
+ADR-0010 freezes these models as a seam inventory, not a proven runtime
+contract.  No persistence, API, or provider integration imports them today.
+Only fields confirmed by a second provider fixture may be promoted into the
+runtime boundary; do not expand this module from documentation alone.
 """
 
 from __future__ import annotations

@@ -52,6 +52,7 @@
 - [ADR-0007: 구현 병렬화와 공개·승격 게이트 분리](adr/ADR-0007-parallel-implementation-release-gates.md) — 2026-07-12, Accepted
 - [ADR-0008: 운영 수집은 전용 상시 worker에서 실행](adr/ADR-0008-dedicated-production-worker.md) — 2026-07-12, Accepted
 - [ADR-0009: 생활인구 베이스라인 단위로 250m 격자 채택](adr/ADR-0009-living-population-250m-grid.md) — 2026-07-12, Accepted
+- [ADR-0010: 지역 확장은 두 번째 공급자 실측 후 최소 계약 확정](adr/ADR-0010-evidence-first-regional-expansion.md) — 2026-07-13, Accepted
 
 ## 현재 제품 경로 요약
 
@@ -62,7 +63,7 @@
 | 혼잡도 | 서울 공식 121개 장소, 10분 non-overlapping polling | 과거 `≤12곳` 범위는 legacy 결정 |
 | 외부 매장 링크 | 검증된 provider ID/canonical direct detail URL만 표시 | 이름/좌표 검색 링크·스크레이핑·추측 매칭 금지 |
 | 제품 모드 | 카페 찾기·지역 밀집도·데이터 커버리지 | 데이터 없는 영역의 임의 보간 금지 |
-| 지역 확장 | `RegionProfile`과 공급자 어댑터를 국내·해외가 공유 | 도시명 기반 코어 분기 금지 |
+| 지역 확장 | 부산·Melbourne fixture 뒤 실제 최소 교집합만 계약 승격 | 선행 범용화·도시명 기반 코어 분기 금지 |
 
 Kakao Local의 실응답 fixture와 키/도메인 활성화 기록은 Phase 0의 역사적 검증 증거다.
 ADR-0003가 대체한 제품 POI 경로로 해석하지 않는다.

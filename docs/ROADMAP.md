@@ -8,6 +8,8 @@ ADR이 우선한다.
 
 핵심 가설의 현장 검증과 실시간 production이 완료될 때까지 Track 2·3의 신규 구현과 신규
 확장 문서 작성을 동결한다. 기존 문서와 계약은 보존하되 확장하지 않는다.
+사용자의 2026-07-13 요청에 따른 read-only feasibility 조사는 예외로 수행했지만, 런타임
+확장 동결은 유지한다. ADR-0010에 따라 두 번째 provider fixture 전 범용 계약 확장도 금지한다.
 관리형 PostgreSQL read 전환은 완료됐다. 현재 제품 우선순위는 Track 1의 polygon shadow와
 Confidence V2 검증, 축소 Phase 6 현장 관측이다. 전용 상시 worker 안정화와 백업·복구는
 운영 레인에서 병렬 진행하되 엔진 실측을 대체하지 않는다. 근거와 예외는
