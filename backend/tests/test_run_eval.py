@@ -13,11 +13,13 @@ from scripts.run_eval import (
     EvaluationReport,
     GroundTruth,
     ReliabilitySummary,
+    compare_evaluation_reports,
     evaluate,
     load_observations,
     main,
     quadratic_weighted_cohen_kappa,
     render_markdown,
+    render_shadow_markdown,
     spearman_rank_correlation,
     summarize,
 )
@@ -592,3 +594,132 @@ def test_cli_prints_by_default_and_only_writes_with_output(
     )
     assert capsys.readouterr().out == ""
     assert output.read_text(encoding="utf-8").startswith("# Cafe Crowd Evaluation")
+
+
+def test_evaluate_accepts_generic_versioned_shadow_scorer(tmp_path: Path) -> None:
+    database_url = _seed_database(tmp_path / "eval.db")
+    engine = create_engine(database_url)
+    calls: list[tuple[int, datetime]] = []
+
+    def challenger(cafe, observations, observed_at):
+        calls.append((cafe.id, observed_at))
+        from app.scoring.engine import score_cafe
+
+        return score_cafe(cafe.lat, cafe.lng, observations, now=observed_at)
+
+    with Session(engine) as session:
+        report = evaluate(
+            session,
+            [GroundTruth(2, 1, NOW, "slot", 1)],
+            total_rows=1,
+            invalid_rows=0,
+            scorer=challenger,
+            model_version="v2-shadow",
+        )
+    engine.dispose()
+
+    assert calls == [(1, NOW)]
+    assert report.model_version == "v2-shadow"
+    assert "- Model: `v2-shadow`" in render_markdown(report)
+
+
+def _shadow_point(
+    row: int,
+    cafe_id: int,
+    observed_level: int,
+    predicted_level: int | None,
+    coverage: str,
+) -> EvaluationPoint:
+    return EvaluationPoint(
+        GroundTruth(row, cafe_id, NOW, "one-slot", observed_level),
+        None if predicted_level is None else float(predicted_level),
+        predicted_level,
+        coverage,
+        100.0 if coverage == "covered" else 900.0,
+    )
+
+
+def test_shadow_comparison_is_paired_segmented_and_promotion_ready() -> None:
+    baseline = EvaluationReport(
+        4,
+        0,
+        0,
+        (
+            _shadow_point(2, 1, 1, 1, "covered"),
+            _shadow_point(3, 2, 4, 4, "covered"),
+            _shadow_point(4, 3, 1, 4, "fringe"),
+            _shadow_point(5, 4, 4, 1, "fringe"),
+        ),
+        model_version="v1",
+    )
+    challenger = EvaluationReport(
+        4,
+        0,
+        0,
+        (
+            _shadow_point(2, 1, 1, 1, "covered"),
+            _shadow_point(3, 2, 4, 4, "covered"),
+            _shadow_point(4, 3, 1, 1, "fringe"),
+            _shadow_point(5, 4, 4, 4, "fringe"),
+        ),
+        model_version="v2",
+    )
+
+    comparison = compare_evaluation_reports(baseline, challenger)
+
+    assert comparison.paired_predictions == 4
+    assert comparison.baseline_only_predictions == 0
+    assert comparison.challenger_only_predictions == 0
+    assert comparison.overall.spearman == pytest.approx(1.0)
+    assert comparison.overall.adjacent_accuracy == pytest.approx(0.5)
+    assert comparison.segments[0].segment == "covered"
+    assert comparison.segments[0].metrics.spearman == pytest.approx(0.0)
+    assert comparison.segments[1].segment == "fringe"
+    assert comparison.segments[1].metrics.spearman == pytest.approx(2.0)
+    assert comparison.promotion_passed is True
+    markdown = render_shadow_markdown(comparison)
+    assert "- Promotion gate: `PASS`" in markdown
+    assert "| fringe | 2 | 2.000 | 1.000 |" in markdown
+
+
+def test_shadow_promotion_fails_closed_for_row_or_prediction_loss_and_na() -> None:
+    baseline = EvaluationReport(
+        2,
+        0,
+        0,
+        (
+            _shadow_point(2, 1, 1, 1, "covered"),
+            _shadow_point(3, 2, 4, 4, "fringe"),
+        ),
+        model_version="v1",
+    )
+    challenger = EvaluationReport(
+        1,
+        0,
+        1,
+        (_shadow_point(2, 1, 1, None, "uncovered"),),
+        model_version="v2",
+    )
+
+    comparison = compare_evaluation_reports(baseline, challenger)
+
+    assert comparison.paired_predictions == 0
+    assert comparison.baseline_only_predictions == 2
+    assert comparison.challenger_only_predictions == 0
+    assert comparison.promotion_passed is False
+    checks = {check.name: check for check in comparison.checks}
+    assert checks["identical_primary_rows"].passed is False
+    assert checks["no_coverage_loss"].passed is False
+    assert checks["overall_spearman"].passed is False
+    assert "N/A" in render_shadow_markdown(comparison)
+
+
+def test_shadow_comparison_rejects_same_version_and_duplicate_keys() -> None:
+    point = _shadow_point(2, 1, 1, 1, "covered")
+    report = EvaluationReport(1, 0, 0, (point,), model_version="v1")
+    with pytest.raises(ValueError, match="versions must differ"):
+        compare_evaluation_reports(report, report)
+
+    duplicate = EvaluationReport(2, 0, 0, (point, point), model_version="v2")
+    with pytest.raises(ValueError, match="duplicate primary evaluation key"):
+        compare_evaluation_reports(report, duplicate)

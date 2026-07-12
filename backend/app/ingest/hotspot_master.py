@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 from zipfile import BadZipFile, ZipFile
 
 import shapefile
@@ -21,6 +21,8 @@ from shapely import make_valid
 from openpyxl import load_workbook
 from shapely.geometry import Point, shape
 from shapely.geometry.base import BaseGeometry
+
+from app.config import POLYGON_SHADOW_GEOMETRY_VERSION
 
 
 EXPECTED_HOTSPOT_COUNT: Final = 121
@@ -49,6 +51,18 @@ class HotspotMasterRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class HotspotGeometryRecord:
+    """Verified official geometry for offline polygon shadow scoring."""
+
+    area_cd: str
+    name: str
+    category: str
+    geometry_version: str
+    normalization: Literal["original", "make_valid"]
+    geometry: BaseGeometry
+
+
+@dataclass(frozen=True, slots=True)
 class _MasterMetadata:
     area_cd: str
     name: str
@@ -59,6 +73,7 @@ class _MasterMetadata:
 class _AreaRecord:
     metadata: _MasterMetadata
     geometry: BaseGeometry
+    normalization: Literal["original", "make_valid"]
 
 
 def _required_text(value: object, *, field: str, row_number: int) -> str:
@@ -186,7 +201,9 @@ def _validate_wgs84(prj: bytes) -> None:
         raise HotspotMasterError("Shapefile CRS must be WGS84 longitude/latitude")
 
 
-def _validate_geometry(geometry: BaseGeometry, *, area_cd: str) -> Point:
+def _normalize_geometry(
+    geometry: BaseGeometry, *, area_cd: str
+) -> tuple[BaseGeometry, Literal["original", "make_valid"]]:
     if geometry.geom_type not in {"Polygon", "MultiPolygon"}:
         raise HotspotMasterError(
             f"{area_cd} geometry must be Polygon or MultiPolygon"
@@ -196,8 +213,10 @@ def _validate_geometry(geometry: BaseGeometry, *, area_cd: str) -> Point:
     # The verified official fixture contains one self-intersecting polygon
     # (POI070).  GEOS make_valid deterministically repairs it before deriving
     # the point, retaining all 121 official areas without trusting bad topology.
+    normalization: Literal["original", "make_valid"] = "original"
     if not geometry.is_valid:
         geometry = make_valid(geometry)
+        normalization = "make_valid"
     if (
         geometry.geom_type not in {"Polygon", "MultiPolygon"}
         or geometry.is_empty
@@ -206,6 +225,16 @@ def _validate_geometry(geometry: BaseGeometry, *, area_cd: str) -> Point:
         raise HotspotMasterError(
             f"{area_cd} geometry could not be normalized to a valid polygon"
         )
+    return geometry, normalization
+
+
+def _representative_point(geometry: BaseGeometry, *, area_cd: str) -> Point:
+    if (
+        geometry.geom_type not in {"Polygon", "MultiPolygon"}
+        or geometry.is_empty
+        or not geometry.is_valid
+    ):
+        raise HotspotMasterError(f"{area_cd} geometry must be normalized first")
 
     point = geometry.representative_point()
     if not point.within(geometry):
@@ -260,9 +289,17 @@ def _read_shapefile(path: Path) -> dict[str, _AreaRecord]:
                 raise HotspotMasterError(
                     "Shapefile AREA_CD, AREA_NM, and CATEGORY must be non-empty"
                 )
-            geometry = shape(shape_record.shape.__geo_interface__)
-            _validate_geometry(geometry, area_cd=metadata.area_cd)
-            areas.append(_AreaRecord(metadata=metadata, geometry=geometry))
+            geometry, normalization = _normalize_geometry(
+                shape(shape_record.shape.__geo_interface__),
+                area_cd=metadata.area_cd,
+            )
+            areas.append(
+                _AreaRecord(
+                    metadata=metadata,
+                    geometry=geometry,
+                    normalization=normalization,
+                )
+            )
     except (shapefile.ShapefileException, ValueError) as exc:
         if isinstance(exc, HotspotMasterError):
             raise
@@ -281,10 +318,10 @@ def _read_shapefile(path: Path) -> dict[str, _AreaRecord]:
     return {area.metadata.area_cd: area for area in areas}
 
 
-def load_hotspot_master(
+def _load_joined_areas(
     xlsx_path: str | Path, shapefile_zip_path: str | Path
-) -> tuple[HotspotMasterRecord, ...]:
-    """Return the fully verified master, deterministically ordered by AREA_CD."""
+) -> tuple[tuple[_MasterMetadata, _AreaRecord], ...]:
+    """Return verified metadata/geometry pairs ordered by stable AREA_CD."""
 
     metadata_by_code = _read_xlsx(Path(xlsx_path))
     areas_by_code = _read_shapefile(Path(shapefile_zip_path))
@@ -300,7 +337,7 @@ def load_hotspot_master(
             f"missing metadata: {missing_metadata}"
         )
 
-    records: list[HotspotMasterRecord] = []
+    records: list[tuple[_MasterMetadata, _AreaRecord]] = []
     for area_cd in sorted(xlsx_codes):
         metadata = metadata_by_code[area_cd]
         area = areas_by_code[area_cd]
@@ -309,10 +346,39 @@ def load_hotspot_master(
                 f"metadata mismatch for {area_cd}: XLSX={metadata!r}, "
                 f"Shapefile={area.metadata!r}"
             )
-        point = _validate_geometry(area.geometry, area_cd=area_cd)
+        records.append((metadata, area))
+    return tuple(records)
+
+
+def load_hotspot_geometry_master(
+    xlsx_path: str | Path, shapefile_zip_path: str | Path
+) -> tuple[HotspotGeometryRecord, ...]:
+    """Return normalized official polygons for offline shadow evaluation."""
+
+    return tuple(
+        HotspotGeometryRecord(
+            area_cd=metadata.area_cd,
+            name=metadata.name,
+            category=metadata.category,
+            geometry_version=POLYGON_SHADOW_GEOMETRY_VERSION,
+            normalization=area.normalization,
+            geometry=area.geometry,
+        )
+        for metadata, area in _load_joined_areas(xlsx_path, shapefile_zip_path)
+    )
+
+
+def load_hotspot_master(
+    xlsx_path: str | Path, shapefile_zip_path: str | Path
+) -> tuple[HotspotMasterRecord, ...]:
+    """Return the fully verified point master ordered by stable AREA_CD."""
+
+    records: list[HotspotMasterRecord] = []
+    for metadata, area in _load_joined_areas(xlsx_path, shapefile_zip_path):
+        point = _representative_point(area.geometry, area_cd=metadata.area_cd)
         records.append(
             HotspotMasterRecord(
-                area_cd=area_cd,
+                area_cd=metadata.area_cd,
                 name=metadata.name,
                 category=metadata.category,
                 lat=point.y,

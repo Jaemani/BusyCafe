@@ -70,6 +70,30 @@ D_FLOOR_M: Final = 50
 TAU_MIN: Final = 15
 CONF_HIGH: Final = 0.55
 CONF_MID: Final = 0.30
+# Offline-only geometry challenger. An independent namespace keeps shadow
+# runs reproducible if public v1 defaults are calibrated later.
+POLYGON_SHADOW_MODEL_VERSION: Final = "v2-polygon-shadow"
+POLYGON_SHADOW_GEOMETRY_VERSION: Final = "oa-21285-2026-04-02-make-valid-v1"
+POLYGON_SHADOW_R_MAX_M: Final = R_MAX_M
+POLYGON_SHADOW_COVERED_M: Final = COVERED_M
+POLYGON_SHADOW_K_NEIGHBORS: Final = K_NEIGHBORS
+POLYGON_SHADOW_D_FLOOR_M: Final = D_FLOOR_M
+POLYGON_SHADOW_TAU_MIN: Final = TAU_MIN
+POLYGON_SHADOW_CONF_HIGH: Final = CONF_HIGH
+POLYGON_SHADOW_CONF_MID: Final = CONF_MID
+SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
+# Confidence V2 remains a shadow input-quality score until empirical
+# calibration passes Track 1 Gate D. These weights intentionally exclude the
+# validation-sufficiency placeholder: sample quantity is not runtime input
+# quality and must not be presented as an accuracy probability.
+CONF_V2_SPATIAL_WEIGHT: Final = 0.30
+CONF_V2_FRESHNESS_WEIGHT: Final = 0.30
+CONF_V2_AGREEMENT_WEIGHT: Final = 0.25
+CONF_V2_SOURCE_HEALTH_WEIGHT: Final = 0.15
+CONF_V2_SINGLE_NEIGHBOR_AGREEMENT: Final = 0.50
+CONF_V2_ALIGNMENT_TAU_MIN: Final = 10.0
+CONF_V2_PARTIAL_CYCLE_FACTOR: Final = 0.50
+CONF_V2_VALIDATION_TARGET_SAMPLES: Final = 120
 STALE_WARN_MIN: Final = 25
 FRESHNESS_MAX_FUTURE_SKEW_MIN: Final = 2
 MAX_CAFES_PER_VIEWPORT: Final = 5_000
@@ -80,6 +104,10 @@ EVAL_PILOT_SLOTS: Final = 3
 EVAL_OBSERVATION_RADIUS_M: Final = 50
 EVAL_OBSERVATION_DURATION_MIN: Final = 3
 EVAL_AREA_PEDESTRIANS_PER_MIN_THRESHOLDS: Final = (5, 15, 30)
+EVAL_MIN_SPEARMAN: Final = 0.50
+EVAL_MIN_ADJACENT_ACCURACY: Final = 0.80
+# Gate B requires no measured segment regression before public promotion.
+SHADOW_MAX_SEGMENT_REGRESSION: Final = 0.0
 FRONTEND_CORS_ORIGINS: Final = (
     "http://localhost:5188",
     "http://127.0.0.1:5188",

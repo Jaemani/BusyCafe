@@ -11,10 +11,12 @@ from openpyxl import load_workbook
 from shapely import make_valid
 from shapely.geometry import Point, shape
 
+from app.config import POLYGON_SHADOW_GEOMETRY_VERSION
 from app.ingest.hotspot_master import (
     EXPECTED_HOTSPOT_COUNT,
     SEOUL_WGS84_BBOX,
     HotspotMasterError,
+    load_hotspot_geometry_master,
     load_hotspot_master,
 )
 
@@ -113,6 +115,28 @@ def test_loads_and_deterministically_joins_official_binary_fixtures() -> None:
     assert by_code["POI001"].category == "관광특구"
     assert by_code["POI007"].name == "홍대 관광특구"
     assert by_code["POI131"].name == "숭례문"
+
+
+def test_geometry_loader_exposes_normalized_versioned_official_polygons() -> None:
+    records = load_hotspot_geometry_master(XLSX, SHAPEFILE_ZIP)
+
+    assert len(records) == EXPECTED_HOTSPOT_COUNT
+    assert [record.area_cd for record in records] == sorted(
+        record.area_cd for record in records
+    )
+    assert {record.geometry_version for record in records} == {
+        POLYGON_SHADOW_GEOMETRY_VERSION
+    }
+    assert all(record.geometry.is_valid for record in records)
+    assert all(
+        record.geometry.geom_type in {"Polygon", "MultiPolygon"}
+        for record in records
+    )
+    assert {
+        record.area_cd
+        for record in records
+        if record.normalization == "make_valid"
+    } == {"POI070"}
 
 
 def test_all_representative_points_are_wgs84_coordinates_inside_seoul() -> None:

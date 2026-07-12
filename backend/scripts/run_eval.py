@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import csv
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
@@ -24,12 +24,15 @@ from sqlalchemy.orm import Session
 from app.config import (
     COVERED_M,
     EVAL_AREA_PEDESTRIANS_PER_MIN_THRESHOLDS,
+    EVAL_MIN_ADJACENT_ACCURACY,
+    EVAL_MIN_SPEARMAN,
     R_MAX_M,
     SCORING_MODEL_VERSION,
+    SHADOW_MAX_SEGMENT_REGRESSION,
 )
 from app.database import create_db_engine
 from app.models import Cafe, Hotspot, HotspotSnapshot
-from app.scoring.engine import HotspotObservation, score_cafe
+from app.scoring.engine import CafeEstimate, HotspotObservation, score_cafe
 
 
 REQUIRED_COLUMNS = frozenset(
@@ -93,6 +96,51 @@ class EvaluationReport:
     uncovered_rows: int
     points: tuple[EvaluationPoint, ...]
     reliability: ReliabilitySummary = ReliabilitySummary(0, None)
+    model_version: str = SCORING_MODEL_VERSION
+
+
+EvaluationScorer = Callable[
+    [Cafe, Sequence[HotspotObservation], datetime], CafeEstimate
+]
+
+
+@dataclass(frozen=True, slots=True)
+class MetricDelta:
+    baseline: MetricSummary
+    challenger: MetricSummary
+    spearman: float | None
+    adjacent_accuracy: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentDelta:
+    segment: Literal["covered", "fringe"]
+    metrics: MetricDelta
+
+
+@dataclass(frozen=True, slots=True)
+class PromotionCheck:
+    name: str
+    passed: bool
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class ShadowComparison:
+    baseline_model: str
+    challenger_model: str
+    baseline_rows: int
+    challenger_rows: int
+    paired_predictions: int
+    baseline_only_predictions: int
+    challenger_only_predictions: int
+    overall: MetricDelta
+    segments: tuple[SegmentDelta, ...]
+    checks: tuple[PromotionCheck, ...]
+
+    @property
+    def promotion_passed(self) -> bool:
+        return bool(self.checks) and all(check.passed for check in self.checks)
 
 
 def _parse_iso_datetime(value: str | None) -> datetime:
@@ -319,12 +367,27 @@ def _observations_at(
     )
 
 
+def _score_v1(
+    cafe: Cafe,
+    observations: Sequence[HotspotObservation],
+    observed_at: datetime,
+) -> CafeEstimate:
+    return score_cafe(
+        cafe.lat,
+        cafe.lng,
+        observations,
+        now=observed_at,
+    )
+
+
 def evaluate(
     session: Session,
     truths: Sequence[GroundTruth],
     *,
     total_rows: int,
     invalid_rows: int,
+    scorer: EvaluationScorer = _score_v1,
+    model_version: str = SCORING_MODEL_VERSION,
 ) -> EvaluationReport:
     primary_truths = tuple(
         truth for truth in truths if truth.observation_role == "primary"
@@ -347,11 +410,10 @@ def evaluate(
         cafe = cafes.get(truth.cafe_id)
         if cafe is None:
             continue
-        estimate = score_cafe(
-            cafe.lat,
-            cafe.lng,
+        estimate = scorer(
+            cafe,
             observations_by_time[truth.observed_at],
-            now=truth.observed_at,
+            truth.observed_at,
         )
         if estimate.coverage == "uncovered":
             uncovered += 1
@@ -370,6 +432,7 @@ def evaluate(
         uncovered_rows=uncovered,
         points=tuple(points),
         reliability=summarize_reliability(truths),
+        model_version=model_version,
     )
 
 
@@ -523,6 +586,209 @@ def summarize(
     )
 
 
+def _metric_delta(baseline: MetricSummary, challenger: MetricSummary) -> MetricDelta:
+    return MetricDelta(
+        baseline=baseline,
+        challenger=challenger,
+        spearman=(
+            None
+            if baseline.spearman is None or challenger.spearman is None
+            else challenger.spearman - baseline.spearman
+        ),
+        adjacent_accuracy=(
+            None
+            if baseline.adjacent_accuracy is None
+            or challenger.adjacent_accuracy is None
+            else challenger.adjacent_accuracy - baseline.adjacent_accuracy
+        ),
+    )
+
+
+def _point_key(point: EvaluationPoint) -> tuple[int, datetime, str]:
+    return (point.truth.cafe_id, point.truth.observed_at, point.truth.slot)
+
+
+def _points_by_key(
+    points: Sequence[EvaluationPoint],
+) -> dict[tuple[int, datetime, str], EvaluationPoint]:
+    indexed: dict[tuple[int, datetime, str], EvaluationPoint] = {}
+    for point in points:
+        key = _point_key(point)
+        if key in indexed:
+            raise ValueError(
+                "duplicate primary evaluation key: "
+                f"{point.truth.cafe_id}/{point.truth.observed_at.isoformat()}/"
+                f"{point.truth.slot}"
+            )
+        indexed[key] = point
+    return indexed
+
+
+def _is_valid_prediction(point: EvaluationPoint) -> bool:
+    return point.predicted_score is not None and point.predicted_level is not None
+
+
+def compare_evaluation_reports(
+    baseline: EvaluationReport,
+    challenger: EvaluationReport,
+    *,
+    minimum_spearman: float = EVAL_MIN_SPEARMAN,
+    minimum_adjacent_accuracy: float = EVAL_MIN_ADJACENT_ACCURACY,
+    maximum_segment_regression: float = SHADOW_MAX_SEGMENT_REGRESSION,
+) -> ShadowComparison:
+    """Compare two models on an identical primary-observation contract.
+
+    Metrics use only rows where both models produced a prediction. Distance
+    segments are frozen from the baseline so a challenger cannot improve a
+    segment by merely reclassifying rows. Missing rows and undefined metrics
+    remain visible and fail the promotion gate.
+    """
+
+    if not 0 <= minimum_spearman <= 1:
+        raise ValueError("minimum_spearman must be between zero and one")
+    if not 0 <= minimum_adjacent_accuracy <= 1:
+        raise ValueError("minimum_adjacent_accuracy must be between zero and one")
+    if not 0 <= maximum_segment_regression <= 1:
+        raise ValueError("maximum_segment_regression must be between zero and one")
+    if baseline.model_version == challenger.model_version:
+        raise ValueError("baseline and challenger model versions must differ")
+
+    baseline_by_key = _points_by_key(baseline.points)
+    challenger_by_key = _points_by_key(challenger.points)
+    baseline_keys = set(baseline_by_key)
+    challenger_keys = set(challenger_by_key)
+    common_keys = sorted(baseline_keys & challenger_keys)
+    identical_rows = baseline_keys == challenger_keys and all(
+        baseline_by_key[key].truth == challenger_by_key[key].truth
+        for key in common_keys
+    )
+
+    baseline_valid_keys = {
+        key for key, point in baseline_by_key.items() if _is_valid_prediction(point)
+    }
+    challenger_valid_keys = {
+        key for key, point in challenger_by_key.items() if _is_valid_prediction(point)
+    }
+    paired_keys = sorted(baseline_valid_keys & challenger_valid_keys)
+    paired_baseline = tuple(baseline_by_key[key] for key in paired_keys)
+    paired_challenger = tuple(challenger_by_key[key] for key in paired_keys)
+    overall = _metric_delta(
+        summarize(paired_baseline),
+        summarize(paired_challenger),
+    )
+
+    segment_deltas: list[SegmentDelta] = []
+    for segment in ("covered", "fringe"):
+        segment_keys = [
+            key
+            for key in paired_keys
+            if baseline_by_key[key].coverage == segment
+        ]
+        segment_deltas.append(
+            SegmentDelta(
+                segment=segment,
+                metrics=_metric_delta(
+                    summarize(baseline_by_key[key] for key in segment_keys),
+                    summarize(challenger_by_key[key] for key in segment_keys),
+                ),
+            )
+        )
+
+    checks: list[PromotionCheck] = [
+        PromotionCheck(
+            "identical_primary_rows",
+            identical_rows,
+            f"baseline={len(baseline_keys)}, challenger={len(challenger_keys)}",
+        ),
+        PromotionCheck(
+            "no_coverage_loss",
+            not (baseline_valid_keys - challenger_valid_keys),
+            "baseline_only="
+            f"{len(baseline_valid_keys - challenger_valid_keys)}, "
+            f"challenger_only={len(challenger_valid_keys - baseline_valid_keys)}",
+        ),
+    ]
+
+    spearman_passed = (
+        overall.challenger.spearman is not None
+        and overall.baseline.spearman is not None
+        and overall.challenger.spearman >= minimum_spearman
+        and overall.spearman is not None
+        and overall.spearman >= 0
+    )
+    checks.append(
+        PromotionCheck(
+            "overall_spearman",
+            spearman_passed,
+            f"baseline={_metric(overall.baseline.spearman)}, "
+            f"challenger={_metric(overall.challenger.spearman)}, "
+            f"minimum={minimum_spearman:.3f}",
+        )
+    )
+    adjacent_passed = (
+        overall.challenger.adjacent_accuracy is not None
+        and overall.baseline.adjacent_accuracy is not None
+        and overall.challenger.adjacent_accuracy >= minimum_adjacent_accuracy
+        and overall.adjacent_accuracy is not None
+        and overall.adjacent_accuracy >= 0
+    )
+    checks.append(
+        PromotionCheck(
+            "overall_adjacent_accuracy",
+            adjacent_passed,
+            f"baseline={_metric(overall.baseline.adjacent_accuracy)}, "
+            f"challenger={_metric(overall.challenger.adjacent_accuracy)}, "
+            f"minimum={minimum_adjacent_accuracy:.3f}",
+        )
+    )
+
+    for segment_delta in segment_deltas:
+        metrics = segment_delta.metrics
+        no_serious_regression = (
+            metrics.spearman is not None
+            and metrics.adjacent_accuracy is not None
+            and metrics.spearman >= -maximum_segment_regression
+            and metrics.adjacent_accuracy >= -maximum_segment_regression
+        )
+        checks.append(
+            PromotionCheck(
+                f"{segment_delta.segment}_no_serious_regression",
+                no_serious_regression,
+                f"spearman_delta={_metric(metrics.spearman)}, "
+                f"adjacent_delta={_metric(metrics.adjacent_accuracy)}, "
+                f"tolerance={maximum_segment_regression:.3f}",
+            )
+        )
+
+    fringe = next(item.metrics for item in segment_deltas if item.segment == "fringe")
+    fringe_improved = (
+        fringe.spearman is not None
+        and fringe.adjacent_accuracy is not None
+        and (fringe.spearman > 0 or fringe.adjacent_accuracy > 0)
+    )
+    checks.append(
+        PromotionCheck(
+            "fringe_improvement_evidence",
+            fringe_improved,
+            f"spearman_delta={_metric(fringe.spearman)}, "
+            f"adjacent_delta={_metric(fringe.adjacent_accuracy)}",
+        )
+    )
+
+    return ShadowComparison(
+        baseline_model=baseline.model_version,
+        challenger_model=challenger.model_version,
+        baseline_rows=len(baseline_keys),
+        challenger_rows=len(challenger_keys),
+        paired_predictions=len(paired_keys),
+        baseline_only_predictions=len(baseline_valid_keys - challenger_valid_keys),
+        challenger_only_predictions=len(challenger_valid_keys - baseline_valid_keys),
+        overall=overall,
+        segments=tuple(segment_deltas),
+        checks=tuple(checks),
+    )
+
+
 def _metric(value: float | None) -> str:
     return "N/A" if value is None else f"{value:.3f}"
 
@@ -540,7 +806,7 @@ def render_markdown(report: EvaluationReport) -> str:
     lines = [
         "# Cafe Crowd Evaluation",
         "",
-        f"- Model: `{SCORING_MODEL_VERSION}`",
+        f"- Model: `{report.model_version}`",
         f"- Input rows: {report.total_rows}",
         f"- Valid predictions: {overall.observations}",
         f"- Uncovered: {report.uncovered_rows}",
@@ -635,6 +901,63 @@ def render_markdown(report: EvaluationReport) -> str:
             f"{_metric(venue_utility.adjacent_accuracy)} |",
         ]
     )
+    return "\n".join(lines) + "\n"
+
+
+def render_shadow_markdown(comparison: ShadowComparison) -> str:
+    lines = [
+        "# Cafe Crowd Shadow Model Comparison",
+        "",
+        f"- Baseline: `{comparison.baseline_model}`",
+        f"- Challenger: `{comparison.challenger_model}`",
+        f"- Baseline primary rows: {comparison.baseline_rows}",
+        f"- Challenger primary rows: {comparison.challenger_rows}",
+        f"- Paired predictions: {comparison.paired_predictions}",
+        f"- Coverage changes: baseline-only "
+        f"{comparison.baseline_only_predictions}, challenger-only "
+        f"{comparison.challenger_only_predictions}",
+        f"- Promotion gate: `{'PASS' if comparison.promotion_passed else 'FAIL'}`",
+        "- Metrics are paired on primary observations only; reliability rows "
+        "never enter model metrics.",
+        "- Distance segments are frozen from the baseline model.",
+        "",
+        "## Overall paired metrics",
+        "",
+        "| Metric | Baseline | Challenger | Delta |",
+        "| --- | ---: | ---: | ---: |",
+        f"| Spearman | {_metric(comparison.overall.baseline.spearman)} | "
+        f"{_metric(comparison.overall.challenger.spearman)} | "
+        f"{_metric(comparison.overall.spearman)} |",
+        f"| Adjacent accuracy | "
+        f"{_metric(comparison.overall.baseline.adjacent_accuracy)} | "
+        f"{_metric(comparison.overall.challenger.adjacent_accuracy)} | "
+        f"{_metric(comparison.overall.adjacent_accuracy)} |",
+        "",
+        "## Paired metrics by baseline distance segment",
+        "",
+        "| Segment | Observations | Spearman Δ | Adjacent accuracy Δ |",
+        "| --- | ---: | ---: | ---: |",
+    ]
+    for segment in comparison.segments:
+        lines.append(
+            f"| {segment.segment} | {segment.metrics.baseline.observations} | "
+            f"{_metric(segment.metrics.spearman)} | "
+            f"{_metric(segment.metrics.adjacent_accuracy)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Promotion checks",
+            "",
+            "| Check | Result | Evidence |",
+            "| --- | --- | --- |",
+        ]
+    )
+    for check in comparison.checks:
+        lines.append(
+            f"| `{check.name}` | {'PASS' if check.passed else 'FAIL'} | "
+            f"{_escape_cell(check.detail)} |"
+        )
     return "\n".join(lines) + "\n"
 
 
