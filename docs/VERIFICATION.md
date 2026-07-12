@@ -685,3 +685,22 @@
 - 판정: PASS — 기존 키로 250m 격자 접근 가능, 단위 결정(ADR-0009) 실측 근거 확보
 - 후속 조치: 월별 ZIP 파일 원본 확보 후 스키마·파서 확정(INC-2026-001 순서),
   CELL_ID → geometry 변환 검증, citydata 혼잡 라벨과의 상관 실험 설계
+
+## 2026-07-12 — 국가 격자 CELL_ID 디코더 표본 검증
+
+- 실행 환경: backend/, uv, pytest + 일회성 검증 스크립트(scratchpad)
+- 검증자: Claude (Fable 판단·검증, opus 부분 구현 후 세션 한도로 중단 → Fable이 완료)
+- 관련 커밋: 이 커밋. 상세 수치는
+  `docs/research/2026-07-12-cell-id-decode.md`
+- 입력: `Se250MSpopLocalResd` 20260708 실응답 1000행(고유 셀 817, 행정동 48).
+  검증용 실호출 원본은 scratchpad에만 두고 5행 fixture는 기존 커밋 유지
+- 실행 명령: `rtk proxy uv run python -m pytest tests` ·
+  `rtk proxy uv run python -m compileall -q app scripts` · 검증 스크립트 1회
+- 기대 결과: 디코드된 셀이 서울 bbox 안, 행정동 군집 정합, 250m 간격, 회귀 테스트 통과
+- 실제 결과: 294 passed(+16), compileall PASS. bbox 817/817, 동 군집 최대 쌍거리
+  중앙값 1,344m·최악 3,603m, 종로구 389셀 centroid (37.5899, 126.9806) 정합,
+  왕복 투영 오차 ≤ 0.000011m, 인접 셀 간격 250.56m
+- 판정: PASS(표본 기반). 공식 250m 격자 경계 파일과의 전수 대조는 `[VERIFY]` —
+  geometry가 점수 계산에 들어가기 전 필수
+- 계획과의 차이: 구현 에이전트가 세션 한도로 2회 중단되어 테스트·검증·문서는
+  오케스트레이터가 직접 완료했다. 표본이 종로·용산 구간에 한정(정렬 첫 1000행)

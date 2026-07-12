@@ -20,6 +20,9 @@
   `v3-density-shadow` 채점기. v2 polygon 공간 선택과 국소 equirectangular 면적 근사를
   공유하고, ppltn 결측 관측은 제외·집계하며, 보정된 기준선 전에는 1~4 레벨 매핑을
   의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
+- 국가 격자 `CELL_ID` 디코더(`app/ingest/national_grid.py`): 순수 EPSG:5179 역TM
+  구현으로 250m 셀을 WGS84 중심·경계로 변환. 실데이터 817셀 표본 검증
+  (bbox 817/817, 종로구 정합, 인접 간격 250.56m) — 공식 격자 경계 전수 대조는 `[VERIFY]`
 - 생활인구 ↔ citydata 상관 실험 설계
   (`docs/research/2026-07-12-baseline-correlation-design.md`): 프로파일 상관 주 지표와
   판정 기준을 데이터 관측 전에 고정, worker 연속 수집을 선행 조건으로 명시
