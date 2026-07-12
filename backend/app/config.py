@@ -53,6 +53,16 @@ LIVING_POPULATION_HISTORY_START_MONTH: Final = "202301"
 LIVING_POPULATION_BACKFILL_MANIFEST_FILENAME: Final = "backfill_manifest.json"
 LIVING_POPULATION_BACKFILL_MANIFEST_SCHEMA_VERSION: Final = 1
 LIVING_POPULATION_HASH_CHUNK_BYTES: Final = 1024 * 1024
+# Offline-only compact extract used by the living-population baseline research.
+# These versions are persisted in every manifest so a change in validation,
+# normalization, or physical output is never mistaken for the same dataset.
+LIVING_POPULATION_COMPACT_SCHEMA_VERSION: Final = 1
+LIVING_POPULATION_COMPACT_QUERY_VERSION: Final = "oa-22784-cp949-cells-v1"
+LIVING_POPULATION_COMPACT_MANIFEST_SUFFIX: Final = ".manifest.json"
+LIVING_POPULATION_COMPACT_PART_SUFFIX: Final = ".part"
+LIVING_POPULATION_COMPACT_PARQUET_COMPRESSION: Final = "zstd"
+LIVING_POPULATION_COMPACT_PARQUET_ROW_GROUP_SIZE: Final = 100_000
+LIVING_POPULATION_COMPACT_MISSING_CELL_AUDIT_LIMIT: Final = 20
 
 # Legacy Phase 0 verification only; not part of the product runtime.
 KAKAO_LOCAL_BASE_URL: Final = "https://dapi.kakao.com"
