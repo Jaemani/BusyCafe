@@ -51,6 +51,7 @@
 - [ADR-0006: 세 개 제품 트랙과 유니버설 혼잡 데이터 계약](adr/ADR-0006-universal-expansion-tracks.md) — 2026-07-11, Accepted
 - [ADR-0007: 구현 병렬화와 공개·승격 게이트 분리](adr/ADR-0007-parallel-implementation-release-gates.md) — 2026-07-12, Accepted
 - [ADR-0008: 운영 수집은 전용 상시 worker에서 실행](adr/ADR-0008-dedicated-production-worker.md) — 2026-07-12, Accepted
+- [ADR-0009: 생활인구 베이스라인 단위로 250m 격자 채택](adr/ADR-0009-living-population-250m-grid.md) — 2026-07-12, Accepted
 
 ## 현재 제품 경로 요약
 

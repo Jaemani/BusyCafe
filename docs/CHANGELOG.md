@@ -20,6 +20,9 @@
   `v3-density-shadow` 채점기. v2 polygon 공간 선택과 국소 equirectangular 면적 근사를
   공유하고, ppltn 결측 관측은 제외·집계하며, 보정된 기준선 전에는 1~4 레벨 매핑을
   의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
+- 생활인구 베이스라인 단위를 250m 격자로 확정(ADR-0009, 사용자 승인). 기존
+  `SEOUL_API_KEY`로 `Se250MSpopLocalResd` 실호출 검증(XML 정상·JSON 포털 결함),
+  원본 5행 fixture와 SHA-256 보존
 - `seed_cafes.py` 읽기 전용 `--confidence-report` 모드: 로컬 Overture extract의
   confidence 버킷(0.05 단위)·카테고리 분포와 현재 임계값 통과 비율을 DB 쓰기·네트워크
   없이 확인. cache가 사전 필터된 구간은 0 대신 filtered로 표기
