@@ -11,7 +11,7 @@ No I/O, database model, public API, or public v1 score depends on this module.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from math import fsum, isfinite, log1p, sqrt
 from typing import Literal, Sequence
 
@@ -41,6 +41,24 @@ FreshnessStatus = Literal["fresh", "stale", "n/a"]
 
 
 @dataclass(frozen=True, slots=True)
+class ActivityBaselineReference:
+    """Auditable reference to the historical bucket behind one baseline."""
+
+    model_version: str
+    source_version: str
+    source_hashes: tuple[str, ...]
+    calendar_version: str
+    window_start: date
+    window_end_exclusive: date
+    cutoff: date
+    selected_bucket: str
+    raw_n: int
+    effective_n: float
+    fallback_depth: int
+    masked_share: float
+
+
+@dataclass(frozen=True, slots=True)
 class ActivityContributorInput:
     """One source-local observation and its matching temporal baseline.
 
@@ -53,6 +71,7 @@ class ActivityContributorInput:
     observation_type: ObservationType
     baseline_mean: float
     baseline_log_dispersion: float | None
+    baseline_reference: ActivityBaselineReference
     value: float | None
     value_min: float | None
     value_max: float | None
@@ -73,6 +92,7 @@ class ActivityContributorEvidence:
     observation_type: ObservationType
     baseline_mean: float
     baseline_log_dispersion: float | None
+    baseline_reference: ActivityBaselineReference
     # Source evidence remains visible with stale freshness, but is never promoted to
     # the result's current value or anomaly fields.
     source_value: float | None
@@ -100,6 +120,7 @@ class ActivityContributorEvidence:
 class ActivityShadowEstimate:
     model_version: str
     source_id: str | None
+    source_version: str | None
     observation_type: ObservationType
     signal_mode: ActivityMode
     freshness: FreshnessStatus
@@ -136,6 +157,38 @@ def _validate_unit(value: float, name: str) -> None:
 
 def _clip_standardized(value: float, cap: float) -> float:
     return min(cap, max(-cap, value))
+
+
+def _validate_baseline_reference(reference: ActivityBaselineReference) -> None:
+    if any(
+        not value.strip()
+        for value in (
+            reference.model_version,
+            reference.source_version,
+            reference.calendar_version,
+            reference.selected_bucket,
+        )
+    ):
+        raise ValueError("baseline reference text fields must be non-empty")
+    if not reference.source_hashes or any(
+        not value.strip() for value in reference.source_hashes
+    ):
+        raise ValueError("baseline source_hashes must contain non-empty values")
+    if reference.window_start >= reference.window_end_exclusive:
+        raise ValueError("baseline window must be non-empty")
+    if reference.cutoff != reference.window_end_exclusive:
+        raise ValueError("baseline cutoff must equal window_end_exclusive")
+    if reference.raw_n <= 0:
+        raise ValueError("baseline raw_n must be positive")
+    if (
+        not isfinite(reference.effective_n)
+        or reference.effective_n <= 0
+        or reference.effective_n > reference.raw_n
+    ):
+        raise ValueError("baseline effective_n must be in (0, raw_n]")
+    if reference.fallback_depth < 0:
+        raise ValueError("baseline fallback_depth must be non-negative")
+    _validate_unit(reference.masked_share, "baseline masked_share")
 
 
 def _source_interval(
@@ -176,6 +229,7 @@ def _validate_contributor(
     if contributor.observation_type != observation_type:
         raise ValueError("different observation_type raw values cannot be combined")
     _validate_finite_nonnegative(contributor.baseline_mean, "baseline_mean")
+    _validate_baseline_reference(contributor.baseline_reference)
     if contributor.baseline_log_dispersion is not None:
         _validate_finite_nonnegative(
             contributor.baseline_log_dispersion,
@@ -222,6 +276,17 @@ def _validate_contributor(
             raise ValueError("observed_at exceeds allowed future skew")
         if contributor.observed_at > contributor.fetched_at:
             raise ValueError("observed_at must not be after fetched_at")
+    else:
+        target_before_fetch_min = (
+            contributor.fetched_at - contributor.observed_at
+        ).total_seconds() / 60.0
+        if target_before_fetch_min > max_future_skew_min:
+            raise ValueError("forecast target must not be before fetched_at")
+        target_age_min = (now - contributor.observed_at).total_seconds() / 60.0
+        if target_age_min > max_future_skew_min:
+            raise ValueError("forecast target has expired")
+    if contributor.baseline_reference.cutoff > contributor.observed_at.date():
+        raise ValueError("baseline cutoff must not be after observation date")
     return interval
 
 
@@ -271,6 +336,7 @@ def calculate_activity_shadow(
         return ActivityShadowEstimate(
             model_version=ACTIVITY_SHADOW_MODEL_VERSION,
             source_id=None,
+            source_version=None,
             observation_type=observation_type,
             signal_mode=mode,
             freshness="n/a",
@@ -311,6 +377,10 @@ def calculate_activity_shadow(
     if len(source_ids) != 1:
         raise ValueError("different source_id raw values cannot be combined")
     source_id = next(iter(source_ids))
+    source_versions = {item.source_version for item in sorted_inputs}
+    if len(source_versions) != 1:
+        raise ValueError("different source_version values cannot be combined")
+    source_version = next(iter(source_versions))
 
     intervals: list[tuple[float, float] | None] = []
     for contributor in sorted_inputs:
@@ -326,10 +396,10 @@ def calculate_activity_shadow(
 
     weight_sum = fsum(item.weight for item in sorted_inputs)
     normalized_weights = tuple(item.weight / weight_sum for item in sorted_inputs)
-    baseline_mean = fsum(
-        weight * item.baseline_mean
-        for item, weight in zip(sorted_inputs, normalized_weights, strict=True)
-    )
+    # Raw counts and baselines are spatial-support-specific.  Even within one
+    # source they are not an aggregateable product value; only source-local
+    # anomalies may combine.  A single contributor can expose its raw evidence.
+    baseline_mean = sorted_inputs[0].baseline_mean if len(sorted_inputs) == 1 else None
     aggregate_freshness = fsum(
         weight * item.freshness_score
         for item, weight in zip(sorted_inputs, normalized_weights, strict=True)
@@ -340,21 +410,26 @@ def calculate_activity_shadow(
     )
 
     if mode == "observed":
-        is_stale = any(
+        stale_flags = tuple(
             item.observed_at is not None
             and (now - item.observed_at).total_seconds() / 60.0 > stale_after_min
             for item in sorted_inputs
         )
-        freshness_status: FreshnessStatus = "stale" if is_stale else "fresh"
     elif mode == "forecast":
-        is_stale = any(
+        stale_flags = tuple(
             (now - item.fetched_at).total_seconds() / 60.0 > stale_after_min
             for item in sorted_inputs
         )
-        freshness_status = "stale" if is_stale else "fresh"
     else:
-        is_stale = False
-        freshness_status = "n/a"
+        stale_flags = ()
+    if stale_flags and any(stale_flags) and not all(stale_flags):
+        raise ValueError(
+            "mixed fresh and stale contributors require separate estimates"
+        )
+    is_stale = bool(stale_flags) and all(stale_flags)
+    freshness_status: FreshnessStatus = (
+        "n/a" if mode == "baseline_only" else "stale" if is_stale else "fresh"
+    )
     # Stale source values stay in contributor evidence, but are not treated as
     # current activity and therefore cannot produce an anomaly.
     active = mode in ("observed", "forecast") and not is_stale
@@ -386,6 +461,7 @@ def calculate_activity_shadow(
             observation_type=item.observation_type,
             baseline_mean=item.baseline_mean,
             baseline_log_dispersion=item.baseline_log_dispersion,
+            baseline_reference=item.baseline_reference,
             source_value=item.value,
             source_value_min=item.value_min,
             source_value_max=item.value_max,
@@ -434,6 +510,7 @@ def calculate_activity_shadow(
         return ActivityShadowEstimate(
             model_version=ACTIVITY_SHADOW_MODEL_VERSION,
             source_id=source_id,
+            source_version=source_version,
             observation_type=observation_type,
             signal_mode=mode,
             freshness=freshness_status,
@@ -520,7 +597,8 @@ def calculate_activity_shadow(
     else:
         standardized_min = standardized_max = None
 
-    point_result = current_min == current_max
+    expose_raw = len(sorted_inputs) == 1
+    point_result = expose_raw and current_min == current_max
     anomaly_point_result = anomaly_min == anomaly_max
     standardized_point_result = (
         standardized_min is not None and standardized_min == standardized_max
@@ -528,13 +606,14 @@ def calculate_activity_shadow(
     return ActivityShadowEstimate(
         model_version=ACTIVITY_SHADOW_MODEL_VERSION,
         source_id=source_id,
+        source_version=source_version,
         observation_type=observation_type,
         signal_mode=mode,
         freshness=freshness_status,
         baseline_mean=baseline_mean,
         current_value=current_min if point_result else None,
-        current_value_min=current_min,
-        current_value_max=current_max,
+        current_value_min=current_min if expose_raw else None,
+        current_value_max=current_max if expose_raw else None,
         anomaly_log1p=anomaly_min if anomaly_point_result else None,
         anomaly_log1p_min=anomaly_min,
         anomaly_log1p_max=anomaly_max,

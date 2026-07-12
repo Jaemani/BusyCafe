@@ -1,19 +1,37 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from math import log1p
 
 import pytest
 
 from app.config import ACTIVITY_SHADOW_MODEL_VERSION
 from app.scoring.activity_shadow import (
+    ActivityBaselineReference,
     ActivityContributorInput,
     calculate_activity_shadow,
 )
 
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+
+
+def baseline_reference() -> ActivityBaselineReference:
+    return ActivityBaselineReference(
+        model_version="temporal-baseline-shadow-v1",
+        source_version="fixture-history-v1",
+        source_hashes=("sha256:fixture",),
+        calendar_version="kr-holidays-fixture-v1",
+        window_start=date(2026, 6, 13),
+        window_end_exclusive=date(2026, 7, 13),
+        cutoff=date(2026, 7, 13),
+        selected_bucket="iso_weekday_day_type",
+        raw_n=4,
+        effective_n=3.5,
+        fallback_depth=0,
+        masked_share=0.0,
+    )
 
 
 def contributor(
@@ -36,6 +54,7 @@ def contributor(
         observation_type=observation_type,  # type: ignore[arg-type]
         baseline_mean=baseline_mean,
         baseline_log_dispersion=dispersion,
+        baseline_reference=baseline_reference(),
         value=value,
         value_min=value_min,
         value_max=value_max,
@@ -61,6 +80,7 @@ def test_point_observation_uses_source_local_log1p_anomaly() -> None:
     expected = log1p(200.0) - log1p(100.0)
     assert result.model_version == ACTIVITY_SHADOW_MODEL_VERSION
     assert result.source_id == "seoul-living-population"
+    assert result.source_version == "fixture-source-v1"
     assert result.signal_mode == "observed"
     assert result.freshness == "fresh"
     assert result.current_value == 200.0
@@ -118,7 +138,7 @@ def test_standardized_anomaly_requires_dispersion_and_is_capped() -> None:
     assert capped.standardized_anomaly == 3.0
 
 
-def test_same_type_weighted_combine_is_order_independent_and_auditable() -> None:
+def test_same_type_anomaly_is_order_independent_without_raw_aggregate() -> None:
     first = contributor(
         "a", baseline_mean=100, value=200, weight=1, freshness=0.9, quality=0.7
     )
@@ -136,8 +156,10 @@ def test_same_type_weighted_combine_is_order_independent_and_auditable() -> None
     anomaly_a = log1p(200) - log1p(100)
     anomaly_b = log1p(150) - log1p(300)
     assert forward == reverse
-    assert forward.baseline_mean == 250.0
-    assert forward.current_value == 162.5
+    assert forward.baseline_mean is None
+    assert forward.current_value is None
+    assert forward.current_value_min is None
+    assert forward.current_value_max is None
     assert forward.anomaly_log1p == pytest.approx(0.25 * anomaly_a + 0.75 * anomaly_b)
     assert forward.disagreement_log1p is not None
     assert forward.disagreement_log1p > 0
@@ -149,6 +171,7 @@ def test_same_type_weighted_combine_is_order_independent_and_auditable() -> None
     assert forward.contributors[0].source_id == "seoul-living-population"
     assert forward.contributors[0].geometry == "grid:250m:cell-1"
     assert forward.contributors[0].provenance == "fixture:row-1"
+    assert forward.contributors[0].baseline_reference == baseline_reference()
 
 
 def test_different_observation_types_never_combine_raw_values() -> None:
@@ -167,6 +190,19 @@ def test_different_sources_never_combine_even_with_same_observation_type() -> No
             "presence_count",
             "observed",
             [contributor("a"), replace(contributor("b"), source_id="other-provider")],
+            now=NOW,
+        )
+
+
+def test_different_source_versions_never_combine() -> None:
+    with pytest.raises(ValueError, match="different source_version"):
+        calculate_activity_shadow(
+            "presence_count",
+            "observed",
+            [
+                contributor("a"),
+                replace(contributor("b"), source_version="other-release"),
+            ],
             now=NOW,
         )
 
@@ -235,6 +271,45 @@ def test_fresh_future_forecast_is_supported() -> None:
     assert result.current_value == 200.0
 
 
+def test_expired_or_pre_generation_forecast_fails_closed() -> None:
+    expired = replace(
+        contributor(),
+        observed_at=NOW - timedelta(minutes=10),
+        fetched_at=NOW - timedelta(minutes=1),
+    )
+    with pytest.raises(ValueError, match="forecast target has expired"):
+        calculate_activity_shadow(
+            "presence_count",
+            "forecast",
+            [expired],
+            now=NOW,
+            max_future_skew_min=5,
+        )
+
+    before_fetch = replace(
+        contributor(),
+        observed_at=NOW - timedelta(minutes=5),
+        fetched_at=NOW + timedelta(minutes=1),
+    )
+    with pytest.raises(ValueError, match="forecast target must not be before"):
+        calculate_activity_shadow(
+            "presence_count",
+            "forecast",
+            [before_fetch],
+            now=NOW,
+            max_future_skew_min=5,
+        )
+
+
+def test_mixed_freshness_contributors_require_separate_estimates() -> None:
+    fresh = contributor("fresh", age_min=5)
+    stale = contributor("stale", age_min=30, fetched_age_min=29)
+    with pytest.raises(ValueError, match="mixed fresh and stale"):
+        calculate_activity_shadow(
+            "presence_count", "observed", [fresh, stale], now=NOW
+        )
+
+
 def test_unsupported_has_no_contributors_or_invented_values() -> None:
     result = calculate_activity_shadow(
         "proxy", "unsupported", [], now=NOW
@@ -270,6 +345,36 @@ def test_invalid_numeric_or_provenance_inputs_fail_closed(change, message) -> No
     with pytest.raises(ValueError, match=message):
         calculate_activity_shadow(
             "presence_count", "observed", [replace(contributor(), **change)], now=NOW
+        )
+
+
+def test_invalid_or_leaking_baseline_reference_fails_closed() -> None:
+    with pytest.raises(ValueError, match="effective_n"):
+        calculate_activity_shadow(
+            "presence_count",
+            "observed",
+            [
+                replace(
+                    contributor(),
+                    baseline_reference=replace(
+                        baseline_reference(), effective_n=5.0
+                    ),
+                )
+            ],
+            now=NOW,
+        )
+
+    leaking = replace(
+        baseline_reference(),
+        window_end_exclusive=date(2026, 7, 14),
+        cutoff=date(2026, 7, 14),
+    )
+    with pytest.raises(ValueError, match="after observation date"):
+        calculate_activity_shadow(
+            "presence_count",
+            "observed",
+            [replace(contributor(), baseline_reference=leaking)],
+            now=NOW,
         )
 
 
