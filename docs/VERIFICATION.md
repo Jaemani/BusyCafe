@@ -615,3 +615,24 @@
   `dpl_HbFmuwuBjdVgR8an4Xb7aLTh7Ywb`
   (`busy-cafe-hlp4q9ntg-jaemanis-projects.vercel.app`)의 health와 cafe detail을 direct로
   검증하고 exact `busy-cafe.vercel.app` alias를 이 deployment로 이동했다.
+
+## 2026-07-12 — Track 1 WP-1 / v3-density-shadow 밀도 채점기
+
+- 실행 환경: backend/, uv, pytest
+- 검증자: Claude (Fable 판단·리뷰, opus 구현)
+- 관련 커밋: `9bef9e2`
+- 입력/fixture: 합성 polygon fixture(서울 위도 37.55 인근 ~300m 정사각형, 포함·겹침·
+  경계 케이스)와 합성 SQLite snapshot(ppltn_min/max). 실 API/네트워크 미사용
+- 실행 명령: `rtk proxy uv run python -m pytest tests` ·
+  `rtk proxy uv run python -m compileall -q app scripts`
+- 기대 결과: 전체 스위트 통과(신규 밀도 테스트 포함), compileall 성공, polygon_shadow
+  동작 불변
+- 실제 결과: 에이전트 전체 실행 278 passed(동시 작업 트리, 기준선 250 + 병렬 에이전트
+  12 + 신규 16). 오케스트레이터 재검증: scoring 범위 39 passed, compileall PASS.
+  면적 근사는 haversine 변길이 곱 대비 0.22% 이내(허용 2%). polygon_shadow 기존
+  테스트 9건 무변경 통과
+- 판정: PASS. 전체 스위트 최종 확인은 WP-3 병합 후 재실행으로 기록한다
+- 계획과의 차이: confidence tier/CONF 상수는 레벨 매핑 부재로 의도적 미도입.
+  `run_density_snapshot.py` 읽기 전용 구조 리포트는 stretch로 포함
+- 후속 조치: 실 ppltn 분포로 밀도→레벨 cut point 보정(Track 1 gate) 전에는 레벨을
+  emit하지 않는다. 생활인구 250m 격자 확보 후 백테스트 설계와 연결

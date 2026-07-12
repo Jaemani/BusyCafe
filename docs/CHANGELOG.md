@@ -16,6 +16,10 @@
 - v1/v2 historical paired evaluator, fail-closed promotion gate와 전 카페 구조 비교 도구
 - Phase 6 사전 등록 분석 계획(`docs/PHASE6_PREREGISTRATION.md`): divergence 층화
   sign test, v2 과소 추정 guardrail, 스코어 교체와 coverage 확장의 분리 승격 규칙
+- 4단계 라벨 대신 인구밀도(명/m²)를 log-space IDW로 보간하는 offline
+  `v3-density-shadow` 채점기. v2 polygon 공간 선택과 국소 equirectangular 면적 근사를
+  공유하고, ppltn 결측 관측은 제외·집계하며, 보정된 기준선 전에는 1~4 레벨 매핑을
+  의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
 - 서울 생활인구 데이터 리서치(`docs/research/2026-07-12-living-population.md`):
   집계구 단위 데이터셋의 2026-07-31 서비스 종료와 250m 국가표준 격자 전환을 공식
   공지로 확인, 접근 방식·공공누리 1유형 라이선스·경계 geometry 조사와 미확인 항목 기록,
