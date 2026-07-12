@@ -16,7 +16,9 @@ jobs:
   poll:
     environment: Production
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # Keep the whole job below the 10-minute schedule while reserving one
+    # minute for the worker's interrupt cleanup and runner teardown.
+    timeout-minutes: 9
     defaults:
       run:
         working-directory: backend
@@ -54,4 +56,7 @@ jobs:
       - if: steps.configuration.outputs.enabled == 'true'
         run: uv run alembic -c alembic.ini upgrade head
       - if: steps.configuration.outputs.enabled == 'true'
-        run: uv run python -m app.ingest.worker --once
+        name: Poll all hotspots
+        # SIGINT lets the worker mark its durable cycle failed before the
+        # outer job timeout.  A hard kill remains as a bounded fallback.
+        run: timeout --signal=INT --kill-after=30s 8m uv run python -m app.ingest.worker --once

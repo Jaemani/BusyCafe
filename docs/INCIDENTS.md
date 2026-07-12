@@ -416,3 +416,35 @@ materialize를 재실행해 4,933개 score 갱신을 복구했다. worker sessio
 - [x] local 및 배포 snapshot DB의 revision·행 수·materialize 성공 확인
 - [x] worker·API 재기동 후 health와 카페 model version 확인
 - [ ] 공유 workspace에서는 schema-edit agent 완료와 migration gate 통과 전 관련 서비스 실행 금지
+
+## INC-2026-013 — production poll timeout이 수집 cycle을 running으로 남김
+
+- 상태: Monitoring
+- 심각도: SEV-3
+- 시작/감지/해결: 2026-07-12
+- 작성자: Codex
+- 관련 GitHub Actions run: `29181020574`
+
+### 요약
+
+121곳 production poll의 두 번째 수동 실행이 job의 8분 제한에 도달해 취소됐다. worker가
+`KeyboardInterrupt`를 일반 예외와 달리 cycle 종료 경로에서 처리하지 않아, 실제 프로세스가
+종료된 뒤에도 최신 `ingest_cycles` 행과 `/api/health`가 `running`을 계속 표시했다. 직전
+정상 complete cycle과 snapshot은 보존됐지만, 운영 상태가 실제 실행 상태와 달라졌다.
+
+### 근본 원인과 조치
+
+GitHub job 제한과 worker 실행 제한이 같은 하나의 경계였고, 정상 예외만 durable cycle을
+`failed`로 마감했다. 또한 모든 target이 timeout일 때 121곳 각각을 최대 4회 재시도하면
+worst-case가 약 85분이어서 10분 schedule 안에 끝날 수 없었다. job 제한을 9분으로 두되
+worker 명령에는 8분 SIGINT 제한과 30초 hard-kill fallback을 별도로 적용했다. worker는
+`KeyboardInterrupt`와 `SystemExit`도 실패 cycle로 마감한 뒤 다시 전파한다. 5개 target이
+연속 실패하면 outage circuit을 열어 남은 target을 실패 처리하고 즉시 cycle을 끝낸다.
+
+### 재발 방지 조치
+
+- [x] interrupt가 cycle을 `failed`와 `completed_at`으로 마감하는 회귀 테스트 추가
+- [x] worker deadline과 GitHub job deadline을 분리해 cleanup 여유 확보
+- [x] 연속 5개 target 실패 시 bounded circuit breaker 적용 및 회귀 테스트 추가
+- [ ] hard kill·runner 장애처럼 cleanup 불가능한 경우의 오래된 `running` 회수 정책 추가
+- [ ] 수정 배포 후 수동 poll과 이어지는 scheduled cycle의 `121/121/0` 확인

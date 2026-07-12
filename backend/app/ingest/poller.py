@@ -16,7 +16,11 @@ from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from app.clients.seoul_citydata import SeoulAPIError, parse_population
-from app.config import HTTP_MAX_RETRIES, HTTP_RETRY_BASE_DELAY_SECONDS
+from app.config import (
+    HTTP_MAX_RETRIES,
+    HTTP_RETRY_BASE_DELAY_SECONDS,
+    POLL_MAX_CONSECUTIVE_FAILURES,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -163,6 +167,7 @@ def poll_once(
     sleep: Callable[[float], None] = time.sleep,
     max_retries: int = HTTP_MAX_RETRIES,
     retry_base_delay_seconds: float = HTTP_RETRY_BASE_DELAY_SECONDS,
+    max_consecutive_failures: int = POLL_MAX_CONSECUTIVE_FAILURES,
     logger: logging.Logger = LOGGER,
 ) -> PollReport:
     """Poll every target once, isolating retries and failures per target.
@@ -175,12 +180,34 @@ def poll_once(
         raise ValueError("max_retries must be >= 0")
     if retry_base_delay_seconds < 0:
         raise ValueError("retry_base_delay_seconds must be >= 0")
+    if max_consecutive_failures <= 0:
+        raise ValueError("max_consecutive_failures must be > 0")
 
     target_list = tuple(targets)
     saved = 0
     failed = 0
+    consecutive_failures = 0
 
-    for target in target_list:
+    def record_target_failure(target_index: int) -> bool:
+        """Count one failure and open the outage circuit when bounded."""
+
+        nonlocal consecutive_failures, failed
+        failed += 1
+        consecutive_failures += 1
+        if consecutive_failures < max_consecutive_failures:
+            return False
+
+        skipped = len(target_list) - target_index - 1
+        failed += skipped
+        logger.error(
+            "Polling circuit opened after %d consecutive target failures; "
+            "skipping %d remaining target(s)",
+            consecutive_failures,
+            skipped,
+        )
+        return True
+
+    for target_index, target in enumerate(target_list):
         payload: dict[str, Any] | None = None
         for attempt in range(max_retries + 1):
             try:
@@ -213,7 +240,8 @@ def poll_once(
                 break
 
         if payload is None:
-            failed += 1
+            if record_target_failure(target_index):
+                break
             continue
 
         try:
@@ -224,7 +252,8 @@ def poll_once(
                 target.area_name,
                 type(exc).__name__,
             )
-            failed += 1
+            if record_target_failure(target_index):
+                break
             continue
 
         try:
@@ -257,7 +286,8 @@ def poll_once(
                 target.area_name,
                 type(exc).__name__,
             )
-            failed += 1
+            if record_target_failure(target_index):
+                break
             continue
 
         try:
@@ -268,8 +298,10 @@ def poll_once(
                 target.area_name,
                 type(exc).__name__,
             )
-            failed += 1
+            if record_target_failure(target_index):
+                break
             continue
         saved += 1
+        consecutive_failures = 0
 
     return PollReport(targets=len(target_list), saved=saved, failed=failed)

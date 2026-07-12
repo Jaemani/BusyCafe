@@ -151,6 +151,76 @@ def test_final_failure_does_not_prevent_next_target() -> None:
     assert saved[0].congest_level == 4
 
 
+def test_consecutive_failure_circuit_skips_remaining_targets() -> None:
+    targets = [
+        PollTarget(index, f"POI{index:03d}", f"실패 지역 {index}")
+        for index in range(1, 8)
+    ]
+    client = FakePopulationClient(
+        {
+            target.area_name: [SeoulAPIError("down")]
+            for target in targets
+        }
+    )
+
+    report = poll_once(
+        targets,
+        client=client,
+        save_snapshot=lambda _: pytest.fail("unexpected snapshot"),
+        save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
+        sleep=lambda _: pytest.fail("sleep must not be called"),
+        max_retries=0,
+        max_consecutive_failures=3,
+    )
+
+    assert client.calls == [target.area_name for target in targets[:3]]
+    assert report == type(report)(targets=7, saved=0, failed=7)
+
+
+def test_success_resets_consecutive_failure_circuit() -> None:
+    targets = [
+        PollTarget(1, "POI101", "첫 실패"),
+        PollTarget(2, "POI102", "성공 지역"),
+        PollTarget(3, "POI103", "둘째 실패"),
+        PollTarget(4, "POI104", "셋째 실패"),
+    ]
+    client = FakePopulationClient(
+        {
+            "첫 실패": [SeoulAPIError("down")],
+            "성공 지역": [fixture_for_area("성공 지역", "POI102")],
+            "둘째 실패": [SeoulAPIError("down")],
+            "셋째 실패": [SeoulAPIError("down")],
+        }
+    )
+    saved: list[SnapshotRecord] = []
+
+    report = poll_once(
+        targets,
+        client=client,
+        save_snapshot=saved.append,
+        save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
+        sleep=lambda _: pytest.fail("sleep must not be called"),
+        max_retries=0,
+        max_consecutive_failures=2,
+    )
+
+    assert client.calls == [target.area_name for target in targets]
+    assert report.targets == 4
+    assert report.saved == 1
+    assert report.failed == 3
+
+
+def test_poll_rejects_nonpositive_consecutive_failure_limit() -> None:
+    with pytest.raises(ValueError, match="max_consecutive_failures must be > 0"):
+        poll_once(
+            [],
+            client=FakePopulationClient({}),
+            save_snapshot=lambda _: None,
+            save_parse_failure=lambda _: None,
+            max_consecutive_failures=0,
+        )
+
+
 def test_persistence_failure_is_isolated_without_refetching() -> None:
     first = fixture_for_area("첫 지역", "POI101")
     second = fixture_for_area("둘째 지역", "POI102")

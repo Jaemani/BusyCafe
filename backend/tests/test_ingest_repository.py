@@ -261,6 +261,30 @@ def test_materialize_exception_marks_cycle_failed_then_reraises(session_factory)
         assert cycle.completed_at is not None
 
 
+def test_keyboard_interrupt_marks_cycle_failed_then_reraises(session_factory):
+    add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+
+    class InterruptedClient:
+        def fetch_population_raw(self, _area_name: str) -> dict[str, Any]:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_poll_cycle(session_factory, client=InterruptedClient())
+
+    with session_factory() as session:
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "failed"
+        assert cycle.saved == 0
+        assert cycle.failed == 1
+        assert cycle.completed_at is not None
+
+
 def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker.db'}"
     setup_engine = create_engine(database_url)

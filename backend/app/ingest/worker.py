@@ -65,7 +65,11 @@ def run_poll_cycle(
         )
         with session_factory() as session:
             materializer(session)
-    except Exception:
+    except (Exception, KeyboardInterrupt, SystemExit):
+        # ``poll-production.yml`` gives the worker an explicit SIGINT deadline
+        # before the GitHub job timeout.  Python turns SIGINT into
+        # KeyboardInterrupt, which must finalize the durable cycle just like a
+        # normal exception; otherwise /api/health reports ``running`` forever.
         saved = poll_report.saved if poll_report else 0
         failed = poll_report.failed if poll_report else len(targets)
         repository.finish_cycle(
