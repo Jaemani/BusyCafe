@@ -659,3 +659,29 @@
   들어갔다. 기능 영향 없음, history rewrite는 하지 않고 기록으로 남긴다. 재발 방지:
   병렬 에이전트가 같은 파일을 수정 중일 때 orchestrator는 파일 단위 `git add`를
   하지 않는다
+
+## 2026-07-12 — 생활인구 250m 격자 Open API 실측과 원본 확보 (ADR-0009)
+
+- 실행 환경: 로컬 macOS, curl. 명시적 검증 실호출(테스트 아님)
+- 검증자: Claude (Fable)
+- 관련 커밋: ADR-0009, fixture 커밋 참조
+- 실행 명령: `openapi.seoul.go.kr:8088/{KEY}/{TYPE}/Se250MSpopLocalResd/1/5/{YMD}`
+  (키는 `backend/.env`에서만 읽고 URL·응답 로그에 출력하지 않음, INC-2026-006 절차)
+- 기대 결과: 기존 `SEOUL_API_KEY`로 250m 격자 서비스 호출 성공, 스키마 실측
+- 실제 결과:
+  - 서비스명 `Se250MSpopLocalResd`는 포털 API 뷰(`openApiView.do`)에서 확인.
+    상세 페이지 탭은 동적 렌더링이라 정적 fetch로는 보이지 않았다.
+  - 인자 없는 호출과 `json` 타입 호출은 HTTP 200 + `ERROR-500`. 동일 요청을
+    `xml` + 기준일 `20260708`로 바꾸면 `INFO-000` 정상 — **JSON 타입은 포털 측
+    결함으로 판단, ingest 기본 포맷은 XML**
+  - 대조군: 같은 키의 `citydata_ppltn` 호출은 `INFO-000` → 키 유효성 분리 확인
+  - `list_total_count=253,751`(하루, ≈10,573셀 × 24시간), `TT`(시각) 필드로
+    시간대별 제공 확정
+  - `CELL_ID`는 국가지점번호 형식(`다사52505325`) — geometry 산술 파생 `[VERIFY]`
+  - 성·연령 구간 3명 이하 `*` 마스킹, `H_DNG_CD` 후행 공백 확인(파서 strip 필수)
+  - 응답 본문에 인증키 미포함을 확인한 뒤 원본 5행을
+    `backend/fixtures/se250m_spop_local_resd_sample.xml`로 보존
+    (SHA-256 `efa7423dafa4017376d9b2b7a5feaeae4fd1dbcf656c216b609d8a892ec401fd`)
+- 판정: PASS — 기존 키로 250m 격자 접근 가능, 단위 결정(ADR-0009) 실측 근거 확보
+- 후속 조치: 월별 ZIP 파일 원본 확보 후 스키마·파서 확정(INC-2026-001 순서),
+  CELL_ID → geometry 변환 검증, citydata 혼잡 라벨과의 상관 실험 설계
