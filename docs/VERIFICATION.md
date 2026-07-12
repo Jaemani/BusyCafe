@@ -636,3 +636,26 @@
   `run_density_snapshot.py` 읽기 전용 구조 리포트는 stretch로 포함
 - 후속 조치: 실 ppltn 분포로 밀도→레벨 cut point 보정(Track 1 gate) 전에는 레벨을
   emit하지 않는다. 생활인구 250m 격자 확보 후 백테스트 설계와 연결
+
+## 2026-07-12 — WP-3 Overture confidence 임계값 연구 스캐폴딩
+
+- 실행 환경: backend/, uv, pytest
+- 검증자: Claude (Fable 판단·리뷰, sonnet 구현)
+- 관련 커밋: `33df01c` (연구 노트: `docs/research/2026-07-12-catalog-recall.md`)
+- 입력/fixture: 합성 `OvertureCafeRecord`와 DuckDB로 직접 생성한 로컬 parquet
+  extract(네트워크 미사용). 실 Overture S3 접근 없음
+- 실행 명령: `rtk proxy uv run python -m pytest tests`
+- 기대 결과: 전체 스위트 통과, `--confidence-report`가 DB 세션·`cache_seoul_extract`를
+  호출하지 않음(monkeypatch로 확인)
+- 실제 결과: 278 passed, compileall PASS. `--min-confidence` 플래그는 기존
+  커밋(`298af5a`)에 이미 존재해 신규 추가 불필요를 확인. scoring, 기존 config 값,
+  DB 스키마, 기본 ingest 동작 무변경
+- 판정: PASS(자동 테스트 기준). 층화 표본 정밀도 측정은 실제 저임계값 재다운로드가
+  필요한 `[HUMAN]` 작업으로 남는다
+- 계획과의 차이: 로컬 cache에 다운로드 시점 임계값이 저장되지 않아 "cache filtered"
+  판정은 관측된 최소 confidence를 근사 floor로 사용한다(모듈 주석에 한계 기록).
+  병렬 작업 중 orchestrator가 `config.py` 파일 전체를 스테이징해 본 작업의
+  `OVERTURE_CONFIDENCE_REPORT_*` 상수 3개가 밀도 채점기 커밋 `9bef9e2`에 섞여
+  들어갔다. 기능 영향 없음, history rewrite는 하지 않고 기록으로 남긴다. 재발 방지:
+  병렬 에이전트가 같은 파일을 수정 중일 때 orchestrator는 파일 단위 `git add`를
+  하지 않는다

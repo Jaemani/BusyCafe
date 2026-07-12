@@ -20,6 +20,12 @@
   `v3-density-shadow` 채점기. v2 polygon 공간 선택과 국소 equirectangular 면적 근사를
   공유하고, ppltn 결측 관측은 제외·집계하며, 보정된 기준선 전에는 1~4 레벨 매핑을
   의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
+- `seed_cafes.py` 읽기 전용 `--confidence-report` 모드: 로컬 Overture extract의
+  confidence 버킷(0.05 단위)·카테고리 분포와 현재 임계값 통과 비율을 DB 쓰기·네트워크
+  없이 확인. cache가 사전 필터된 구간은 0 대신 filtered로 표기
+- 카페 원장 recall 리서치(`docs/research/2026-07-12-catalog-recall.md`): 인허가
+  데이터를 recall-우선 primary로, Overture를 enrichment로 재구성하는 계획과
+  임계값 연구 절차, 조용한 동네 카페 누락 편향 리스크 명시
 - 서울 생활인구 데이터 리서치(`docs/research/2026-07-12-living-population.md`):
   집계구 단위 데이터셋의 2026-07-31 서비스 종료와 250m 국가표준 격자 전환을 공식
   공지로 확인, 접근 방식·공공누리 1유형 라이선스·경계 geometry 조사와 미확인 항목 기록,
