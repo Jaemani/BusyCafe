@@ -197,6 +197,7 @@ def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
     response = api_client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["data_mode"] == "live"
+    assert response.json()["stale_warn_min"] == 25
     assert response.json()["cafes_count"] == 1
     assert response.json()["snapshots_last_hour"] == 1
     assert response.json()["last_complete_cycle_at"].endswith("Z")

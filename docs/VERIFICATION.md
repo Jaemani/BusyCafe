@@ -533,3 +533,33 @@
   기록이 없으므로 해당 필드는 NULL이며, 이를 live freshness로 해석하지 않는다.
 - 판정: complete-cycle 계측, 비활성 monitor와 snapshot 재배포 PASS. managed PostgreSQL,
   `PRODUCTION_ENABLED=true`, 1시간 6-cycle 검증과 실제 복구 훈련은 `[HUMAN]`/운영 대기다.
+
+## 2026-07-12 — Supabase production bootstrap 적용
+
+- 승인·실행: GitHub Actions `bootstrap-production.yml`, run `29180703862`, `apply=true`.
+- migration: production PostgreSQL이 Alembic head `20260712_0004`임을 확인했다.
+- hotspot seed: 121곳을 적재했고 `is_polled=1`은 121/121이다.
+- cafe seed: Overture release `2026-06-17.0`에서 active 카페 4,933곳을 적재했다.
+  cache SHA-256은
+  `5115e468e6ea34a4859fb9391914a5a9c82c9c2e99d7ba09c8fe8b3d7d8d184e`로
+  dry-run 및 로컬 검증 입력과 일치한다.
+- 첫 ingest: `targets=121, saved=121, failed=0`, latest cycle 상태 `complete`.
+  전체 순회 소요는 약 4분 6초로 10분 폴링 주기 안에 완료됐다.
+- 판정: production seed와 최초 complete cycle PASS. 자동 poll과 monitor는 아직 비활성이고,
+  공개 `busy-cafe.vercel.app`은 이 기록 시점에 snapshot 배포다. live direct deployment 검증과
+  exact alias 승격 전에는 `PRODUCTION_ENABLED`를 켜지 않는다.
+
+## 2026-07-12 — freshness UI, Apache-2.0, 이중 관측자 평가 계약
+
+- health: `/api/health`가 canonical config의 `stale_warn_min`을 반환한다.
+- UI: live 상태에서 latest cycle이 `partial`/`failed`/없음이거나 complete 시각이 유효하지
+  않거나 임계값보다 오래되면 `데이터 갱신 지연 중`을 표시한다. health 조회 실패는 지도를
+  중단하지 않고 데이터 모드 확인 불가 상태로 격리한다. snapshot 표시는 유지한다.
+- 라이선스: 저장소 코드를 Apache License 2.0으로 확정하고 루트 `LICENSE`를 추가했다.
+  외부 데이터와 지도 라이선스는 코드 라이선스와 별개임을 README와 attribution audit에 명시했다.
+- Phase 6: worksheet는 정확히 두 관측자를 요구하고 세션별 4개 카페를 독립 중복 관측한다.
+  엔진 지표는 primary 행만 사용하며 reliability 행으로 quadratic weighted Cohen's kappa를 계산한다.
+  중복·주 관측 누락·다중 reliability 입력은 fail-closed 처리한다.
+- 검증: backend `184 passed`, compileall PASS, frontend typecheck/build PASS,
+  `git diff --check` PASS.
+- 판정: 구현·자동 검증 PASS. 실제 브라우저 stale 시나리오와 Phase 6 현장 관측은 대기다.

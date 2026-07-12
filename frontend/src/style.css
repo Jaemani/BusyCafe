@@ -91,6 +91,7 @@ h1 {
 .search-status[data-state="moving"] { color: #786126; background: #f6efd9; }
 .search-status[data-state="empty"] { color: #5f6863; background: #eef0ed; }
 .search-status[data-state="error"] { color: #873b37; background: #fae9e7; }
+.search-status[data-state="stale"] { color: #873b37; background: #fae9e7; }
 
 .source-line {
   flex: 1 0 100%;

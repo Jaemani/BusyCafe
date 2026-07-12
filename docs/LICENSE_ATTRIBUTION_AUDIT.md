@@ -15,11 +15,13 @@
 
 현행 데이터의 상업적 이용 자체는 공식 문서상 가능하다. 최초 감사에서 확인한 지도
 attribution 강제 접힘, 서울시 출처 미표시와 Overture 데이터 공유 고지는 2026-07-12에
-코드로 보완했다. 코드 라이선스 부재만 저장소 소유자의 선택이 필요한 `BLOCKED` 상태다.
+코드로 보완했다. 저장소 소유자가 코드 라이선스로 Apache License 2.0을 선택하고 루트
+`LICENSE`를 추가해 최초 감사의 코드 라이선스 `BLOCKED`도 해소했다. 외부 데이터에는
+BusyCafe 코드 라이선스가 아니라 아래 제공자별 조건이 계속 적용된다.
 
 | 대상 | 판정 | 공식 근거 | 저장소·응답 증거 | 필요한 조치 |
 |---|---|---|---|---|
-| 저장소 코드 라이선스 | **BLOCKED [HUMAN]** | 적용할 라이선스가 아직 선택되지 않음 | `git ls-files 'LICENSE*'` 결과 없음 | 저작권자가 MIT 또는 Apache-2.0을 선택하고 루트 `LICENSE` 추가. 선택 전 OSS·외부 기여 가능하다고 표현하지 않음 |
+| 저장소 코드 라이선스 | **PASS (2026-07-12 보완)** | 저장소 소유자가 Apache License 2.0을 선택 | 루트 `LICENSE`에 Apache License 2.0 공식 전문, README에 코드·외부 데이터 라이선스 구분 | 코드 배포 시 Apache License 2.0 조건을 유지. 외부 데이터에 이 코드 라이선스를 적용한다고 표현하지 않음 |
 | Overture Places 현 release 수집·내부 cache | **PASS** | Places의 현행 공급자는 CDLA-Permissive-2.0, Apache-2.0, CC0 등 공급자별 조건. CDLA는 사용·변경을 허용함 | release `2026-06-17.0`, extract SHA-256 `5115e468…d8d184e`, 4,933건. `sources_json` 보존 | release마다 source/license 분포와 hash를 다시 기록 |
 | Overture cache의 공개 API 제공 | **PASS (2026-07-12 보완)** | CDLA-Permissive-2.0 §2.1은 Data를 원형 또는 수정해 공유할 때 계약문을 함께 제공하도록 요구 | `GET /api/sources`가 release와 CDLA/CC0 링크를 제공하고 카페 응답이 `license_manifest_url`을 포함함 | release마다 실제 source/license 분포를 재검증 |
 | Overture API 필드가 `Data`인지 계산 `Results`인지 | **[VERIFY]** | CDLA §3.1은 계산 결과에는 의무를 부과하지 않지만, 원장명·좌표와 BusyCafe 점수의 법적 분류는 공식 문서만으로 확정 불가 | 응답에는 원장 필드와 BusyCafe 계산 결과가 함께 있음 | 법률 검토 전까지 원장 필드는 Data로 보수적으로 취급하고 §2.1 고지를 적용 |
@@ -110,8 +112,8 @@ OA-21285 데이터셋 페이지의 2026-07-12 표시 내용은 다음과 같다.
 
 ## 공개 릴리스 해제 조건
 
-- [ ] **[HUMAN]** 코드 라이선스를 MIT 또는 Apache-2.0 중 하나로 선택하고 루트
-  `LICENSE`를 추가한다.
+- [x] 코드 라이선스로 Apache License 2.0을 선택하고 루트 `LICENSE`에 공식 전문을
+  추가한다. 외부 데이터 라이선스와 코드 라이선스는 별도로 표시한다.
 - [x] 지도 attribution 강제 초기 접힘을 제거하고 MapLibre 기본 표시 동작을 복구한다.
 - [x] 사용자 접근 가능한 데이터 출처 화면에 Overture release·현행 라이선스와
   서울특별시 OA-21285·공공누리 제1유형을 링크한다.

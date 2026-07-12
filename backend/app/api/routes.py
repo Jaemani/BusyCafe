@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.config import MAX_CAFES_PER_VIEWPORT, OVERTURE_RELEASE
+from app.config import MAX_CAFES_PER_VIEWPORT, OVERTURE_RELEASE, STALE_WARN_MIN
 from app.database import get_db
 from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
 from app.schemas import (
@@ -342,6 +342,7 @@ def health(db: Session = Depends(get_db)) -> HealthResponse:
         data_mode=(
             "snapshot" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "live"
         ),
+        stale_warn_min=STALE_WARN_MIN,
         last_ingest_at=_utc(db.scalar(select(func.max(HotspotSnapshot.fetched_at)))),
         last_complete_cycle_at=_utc(
             db.scalar(

@@ -10,6 +10,11 @@ import type {
 } from "./cafe-provider";
 import { CachedApiCafeProvider } from "./cafe-provider";
 import { hideCafePanel, showCafePanel } from "./panel";
+import {
+  evaluateRuntimeHealth,
+  fetchRuntimeHealth,
+  type RuntimeHealthState,
+} from "./runtime-health";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const INITIAL_CENTER: [number, number] = [126.9237, 37.5563];
@@ -20,18 +25,6 @@ const CLUSTER_COUNT_LAYER = "cafe-cluster-count";
 const CAFE_LAYER = "cafe-points";
 const CAFE_HIT_LAYER = "cafe-hit-area";
 const MIN_CAFE_ZOOM = 11;
-
-type DataMode = "snapshot" | "live";
-
-async function fetchDataMode(): Promise<DataMode> {
-  const response = await fetch("/api/health");
-  if (!response.ok) throw new Error("데이터 모드 조회 실패");
-  const payload = (await response.json()) as { data_mode?: unknown };
-  if (payload.data_mode !== "snapshot" && payload.data_mode !== "live") {
-    throw new Error("데이터 모드 응답 형식 오류");
-  }
-  return payload.data_mode;
-}
 
 const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
@@ -276,16 +269,27 @@ export async function initializeCafeMap(
 
   let requestController: AbortController | null = null;
   let requestSequence = 0;
-  let dataMode: DataMode | "unknown" | null = null;
+  let runtimeHealth: RuntimeHealthState | "unknown" | null = null;
   let displayedCafeCount: number | null = null;
 
   const renderCafeStatus = (): void => {
     if (displayedCafeCount === null) return;
-    const modeLabel = dataMode === "snapshot"
+    const runtimeKind = runtimeHealth !== null && runtimeHealth !== "unknown"
+      ? runtimeHealth.kind
+      : null;
+    const modeLabel = runtimeKind === "snapshot"
       ? " · 배포 스냅샷"
-      : dataMode === "unknown"
+      : runtimeHealth === "unknown"
         ? " · 데이터 모드 확인 불가"
         : "";
+    if (runtimeKind === "delayed") {
+      const countLabel = displayedCafeCount > 0
+        ? ` · 카페 ${displayedCafeCount.toLocaleString("ko-KR")}곳`
+        : "";
+      statusElement.textContent = `데이터 갱신 지연 중${countLabel}`;
+      statusElement.dataset.state = "stale";
+      return;
+    }
     if (displayedCafeCount === 0) {
       statusElement.textContent = `지도 준비됨 · 카페 데이터 연결 대기${modeLabel}`;
       statusElement.dataset.state = "empty";
@@ -296,13 +300,13 @@ export async function initializeCafeMap(
     statusElement.dataset.state = "ready";
   };
 
-  void fetchDataMode()
-    .then((mode) => {
-      dataMode = mode;
+  void fetchRuntimeHealth()
+    .then((health) => {
+      runtimeHealth = evaluateRuntimeHealth(health);
       renderCafeStatus();
     })
     .catch(() => {
-      dataMode = "unknown";
+      runtimeHealth = "unknown";
       renderCafeStatus();
     });
 

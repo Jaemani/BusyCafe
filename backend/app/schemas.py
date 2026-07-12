@@ -184,6 +184,7 @@ class HotspotStatusResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     data_mode: Literal["snapshot", "live"]
+    stale_warn_min: int = Field(ge=1)
     last_ingest_at: datetime | None = None
     last_complete_cycle_at: datetime | None = None
     last_cycle_status: (

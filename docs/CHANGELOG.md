@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- BusyCafe 자체 코드에 Apache License 2.0을 적용하고, 외부 데이터의 제공자별
+  라이선스·출처표시 조건과 명확히 구분
+
 ## [0.1.0-preview.1] — 2026-07-12
 
 ### Added
