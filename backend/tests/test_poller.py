@@ -174,7 +174,9 @@ def test_consecutive_failure_circuit_skips_remaining_targets() -> None:
     )
 
     assert client.calls == [target.area_name for target in targets[:3]]
-    assert report == type(report)(targets=7, saved=0, failed=7)
+    assert report.targets == 7
+    assert report.saved == 0
+    assert report.failed == 7
 
 
 def test_success_resets_consecutive_failure_circuit() -> None:

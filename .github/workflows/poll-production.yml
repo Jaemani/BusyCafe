@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:
+    inputs:
+      probe_only:
+        description: "Probe one fixed Seoul hotspot without DB access"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -24,16 +30,29 @@ jobs:
         working-directory: backend
     env:
       PRODUCTION_ENABLED: ${{ vars.PRODUCTION_ENABLED }}
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PROBE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.probe_only == true }}
       SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
     steps:
       - id: configuration
         name: Check production secrets
         working-directory: .
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
+          if [ "$PROBE_ONLY" = "true" ]; then
+            if [ -z "$SEOUL_API_KEY" ]; then
+              echo "probe_only=true but SEOUL_API_KEY is missing." >&2
+              exit 1
+            fi
+            echo "Running read-only Seoul API probe; production polling remains unchanged."
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "probe_only=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$PRODUCTION_ENABLED" != "true" ]; then
             echo "Production polling disabled (set PRODUCTION_ENABLED=true to enable); skipping."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "probe_only=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$DATABASE_URL" ] || [ -z "$SEOUL_API_KEY" ]; then
@@ -41,6 +60,7 @@ jobs:
             exit 1
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "probe_only=false" >> "$GITHUB_OUTPUT"
       - if: steps.configuration.outputs.enabled == 'true'
         uses: actions/checkout@v4
       - if: steps.configuration.outputs.enabled == 'true'
@@ -53,10 +73,17 @@ jobs:
           enable-cache: true
       - if: steps.configuration.outputs.enabled == 'true'
         run: uv sync --frozen
-      - if: steps.configuration.outputs.enabled == 'true'
+      - if: steps.configuration.outputs.probe_only == 'true'
+        name: Probe one Seoul hotspot
+        run: uv run python scripts/probe_seoul_citydata.py
+      - if: steps.configuration.outputs.enabled == 'true' && steps.configuration.outputs.probe_only != 'true'
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run alembic -c alembic.ini upgrade head
-      - if: steps.configuration.outputs.enabled == 'true'
+      - if: steps.configuration.outputs.enabled == 'true' && steps.configuration.outputs.probe_only != 'true'
         name: Poll all hotspots
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         # SIGINT lets the worker mark its durable cycle failed before the
         # outer job timeout.  A hard kill remains as a bounded fallback.
         run: timeout --signal=INT --kill-after=30s 8m uv run python -m app.ingest.worker --once
