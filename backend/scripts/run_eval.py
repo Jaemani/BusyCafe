@@ -37,6 +37,8 @@ REQUIRED_COLUMNS = frozenset(
         "cafe_id",
         "observed_at",
         "slot",
+        "observer_id",
+        "observation_role",
         "observed_area_level",
         "pedestrians_per_min",
         "flow_obstruction",
@@ -44,6 +46,7 @@ REQUIRED_COLUMNS = frozenset(
     }
 )
 FLOW_OBSTRUCTIONS = frozenset({"none", "repeated_avoidance", "blocked"})
+OBSERVATION_ROLES = frozenset({"primary", "reliability"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +60,8 @@ class GroundTruth:
     pedestrians_per_min: float | None = None
     flow_obstruction: str = "none"
     observer_notes: str = ""
+    observer_id: str = "observer-1"
+    observation_role: Literal["primary", "reliability"] = "primary"
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,11 +81,18 @@ class MetricSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class ReliabilitySummary:
+    pairs: int
+    quadratic_weighted_kappa: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationReport:
     total_rows: int
     invalid_rows: int
     uncovered_rows: int
     points: tuple[EvaluationPoint, ...]
+    reliability: ReliabilitySummary = ReliabilitySummary(0, None)
 
 
 def _parse_iso_datetime(value: str | None) -> datetime:
@@ -187,6 +199,19 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
                 if not isinstance(raw_slot, str) or not raw_slot.strip():
                     raise ValueError("slot must be nonblank")
                 slot = raw_slot.strip()
+                raw_observer_id = row["observer_id"]
+                if (
+                    not isinstance(raw_observer_id, str)
+                    or not raw_observer_id.strip()
+                ):
+                    raise ValueError("observer_id must be nonblank")
+                observer_id = raw_observer_id.strip()
+                raw_observation_role = row["observation_role"]
+                if not isinstance(raw_observation_role, str):
+                    raise ValueError("observation_role is required")
+                observation_role = raw_observation_role.strip()
+                if observation_role not in OBSERVATION_ROLES:
+                    raise ValueError("invalid observation_role")
                 raw_venue_level = row.get("observed_venue_level")
                 observed_venue_level = (
                     _parse_level(
@@ -209,9 +234,44 @@ def load_observations(path: Path) -> tuple[list[GroundTruth], int, int]:
                     pedestrians_per_min=pedestrians_per_min,
                     flow_obstruction=flow_obstruction,
                     observer_notes=observer_notes,
+                    observer_id=observer_id,
+                    observation_role=observation_role,
                 )
             )
+    _validate_observation_structure(valid)
     return valid, total, invalid
+
+
+def _validate_observation_structure(observations: Sequence[GroundTruth]) -> None:
+    seen_observer_assignments: set[tuple[str, int, str]] = set()
+    by_cafe_slot: dict[tuple[int, str], list[GroundTruth]] = defaultdict(list)
+    for observation in observations:
+        observer_key = (
+            observation.observer_id,
+            observation.cafe_id,
+            observation.slot,
+        )
+        if observer_key in seen_observer_assignments:
+            raise ValueError(
+                "duplicate observer/cafe/slot assignment: "
+                f"{observation.observer_id}/{observation.cafe_id}/{observation.slot}"
+            )
+        seen_observer_assignments.add(observer_key)
+        by_cafe_slot[(observation.cafe_id, observation.slot)].append(observation)
+
+    for (cafe_id, slot), rows in sorted(by_cafe_slot.items()):
+        primaries = [row for row in rows if row.observation_role == "primary"]
+        reliability = [row for row in rows if row.observation_role == "reliability"]
+        if len(primaries) != 1:
+            raise ValueError(
+                "each cafe/slot requires exactly one primary observation: "
+                f"{cafe_id}/{slot}"
+            )
+        if len(reliability) > 1:
+            raise ValueError(
+                "each cafe/slot allows at most one reliability observation: "
+                f"{cafe_id}/{slot}"
+            )
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -266,21 +326,24 @@ def evaluate(
     total_rows: int,
     invalid_rows: int,
 ) -> EvaluationReport:
-    cafe_ids = sorted({truth.cafe_id for truth in truths})
+    primary_truths = tuple(
+        truth for truth in truths if truth.observation_role == "primary"
+    )
+    cafe_ids = sorted({truth.cafe_id for truth in primary_truths})
     cafes = {
         cafe.id: cafe
         for cafe in session.scalars(select(Cafe).where(Cafe.id.in_(cafe_ids)))
     }
     missing_cafes = {cafe_id for cafe_id in cafe_ids if cafe_id not in cafes}
-    invalid_rows += sum(truth.cafe_id in missing_cafes for truth in truths)
+    invalid_rows += sum(truth.cafe_id in missing_cafes for truth in primary_truths)
 
     observations_by_time = {
         observed_at: _observations_at(session, observed_at)
-        for observed_at in sorted({truth.observed_at for truth in truths})
+        for observed_at in sorted({truth.observed_at for truth in primary_truths})
     }
     points: list[EvaluationPoint] = []
     uncovered = 0
-    for truth in truths:
+    for truth in primary_truths:
         cafe = cafes.get(truth.cafe_id)
         if cafe is None:
             continue
@@ -306,6 +369,7 @@ def evaluate(
         invalid_rows=invalid_rows,
         uncovered_rows=uncovered,
         points=tuple(points),
+        reliability=summarize_reliability(truths),
     )
 
 
@@ -343,6 +407,66 @@ def spearman_rank_correlation(
     right_sum = sum((value - observed_mean) ** 2 for value in observed_ranks)
     denominator = (left_sum * right_sum) ** 0.5
     return None if denominator == 0 else numerator / denominator
+
+
+def quadratic_weighted_cohen_kappa(
+    primary: Sequence[int], reliability: Sequence[int]
+) -> float | None:
+    """Calculate quadratic weighted Cohen's kappa for ordinal levels 1–4."""
+
+    if len(primary) != len(reliability):
+        raise ValueError("primary and reliability lengths differ")
+    if any(level not in (1, 2, 3, 4) for level in (*primary, *reliability)):
+        raise ValueError("reliability levels must be between 1 and 4")
+    if len(primary) < 2 or len(set(primary)) < 2 or len(set(reliability)) < 2:
+        return None
+
+    count = len(primary)
+    primary_counts = [primary.count(level) for level in range(1, 5)]
+    reliability_counts = [reliability.count(level) for level in range(1, 5)]
+    observed_disagreement = sum(
+        ((left - right) ** 2 / 9)
+        for left, right in zip(primary, reliability, strict=True)
+    ) / count
+    expected_disagreement = sum(
+        ((left - right) ** 2 / 9)
+        * (primary_counts[left - 1] / count)
+        * (reliability_counts[right - 1] / count)
+        for left in range(1, 5)
+        for right in range(1, 5)
+    )
+    return (
+        None
+        if expected_disagreement == 0
+        else 1 - observed_disagreement / expected_disagreement
+    )
+
+
+def summarize_reliability(
+    observations: Sequence[GroundTruth],
+) -> ReliabilitySummary:
+    by_cafe_slot: dict[tuple[int, str], list[GroundTruth]] = defaultdict(list)
+    for observation in observations:
+        by_cafe_slot[(observation.cafe_id, observation.slot)].append(observation)
+    pairs: list[tuple[int, int]] = []
+    for key in sorted(by_cafe_slot):
+        rows = by_cafe_slot[key]
+        primary = next(
+            (row for row in rows if row.observation_role == "primary"), None
+        )
+        reliability = next(
+            (row for row in rows if row.observation_role == "reliability"), None
+        )
+        if primary is not None and reliability is not None:
+            pairs.append(
+                (primary.observed_area_level, reliability.observed_area_level)
+            )
+    return ReliabilitySummary(
+        pairs=len(pairs),
+        quadratic_weighted_kappa=quadratic_weighted_cohen_kappa(
+            [pair[0] for pair in pairs], [pair[1] for pair in pairs]
+        ),
+    )
 
 
 def summarize(
@@ -421,7 +545,10 @@ def render_markdown(report: EvaluationReport) -> str:
         f"- Valid predictions: {overall.observations}",
         f"- Uncovered: {report.uncovered_rows}",
         f"- Invalid: {report.invalid_rows}",
-        "- Validation contract: area level is derived from pedestrians/min and flow obstruction; mismatches are invalid.",
+        "- Engine metrics include primary observations only; reliability "
+        "observations are excluded.",
+        "- Validation contract: area level is derived from pedestrians/min "
+        "and flow obstruction; mismatches are invalid.",
         "",
         "## Primary surrounding-area metrics",
         "",
@@ -486,9 +613,21 @@ def render_markdown(report: EvaluationReport) -> str:
     lines.extend(
         [
             "",
+            "## Inter-observer reliability",
+            "",
+            "Reliability rows are paired with the single primary row for the "
+            "same cafe and slot. Kappa is `N/A` with fewer than two pairs or "
+            "no rating variance.",
+            "",
+            "| Overlap pairs | Quadratic weighted Cohen's kappa |",
+            "| ---: | ---: |",
+            f"| {report.reliability.pairs} | "
+            f"{_metric(report.reliability.quadratic_weighted_kappa)} |",
+            "",
             "## Optional venue utility metrics",
             "",
-            "Ground truth: nonblank `observed_venue_level`. These indirect product-utility metrics are separate from primary engine validation.",
+            "Ground truth: nonblank `observed_venue_level`. These indirect "
+            "product-utility metrics are separate from primary engine validation.",
             "",
             "| Observations | Spearman | Adjacent accuracy |",
             "| ---: | ---: | ---: |",

@@ -431,7 +431,11 @@ DoD (수동 시나리오 체크리스트를 docs에 기록):
    행을 지우지 않고 `poi_valid`와 `exclusion_reason`을 기록한다.
 2. 축소 기준선은 동네별 3개 관측 세션을 목표로 한다. 같은 동네·세션에서 순위를 비교할
    카페들은 동일한 `slot` ID를 사용하고, 각 행의 `observed_at`에는 실제 현장 시각을
-   timezone 포함 ISO 8601로 기록한다. 순차 관측을 같은 시각으로 조작하지 않는다.
+   timezone 포함 ISO 8601로 기록한다. 순차 관측을 같은 시각으로 조작하지 않는다. 각
+   세션은 서로 다른 두 관측자가 수행한다. 모든 카페에는 `primary` 관측자를 정확히 한 명
+   배정하고, 거리대별 최소 한 곳과 세션마다 순환하는 추가 거리대 한 곳을 합쳐 네 곳에는
+   다른 관측자의 `reliability` 관측을 추가한다. 두 관측자는 서로의 라벨을 보지 않고
+   독립적으로 기록한다.
 3. **주 라벨 `observed_area_level`**은 카페 좌표 반경
    `EVAL_OBSERVATION_RADIUS_M` 안의 보행 흐름을 `EVAL_OBSERVATION_DURATION_MIN`분
    관측한다. 입구와 가장 가까운 주 보행로에 고정 가상선을 두고 통과 인원을 세며,
@@ -445,14 +449,20 @@ DoD (수동 시나리오 체크리스트를 docs에 기록):
    4=만석·대기(>90%)로 기록한다. 지역 혼잡 예측과의 연관성을 보는 제품 효용 지표이며,
    엔진 정확도와 합산하거나 같은 주장으로 표현하지 않는다. `[HUMAN]`
 5. `scripts/run_eval.py`는 필수 CSV 필드
-   `cafe_id, observed_at, slot, observed_area_level, pedestrians_per_min,
-   flow_obstruction, observer_notes`와 선택 필드 `observed_venue_level`을 받는다.
+   `cafe_id, observed_at, slot, observer_id, observation_role,
+   observed_area_level, pedestrians_per_min, flow_obstruction, observer_notes`와 선택 필드
+   `observed_venue_level`을 받는다. `observation_role`은 `primary|reliability`만 허용한다.
+   동일 카페·슬롯에는 `primary`가 정확히 한 행이어야 하며, 동일 관측자·카페·슬롯 중복과
+   주 관측 없는 신뢰도 관측은 계약 오류로 평가를 중단한다.
    `observed_area_level`은 보행량 임계값과 흐름 방해 규칙으로 다시 계산한 값과 일치해야
    하며, 불일치 행은 평가에서 제외한다. 각 실제 관측 시각까지 `observed_at`과
    `fetched_at`이 모두 도달한 스냅샷만 재생해 미래 데이터 누출을 막는다.
-   - **주 지표:** 슬롯별 Spearman을 계산한 뒤 슬롯 간 macro average
+   - **주 지표:** `primary` 행만 사용해 슬롯별 Spearman을 계산한 뒤 슬롯 간 macro average
    - **주 보조 지표:** 지역 라벨 기준 `|pred - obs| ≤ 1` 비율
    - **제품 효용:** 매장 라벨이 있는 표본만 별도 Spearman·한 단계 이내 비율
+   - **관측자 신뢰도:** 같은 카페·슬롯의 `primary`/`reliability` 쌍으로 quadratic
+     weighted Cohen's kappa를 별도 계산한다. 두 쌍 미만이거나 어느 한쪽 라벨에 분산이
+     없으면 `N/A`로 보고한다.
    - 거리 구간별 표본 수와 주 지표 분해
 6. 첫 축소 기준선은 파라미터를 바꾸지 않은 `v1-idw-point`의 홀드아웃 결과로 남긴다.
    그 다음 `R_MAX, COVERED_M, K, TAU`를 별도 튜닝셋에서 그리드 재계산하고, 최종
@@ -463,6 +473,7 @@ DoD:
 - [ ] 결정적 후보 목록과 POI 유효성 검수 기록
 - [ ] 동네별 3개 슬롯의 현장 관측 원본과 `docs/EVAL_REPORT.md` 커밋
 - [ ] `v1-idw-point`의 지역 혼잡 Spearman, 한 단계 이내 정확도, 거리 분해와 표본 수 기록
+- [ ] 중복 관측 weighted Cohen's kappa ≥ 0.60 또는 `N/A` 사유와 추가 관측 계획 기록
 - [ ] 합격선: 지역 혼잡 Spearman ≥ 0.5 (미달 시 원인 가설 3개와 개선안을 리포트에 명시 — 실패도 산출물)
 
 ### Backlog (MVP 이후, 우선순위순)

@@ -31,6 +31,8 @@ OUTPUT_FIELDS = (
     "lng",
     "hotspot_name",
     "distance_band",
+    "observer_id",
+    "observation_role",
     "observed_at",
     "slot",
     "observed_area_level",
@@ -39,6 +41,7 @@ OUTPUT_FIELDS = (
     "flow_obstruction",
     "observer_notes",
 )
+DISTANCE_BANDS = ("near", "mid", "fringe")
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,44 +168,132 @@ def parse_sessions(values: Sequence[str]) -> tuple[FieldSession, ...]:
     return tuple(sessions)
 
 
+def parse_observers(values: Sequence[str]) -> tuple[str, str]:
+    observers = tuple(value.strip() for value in values)
+    if len(observers) != 2:
+        raise ValueError("exactly two --observer values are required")
+    if not all(observers):
+        raise ValueError("observer IDs must be nonblank")
+    if len(set(observers)) != 2:
+        raise ValueError("observer IDs must be unique")
+    return observers
+
+
+def _ordered_session_candidates(
+    candidates: Sequence[ReviewedCandidate], session: FieldSession
+) -> tuple[ReviewedCandidate, ...]:
+    session_candidates = tuple(
+        candidate
+        for candidate in candidates
+        if candidate.poi_valid
+        and candidate.hotspot_name.strip() == session.hotspot_name
+    )
+    if not session_candidates:
+        raise ValueError(
+            f"session hotspot has no valid candidates: {session.hotspot_name}"
+        )
+    unknown_bands = sorted(
+        {candidate.distance_band for candidate in session_candidates}
+        - set(DISTANCE_BANDS)
+    )
+    if unknown_bands:
+        raise ValueError(
+            "session contains unsupported distance bands: "
+            + ", ".join(unknown_bands)
+        )
+    return tuple(
+        sorted(
+            session_candidates,
+            key=lambda candidate: (
+                DISTANCE_BANDS.index(candidate.distance_band),
+                candidate.cafe_id,
+            ),
+        )
+    )
+
+
+def _reliability_candidates(
+    candidates: Sequence[ReviewedCandidate], *, session_index: int
+) -> frozenset[int]:
+    by_band = {
+        band: tuple(
+            candidate
+            for candidate in candidates
+            if candidate.distance_band == band
+        )
+        for band in DISTANCE_BANDS
+    }
+    missing_bands = [band for band, rows in by_band.items() if not rows]
+    if missing_bands:
+        raise ValueError(
+            "reliability overlap requires every distance band: "
+            + ", ".join(missing_bands)
+        )
+    rotated_band = DISTANCE_BANDS[session_index % len(DISTANCE_BANDS)]
+    if len(by_band[rotated_band]) < 2:
+        raise ValueError(
+            "reliability overlap requires two candidates in rotated band: "
+            f"{rotated_band}"
+        )
+    selected = {
+        rows[session_index % len(rows)].cafe_id for rows in by_band.values()
+    }
+    rotated_rows = by_band[rotated_band]
+    selected.add(rotated_rows[(session_index + 1) % len(rotated_rows)].cafe_id)
+    if len(selected) != 4:
+        raise ValueError("reliability overlap must select four distinct candidates")
+    return frozenset(selected)
+
+
 def render_worksheet(
-    candidates: Sequence[ReviewedCandidate], sessions: Sequence[FieldSession]
+    candidates: Sequence[ReviewedCandidate],
+    sessions: Sequence[FieldSession],
+    observers: tuple[str, str],
 ) -> str:
     if not sessions:
         raise ValueError("at least one session is required")
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=OUTPUT_FIELDS, lineterminator="\n")
     writer.writeheader()
-    for session in sessions:
-        session_candidates = tuple(
-            candidate
-            for candidate in candidates
-            if candidate.poi_valid
-            and candidate.hotspot_name.strip() == session.hotspot_name
+    for session_index, session in enumerate(sessions):
+        session_candidates = _ordered_session_candidates(candidates, session)
+        reliability_ids = _reliability_candidates(
+            session_candidates, session_index=session_index
         )
-        if not session_candidates:
-            raise ValueError(
-                f"session hotspot has no valid candidates: {session.hotspot_name}"
-            )
-        for candidate in session_candidates:
+        for candidate_index, candidate in enumerate(session_candidates):
+            primary_observer_index = (candidate_index + session_index) % 2
+            primary_observer = observers[primary_observer_index]
+            common = {
+                "cafe_id": candidate.cafe_id,
+                "name": candidate.name,
+                "road_address": candidate.road_address,
+                "lat": candidate.lat,
+                "lng": candidate.lng,
+                "hotspot_name": candidate.hotspot_name,
+                "distance_band": candidate.distance_band,
+                "observed_at": "",
+                "slot": session.slot,
+                "observed_area_level": "",
+                "observed_venue_level": "",
+                "pedestrians_per_min": "",
+                "flow_obstruction": "",
+                "observer_notes": "",
+            }
             writer.writerow(
                 {
-                    "cafe_id": candidate.cafe_id,
-                    "name": candidate.name,
-                    "road_address": candidate.road_address,
-                    "lat": candidate.lat,
-                    "lng": candidate.lng,
-                    "hotspot_name": candidate.hotspot_name,
-                    "distance_band": candidate.distance_band,
-                    "observed_at": "",
-                    "slot": session.slot,
-                    "observed_area_level": "",
-                    "observed_venue_level": "",
-                    "pedestrians_per_min": "",
-                    "flow_obstruction": "",
-                    "observer_notes": "",
+                    **common,
+                    "observer_id": primary_observer,
+                    "observation_role": "primary",
                 }
             )
+            if candidate.cafe_id in reliability_ids:
+                writer.writerow(
+                    {
+                        **common,
+                        "observer_id": observers[1 - primary_observer_index],
+                        "observation_role": "reliability",
+                    }
+                )
     return buffer.getvalue()
 
 
@@ -220,13 +311,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         required=True,
         help="HOTSPOT_NAME=SLOT_ID (repeatable)",
     )
+    parser.add_argument(
+        "--observer",
+        action="append",
+        required=True,
+        help="observer ID (exactly two unique values required)",
+    )
     parser.add_argument("--output", type=Path, help="write CSV instead of stdout")
     args = parser.parse_args(argv)
 
     try:
         candidates = load_reviewed_candidates(args.candidates)
         sessions = parse_sessions(args.session)
-        rendered = render_worksheet(candidates, sessions)
+        observers = parse_observers(args.observer)
+        rendered = render_worksheet(candidates, sessions, observers)
         if args.output is None:
             print(rendered, end="")
         else:
