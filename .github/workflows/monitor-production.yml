@@ -17,19 +17,48 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     env:
+      PRODUCTION_MONITOR_ENABLED: ${{ vars.PRODUCTION_MONITOR_ENABLED }}
       PRODUCTION_ENABLED: ${{ vars.PRODUCTION_ENABLED }}
       PRODUCTION_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
     steps:
       - id: configuration
         name: Check monitor configuration
         run: |
-          if [ "$PRODUCTION_ENABLED" != "true" ]; then
-            echo "Production monitoring disabled (set PRODUCTION_ENABLED=true to enable); skipping."
+          case "$PRODUCTION_MONITOR_ENABLED" in
+            true|false)
+              monitor_enabled="$PRODUCTION_MONITOR_ENABLED"
+              gate_source="PRODUCTION_MONITOR_ENABLED"
+              ;;
+            "")
+              case "$PRODUCTION_ENABLED" in
+                true|false)
+                  monitor_enabled="$PRODUCTION_ENABLED"
+                  gate_source="legacy PRODUCTION_ENABLED"
+                  echo "PRODUCTION_MONITOR_ENABLED is unset; using legacy PRODUCTION_ENABLED." >&2
+                  ;;
+                "")
+                  monitor_enabled="false"
+                  gate_source="default"
+                  ;;
+                *)
+                  echo "PRODUCTION_ENABLED must be exactly true or false when used as the legacy fallback." >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "PRODUCTION_MONITOR_ENABLED must be exactly true or false." >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$monitor_enabled" != "true" ]; then
+            echo "Production monitoring disabled by $gate_source; skipping."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$PRODUCTION_HEALTH_URL" ]; then
-            echo "PRODUCTION_ENABLED=true but PRODUCTION_HEALTH_URL is missing." >&2
+            echo "Production monitoring is enabled but PRODUCTION_HEALTH_URL is missing." >&2
             exit 1
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"

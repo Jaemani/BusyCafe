@@ -90,7 +90,7 @@ preflight step의 working directory를 workspace root로 명시했다. `PRODUCTI
 - [x] checkout 전 step은 repository 내부 working directory를 사용하지 않도록 고정
 - [x] 비활성 poll workflow dispatch 성공 검증 — run `29164391760`
 - [x] 비활성 freshness monitor dispatch 성공 검증 — run `29164392552`
-- [ ] managed DB 전환 시 `PRODUCTION_ENABLED=true`에서 secret 누락 실패와 정상 cycle 성공을 각각 검증
+- [ ] managed DB 전환 시 `PRODUCTION_POLL_ENABLED=true`에서 secret 누락 실패와 정상 cycle 성공을 각각 검증
 
 ### 교훈
 

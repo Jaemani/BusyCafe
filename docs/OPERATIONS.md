@@ -16,7 +16,9 @@
   가리켜야 한다.
 
 GitHub secrets는 repository의 `Production` environment에 저장하고 poll job도 같은
-environment를 명시한다. Supabase의 `Project URL`(`https://...supabase.co`)과 publishable
+environment를 명시한다. GitHub repository variable `PRODUCTION_POLL_ENABLED`와
+`PRODUCTION_MONITOR_ENABLED`는 각각 쓰기 수집과 읽기 전용 신선도 감시를 독립 제어한다.
+Supabase의 `Project URL`(`https://...supabase.co`)과 publishable
 key는 PostgreSQL connection string이 아니므로 `DATABASE_URL`에 넣지 않는다.
 
 ### Supabase 연결 항목 대응
@@ -137,9 +139,15 @@ curl --fail --silent "https://busy-cafe.vercel.app/api/cafes?bbox=126.91,37.54,1
 
 `last_complete_cycle_at`, latest cycle, cafe count, model version과 evidence를 bootstrap DB의
 값과 대조한다. 그 뒤 GitHub repository variable `PRODUCTION_HEALTH_URL`에 production health
-URL을 설정한다. 마지막으로 `PRODUCTION_ENABLED=true`를 설정해 poll과 freshness monitor를
-동시에 fail-closed 운영 모드로 전환한다. 활성화 전에는 두 workflow가 의도적으로 skip하고,
-활성화 후에는 URL 또는 secret 누락도 실패로 처리한다.
+URL을 설정한다. `PRODUCTION_MONITOR_ENABLED=true`로 읽기 전용 freshness monitor를 먼저
+활성화하고, 수집 검증 뒤 `PRODUCTION_POLL_ENABLED=true`로 쓰기 poll을 별도 활성화한다.
+장애 대응으로 poll을 멈출 때도 monitor는 켜 두어 stale 전환을 감지한다. 활성화된 workflow는
+필수 URL 또는 secret 누락을 실패로 처리한다.
+
+두 전용 변수는 값이 있으면 각각의 workflow에서 authoritative하며 정확히 `true` 또는
+`false`만 허용한다. 전용 변수가 없는 기존 설치에 한해서만 `PRODUCTION_ENABLED`의 정확한
+`true`/`false` 값을 legacy fallback으로 사용한다. 전용 변수와 legacy 변수를 섞어 운용하지
+말고, 마이그레이션 후에는 전용 변수 두 개를 모두 명시한다.
 
 공개 승격 전 최소 1시간 동안 complete cycle 6회를 확인한다. 각 cycle은 targets=121,
 saved=121, failed=0이어야 하고 complete cycle age는 25분을 넘지 않아야 한다.
@@ -189,7 +197,8 @@ recovery API를 별도 포트에 띄워 `/api/health`, 대표 bbox와 cafe detai
 
 ## 장애 시 rollback
 
-1. poll workflow를 중지해 추가 write를 막는다.
+1. `PRODUCTION_POLL_ENABLED=false`로 poll workflow의 추가 write를 막는다.
+   `PRODUCTION_MONITOR_ENABLED=true`는 유지해 stale 상태를 계속 감지한다.
 2. Vercel의 `DATABASE_URL`을 제거하거나 이전 정상 DB로 교체해 읽기 전용 snapshot 또는
    정상 DB로 되돌린다.
 3. 손상 DB는 보존하고 별도 recovery DB에 point-in-time recovery 또는 logical dump를

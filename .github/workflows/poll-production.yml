@@ -29,6 +29,7 @@ jobs:
       run:
         working-directory: backend
     env:
+      PRODUCTION_POLL_ENABLED: ${{ vars.PRODUCTION_POLL_ENABLED }}
       PRODUCTION_ENABLED: ${{ vars.PRODUCTION_ENABLED }}
       PROBE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.probe_only == true }}
       SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
@@ -49,14 +50,43 @@ jobs:
             echo "probe_only=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [ "$PRODUCTION_ENABLED" != "true" ]; then
-            echo "Production polling disabled (set PRODUCTION_ENABLED=true to enable); skipping."
+
+          case "$PRODUCTION_POLL_ENABLED" in
+            true|false)
+              poll_enabled="$PRODUCTION_POLL_ENABLED"
+              gate_source="PRODUCTION_POLL_ENABLED"
+              ;;
+            "")
+              case "$PRODUCTION_ENABLED" in
+                true|false)
+                  poll_enabled="$PRODUCTION_ENABLED"
+                  gate_source="legacy PRODUCTION_ENABLED"
+                  echo "PRODUCTION_POLL_ENABLED is unset; using legacy PRODUCTION_ENABLED." >&2
+                  ;;
+                "")
+                  poll_enabled="false"
+                  gate_source="default"
+                  ;;
+                *)
+                  echo "PRODUCTION_ENABLED must be exactly true or false when used as the legacy fallback." >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "PRODUCTION_POLL_ENABLED must be exactly true or false." >&2
+              exit 1
+              ;;
+          esac
+
+          if [ "$poll_enabled" != "true" ]; then
+            echo "Production polling disabled by $gate_source; skipping."
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             echo "probe_only=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ -z "$DATABASE_URL" ] || [ -z "$SEOUL_API_KEY" ]; then
-            echo "PRODUCTION_ENABLED=true but DATABASE_URL or SEOUL_API_KEY is missing." >&2
+            echo "Production polling is enabled but DATABASE_URL or SEOUL_API_KEY is missing." >&2
             exit 1
           fi
           echo "enabled=true" >> "$GITHUB_OUTPUT"
