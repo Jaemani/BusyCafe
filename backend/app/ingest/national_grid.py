@@ -41,6 +41,10 @@ HUNDRED_KM_M: Final = 100_000.0
 DIGIT_UNIT_M: Final = 10.0
 # This feed publishes the 250m grid; the digit fields must land on it.
 CELL_SIZE_M: Final = 250.0
+# Provenance label for geometry inferred from ``CELL_ID``.  ``shadow`` and
+# ``unverified`` are intentional: the arithmetic decoder has passed sample
+# checks, but an authority boundary-file comparison is still outstanding.
+CELL_GEOMETRY_VERSION: Final = "national-grid-250m-shadow-unverified-v1"
 # Letters assigned east (first hangul) and north (second hangul).  Korea only
 # spans these; anything else is not a national-grid cell we accept.
 EASTING_LETTERS: Final = "가나다라마바사"
@@ -193,11 +197,7 @@ def decode_cell_id(cell_id: str) -> DecodedCell:
     )
     # The cell is axis-aligned in the projection, not in lat/lng, so take the
     # true enclosing bbox from all four projected corners.
-    corners = [
-        _utmk_to_wgs84(easting_m + de, northing_m + dn)
-        for de in (0.0, CELL_SIZE_M)
-        for dn in (0.0, CELL_SIZE_M)
-    ]
+    corners = cell_wgs84_corners(cell_id)
     lats = [lat for lat, _ in corners]
     lngs = [lng for _, lng in corners]
     return DecodedCell(
@@ -210,4 +210,25 @@ def decode_cell_id(cell_id: str) -> DecodedCell:
         min_lng=min(lngs),
         max_lat=max(lats),
         max_lng=max(lngs),
+    )
+
+
+def cell_wgs84_corners(cell_id: str) -> tuple[tuple[float, float], ...]:
+    """Return the projected cell corners as ``(lat, lng)`` in ring order.
+
+    The order is south-west, south-east, north-east, north-west.  Keeping the
+    exact transformed quadrilateral separate from :class:`DecodedCell`'s
+    axis-aligned display bbox prevents spatial joins from counting the bbox's
+    small corner excess as part of the cell.
+    """
+
+    easting_m, northing_m = _corner_easting_northing(cell_id)
+    return tuple(
+        _utmk_to_wgs84(easting_m + de, northing_m + dn)
+        for de, dn in (
+            (0.0, 0.0),
+            (CELL_SIZE_M, 0.0),
+            (CELL_SIZE_M, CELL_SIZE_M),
+            (0.0, CELL_SIZE_M),
+        )
     )
