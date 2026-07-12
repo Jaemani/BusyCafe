@@ -846,3 +846,33 @@
 - 판정: PASS. 공개 API·score·DB schema 변경 없음
 - `[HUMAN]` 다음 입력: 부산 공공데이터포털 API 키, 두 도시 라이선스·파생 표시 최종 확인.
   Melbourne 48시간 read-only shadow와 fixture 확보는 다음 구현 단계에서 진행 가능
+
+## 2026-07-13 — 도시 활동도 코어 결정과 source-local activity shadow
+
+- 실행 환경: macOS, backend/frontend, Python 3.14, uv/pytest, Vite/TypeScript
+- 관련 결정: [ADR-0011](adr/ADR-0011-urban-activity-core-cafe-overlay.md)
+- 입력: 고정 합성 observation·baseline fixture. 실 API와 네트워크 호출 없음
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+- 실제 결과: backend **417 passed**, compileall PASS. frontend typecheck와 production
+  build PASS. Vite의 500kB 초과 bundle 경고는 기존과 동일하며 신규 오류는 없음
+- 구현 계약:
+  - 제품 코어를 도시 활동도 surface로, 카페를 첫 활용 overlay로 정의한다. 지역 활동도를
+    카페 좌석 점유율이나 대기 인원으로 표현하지 않는다
+  - observation type과 `source_id`가 같은 입력만 source-local 기준선으로 비교한다.
+    서로 다른 provider의 raw 값은 직접 결합하지 않는다
+  - `signal_mode`와 freshness를 별도 축으로 유지한다. stale 관측은 출처·관측 및 수집
+    시간 범위를 보존하지만 현재 값과 anomaly는 `NULL`로 반환한다
+  - 결정적 frozen dataclass, `log1p` anomaly와 구간 envelope, contributor disagreement,
+    입력 품질·신선도·provenance를 제공한다
+- UI 의미 수정: 퍼센트형 `신뢰도`를 `근거 강도 높음/보통/낮음`으로 바꾸고,
+  Overture confidence는 정확도 확률이 아닌 `장소 원장 품질`로 표시한다
+- 공개 영향: 공개 `v1-idw-point`, `/api/cafes` 계약, DB schema와 materialized score는
+  변경하지 않았다. activity shadow는 DB/API 의존이 없는 비공개 비교 경로다
+- heatmap 판정: 독립적인 cell artifact와 평가 근거가 생기기 전에는 카페 point 추정치를
+  heatmap으로 확장하지 않는다. 이후에도 활동도는 별도 `/api/activity` 계약으로 제공한다
+- 판정: PASS(shadow 및 의미 수정). 공개 모델·기본 레이어 승격은 Phase 6와 source별
+  empirical gate 통과 전까지 차단한다

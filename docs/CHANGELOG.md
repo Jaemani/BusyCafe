@@ -6,6 +6,12 @@
 
 ### Added
 
+- 도시 활동도를 제품 코어, 카페를 첫 활용 레이어로 정의한 ADR-0011. 서울을 우선
+  검증 지역으로 유지하고, 공개 모델 승격 전에는 카페 내부 좌석 점유율과 지역 활동도를
+  구분한다
+- source별 원본 의미와 기준선을 보존하는 결정적 `activity-shadow`. 서로 다른 provider의
+  raw 값을 합치지 않고, `signal_mode`와 freshness를 분리하며 stale 관측은 provenance만
+  남기고 현재 anomaly는 생성하지 않는다
 - BusyCafe 자체 코드에 Apache License 2.0을 적용하고, 외부 데이터의 제공자별
   라이선스·출처표시 조건과 명확히 구분
 - live health의 complete-cycle freshness를 이용한 프론트 갱신 지연 표시
@@ -63,6 +69,10 @@
 
 ### Changed
 
+- UI의 퍼센트형 `신뢰도` 표현을 정확도 확률로 오인되지 않는 `근거 강도` 등급으로
+  변경하고, Overture confidence는 `장소 원장 품질`로 구분
+- 독립적인 격자 활동도 artifact가 마련되기 전에는 기존 카페 점수로 heatmap을 만들지
+  않는다. 공개 v1 API와 DB schema는 이번 shadow 작업에서 변경하지 않음
 - 공개 Vercel API를 Supabase PostgreSQL read 경로로 승격
 - 서울 API client를 4개 bounded connection pool로 재사용하고, fetch 결과는 대상 순서대로
   검증한 뒤 snapshot을 한 transaction으로 저장
