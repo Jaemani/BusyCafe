@@ -690,7 +690,7 @@
 
 - 실행 환경: backend/, uv, pytest + 일회성 검증 스크립트(scratchpad)
 - 검증자: Claude (Fable 판단·검증, opus 부분 구현 후 세션 한도로 중단 → Fable이 완료)
-- 관련 커밋: 이 커밋. 상세 수치는
+- 관련 커밋: `7183a78`. 상세 수치는
   `docs/research/2026-07-12-cell-id-decode.md`
 - 입력: `Se250MSpopLocalResd` 20260708 실응답 1000행(고유 셀 817, 행정동 48).
   검증용 실호출 원본은 scratchpad에만 두고 5행 fixture는 기존 커밋 유지
@@ -710,7 +710,7 @@
 - 실행 환경: backend/, uv, pytest + 명시적 검증 실다운로드 1회
 - 검증자: Claude (Fable — sonnet 에이전트가 세션 한도로 중단, config 상수와 URL
   실검증 기록을 이어받아 완료)
-- 관련 커밋: 이 커밋
+- 관련 커밋: 구현 `6fdf450`, 실측 기록 `22f41e8`
 - 실행 명령: `nio_download.do`에 `infId=OA-22784, infSeq=1, seq=260708` POST ·
   `rtk proxy uv run python -m pytest tests` · dry-run
   `scripts/download_living_population.py --date 20260708`
@@ -731,3 +731,40 @@
 - 판정: PASS. 월별 파일(448MB)의 실다운로드는 상관 실험 직전에 명시적으로 실행한다
 - 후속 조치: CELL_ID 디코더와 이 다운로더로 상관 실험 입력이 준비됨 — 남은 선행
   조건은 worker 연속 수집(`[HUMAN]`)뿐이다
+
+## 2026-07-13 — 생활인구 CSV 파서와 250m 공간가중 shadow
+
+- 실행 환경: macOS, backend/, Python 3.14, uv/pytest
+- 관련 커밋: 파서 `8a0529f`, 공간가중 shadow `88781d6`
+- 입력:
+  - 실측 일별 ZIP에서 파생한 2행 `cp949` fixture
+    (`backend/fixtures/living_population_minimal_cp949.csv`)
+  - 고정 national-grid 셀과 synthetic hotspot polygon fixture
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts`
+  - `cd backend && mypy app`
+- 실제 결과: **342 passed**, compileall PASS, mypy PASS. 기존
+  Starlette/httpx deprecation warning 1건 외 신규 경고 없음
+- 구현 계약:
+  - CSV는 스트리밍 파싱하며 실제 달력 날짜, `00~23`, strip 후 8자리 행정동 코드,
+    250m lattice `CELL_ID`, 음이 아닌 plain decimal 또는 `*`만 허용한다
+  - `*`는 `None + raw token + masked flag`로 보존하고 2.0/0/3 대치는 파서 밖의
+    상관 실험 계산층에서만 수행한다
+  - 공간 가중치는 `area(cell ∩ hotspot) / area(cell)`이며, 출력은
+    `(area_cd, cell_id)` 순으로 결정적이다. I/O·DB write·공개 점수 변경은 없다
+- 판정: PASS(shadow 기반). 공개 `v1-idw-point`는 변경하지 않았다
+- 승격 차단 조건: 공식 250m 경계 파일 전수 대조 `[VERIFY]`, 7일 연속 snapshot,
+  Phase 6 현장 관측이 남아 있다
+- 감사 중 정정: 월별 448MB 파일은 포털 메타데이터만 확인했는데 전체 다운로드까지
+  검증한 것으로 config/client/CHANGELOG에 잘못 기록돼 있었다. 일별 15MB 파일만 full
+  download 검증된 사실로 수정했다. 런타임 동작에는 영향이 없었다
+
+## 2026-07-13 — production 신선도 재확인
+
+- 실행 명령: `curl -fsS https://busy-cafe.vercel.app/api/health`
+- 실제 결과: `data_mode=live`, 마지막 ingest `2026-07-12T05:42:03Z`, 마지막 complete
+  cycle `2026-07-12T05:12:32Z`, 최신 cycle `failed`(`saved=0`, `failed=121`),
+  `snapshots_last_hour=0`
+- 판정: FAIL — live PostgreSQL read는 동작하지만 현재 데이터는 준실시간이 아니다.
+  ADR-0008의 전용 상시 worker 배포·1시간 6회 complete 검증 전까지 실시간 승격 금지

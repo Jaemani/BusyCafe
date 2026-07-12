@@ -22,14 +22,20 @@
   의도적으로 두지 않는다. 읽기 전용 `run_density_snapshot.py` 구조 리포트 포함
 - 생활인구 대량 파일 다운로더(`scripts/download_living_population.py` +
   `clients/seoul_living_population_files.py`): dry-run 기본, `.part` 원자적 게시,
-  덮어쓰기 거부. seq 파생 규칙(일별 YYMMDD·월별 YYMM)을 실다운로드로 이중 확인.
-  파일 실측에서 cp949 인코딩과 `생활인구합계`의 `*` 마스킹 확인
+  덮어쓰기 거부. 일별 seq 파생 규칙(YYMMDD)을 실다운로드로 이중 확인하고 월별
+  규칙(YYMM)은 포털 페이지에서 확인. 파일 실측에서 cp949 인코딩과
+  `생활인구합계`의 `*` 마스킹 확인
 - 국가 격자 `CELL_ID` 디코더(`app/ingest/national_grid.py`): 순수 EPSG:5179 역TM
   구현으로 250m 셀을 WGS84 중심·경계로 변환. 실데이터 817셀 표본 검증
   (bbox 817/817, 종로구 정합, 인접 간격 250.56m) — 공식 격자 경계 전수 대조는 `[VERIFY]`
 - 생활인구 ↔ citydata 상관 실험 설계
   (`docs/research/2026-07-12-baseline-correlation-design.md`): 프로파일 상관 주 지표와
   판정 기준을 데이터 관측 전에 고정, worker 연속 수집을 선행 조건으로 명시
+- 생활인구 bulk CSV 스트리밍 파서: 실측 `cp949` 인코딩, 엄격한 날짜·시간·행정동·
+  `CELL_ID` 검증, 총계 `*` 마스킹의 원본 상태를 보존. 대치값은 연구 계산층으로 분리
+- 핫스팟 polygon과 250m 생활인구 셀의 교차면적 가중치를 결정적으로 생성하는
+  offline shadow 도구. 공식 격자 경계 전수 대조 전에는 provenance에 `unverified`를
+  유지하고 공개 점수에 사용하지 않음
 - 생활인구 베이스라인 단위를 250m 격자로 확정(ADR-0009, 사용자 승인). 기존
   `SEOUL_API_KEY`로 `Se250MSpopLocalResd` 실호출 검증(XML 정상·JSON 포털 결함),
   원본 5행 fixture와 SHA-256 보존

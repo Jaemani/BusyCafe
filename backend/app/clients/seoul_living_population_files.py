@@ -2,10 +2,11 @@
 
 The portal serves every bulk file from the same ``nio_download.do`` endpoint
 used by the hotspot master client, but the per-file ``seq`` is not a stored
-constant: the dataset page derives it from the file date. Both derivations
-below were confirmed live on 2026-07-12 against real downloads (daily
-``250_LOCAL_RESD_20260708.zip`` = 15,037,162 bytes, monthly
-``250_LOCAL_RESD_202606.zip`` = 448,638,322 bytes):
+constant: the dataset page derives it from the file date. The daily rule was
+confirmed on 2026-07-12 with a complete real download
+(``250_LOCAL_RESD_20260708.zip`` = 15,037,162 bytes). The monthly filename,
+sequence and 448,638,322-byte size were read from the portal page; the monthly
+body has not yet been downloaded in full:
 
 * daily  ``YYYYMMDD`` -> ``seq = YYMMDD``  (page JS: ``downloadFile('260708')``)
 * monthly ``YYYYMM``  -> ``seq = YYMM``

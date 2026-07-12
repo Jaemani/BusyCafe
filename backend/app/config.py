@@ -40,11 +40,11 @@ SEOUL_HOTSPOT_AREAS_PATH: Final = FIXTURES_DIR / "seoul_hotspot_areas.zip"
 # `infId`/`infSeq`/the SEOUL_DATAFILE_DOWNLOAD_URL endpoint above were read
 # from the dataset page's `frmFile` hidden fields
 # (https://data.seoul.go.kr/dataList/OA-22784/F/1/datasetView.do) and then
-# confirmed live on 2026-07-12 by actually POSTing this exact payload: it
-# returned real ZIPs for both a daily file (250_LOCAL_RESD_20260708.zip,
-# 15,037,162 bytes) and a monthly file (250_LOCAL_RESD_202606.zip,
-# 448,638,322 bytes). The per-file `seq` value itself is NOT a stored
-# constant here -- it is derived per request; see [VERIFY] notes on
+# confirmed live on 2026-07-12 by POSTing this exact payload for a daily file
+# (250_LOCAL_RESD_20260708.zip, 15,037,162 bytes). The portal page exposed the
+# monthly target metadata (250_LOCAL_RESD_202606.zip, 448,638,322 bytes), but
+# the monthly body was not downloaded in full. The per-file `seq` value itself
+# is NOT a stored constant here -- it is derived per request; see notes on
 # `build_download_target()` in app/clients/seoul_living_population_files.py.
 SEOUL_LIVING_POPULATION_INF_ID: Final = "OA-22784"
 SEOUL_LIVING_POPULATION_INF_SEQ: Final = 1
