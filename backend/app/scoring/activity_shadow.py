@@ -277,14 +277,14 @@ def _validate_contributor(
         if contributor.observed_at > contributor.fetched_at:
             raise ValueError("observed_at must not be after fetched_at")
     else:
+        target_age_min = (now - contributor.observed_at).total_seconds() / 60.0
+        if target_age_min > max_future_skew_min:
+            raise ValueError("forecast target has expired")
         target_before_fetch_min = (
             contributor.fetched_at - contributor.observed_at
         ).total_seconds() / 60.0
         if target_before_fetch_min > max_future_skew_min:
             raise ValueError("forecast target must not be before fetched_at")
-        target_age_min = (now - contributor.observed_at).total_seconds() / 60.0
-        if target_age_min > max_future_skew_min:
-            raise ValueError("forecast target has expired")
     if contributor.baseline_reference.cutoff > contributor.observed_at.date():
         raise ValueError("baseline cutoff must not be after observation date")
     return interval
