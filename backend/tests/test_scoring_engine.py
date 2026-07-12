@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from app.config import SCORING_MODEL_VERSION
@@ -191,7 +191,16 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
             lat=37.0,
             lng=127.0,
         )
-        session.add_all([hotspot, cafe])
+        second_cafe = Cafe(
+            overture_id="overture:test:second",
+            source_release="2026-06-17.0",
+            source_confidence=0.9,
+            primary_category="cafe",
+            name="두 번째 테스트 카페",
+            lat=37.0001,
+            lng=127.0001,
+        )
+        session.add_all([hotspot, cafe, second_cafe])
         session.flush()
         session.add(
             HotspotSnapshot(
@@ -205,17 +214,36 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         session.commit()
 
         first = materialize_all(session, now=NOW)
-        second = materialize_all(session, now=NOW + timedelta(minutes=15))
+        selected_statements: list[str] = []
+        score_update_batches: list[bool] = []
 
-        assert first.cafes == second.cafes == 1
-        assert first.covered == 1
+        def capture_selects(
+            _connection, _cursor, statement, _parameters, _context, _executemany
+        ) -> None:
+            if statement.lstrip().upper().startswith("SELECT"):
+                selected_statements.append(statement.lower())
+            if statement.lstrip().upper().startswith("UPDATE CAFE_SCORES"):
+                score_update_batches.append(_executemany)
+
+        event.listen(engine, "before_cursor_execute", capture_selects)
+        second = materialize_all(session, now=NOW + timedelta(minutes=15))
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+        assert first.cafes == second.cafes == 2
+        assert first.covered == 2
         stored = session.scalar(select(CafeScore))
         assert stored is not None
         assert stored.model_version == SCORING_MODEL_VERSION
         assert stored.level == 3
         assert stored.coverage == "covered"
         assert stored.computed_at.replace(tzinfo=UTC) == NOW + timedelta(minutes=15)
-        assert len(session.scalars(select(CafeScore)).all()) == 1
+        assert len(session.scalars(select(CafeScore)).all()) == 2
+        materialize_selects = "\n".join(selected_statements)
+        assert "cafes.source_json" not in materialize_selects
+        assert "cafe_scores.contributors_json" not in materialize_selects
+        assert "hotspot_snapshots.raw_json" not in materialize_selects
+        assert "hotspot_snapshots.forecast_json" not in materialize_selects
+        assert score_update_batches == [True]
     engine.dispose()
 
 

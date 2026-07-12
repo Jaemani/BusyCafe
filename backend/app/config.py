@@ -53,11 +53,15 @@ HTTP_CONNECT_TIMEOUT_SECONDS: Final = 5.0
 HTTP_MAX_RETRIES: Final = 3
 HTTP_RETRY_BASE_DELAY_SECONDS: Final = 0.5
 HTTP_USER_AGENT: Final = "cafe-crowd/0.1"
+HTTP_MAX_CONNECTIONS: Final = 4
+HTTP_MAX_KEEPALIVE_CONNECTIONS: Final = 4
 
 # Polling interval confirmed after the portal reported no call-count limit.
 # Scoring defaults remain subject to Phase 6 calibration.
 POLL_INTERVAL_MIN: Final = 10
 POLL_MAX_CONSECUTIVE_FAILURES: Final = 5
+# Bounds upstream pressure while reducing the 121-place cycle latency.
+POLL_FETCH_CONCURRENCY: Final = HTTP_MAX_CONNECTIONS
 SCORING_MODEL_VERSION: Final = "v1-idw-point"
 R_MAX_M: Final = 1_500
 COVERED_M: Final = 600

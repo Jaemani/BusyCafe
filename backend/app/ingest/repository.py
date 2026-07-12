@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -12,8 +17,19 @@ from app.ingest.poller import ParseFailureRecord, PollTarget, SnapshotRecord
 from app.models import IngestCycle, Hotspot, HotspotParseFailure, HotspotSnapshot
 
 
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class BatchPersistenceReport:
+    snapshot_saved: int
+    snapshot_failed: int
+    parse_failure_saved: int
+    parse_failure_failed: int
+
+
 class SnapshotRepository:
-    """Load active targets and persist each result in an isolated transaction."""
+    """Load active targets and persist deterministic polling results."""
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
@@ -124,3 +140,119 @@ class SnapshotRepository:
                 )
             )
             session.commit()
+
+    @staticmethod
+    def _snapshot_values(record: SnapshotRecord) -> dict[str, Any]:
+        return {
+            "hotspot_id": record.hotspot_id,
+            "observed_at": record.observed_at,
+            "fetched_at": record.fetched_at,
+            "congest_level": record.congest_level,
+            "congest_label": record.congest_label,
+            "ppltn_min": record.ppltn_min,
+            "ppltn_max": record.ppltn_max,
+            "forecast_json": record.forecast_json,
+            "raw_json": record.raw_json,
+        }
+
+    @staticmethod
+    def _parse_failure_model(
+        record: ParseFailureRecord,
+    ) -> HotspotParseFailure:
+        return HotspotParseFailure(
+            hotspot_id=record.hotspot_id,
+            fetched_at=record.fetched_at,
+            error_type=record.error_type,
+            error_message=record.error_message,
+            raw_json=record.raw_json,
+        )
+
+    def save_batch(
+        self,
+        snapshots: list[SnapshotRecord],
+        parse_failures: list[ParseFailureRecord],
+    ) -> BatchPersistenceReport:
+        """Persist one ordered poll result in one normal-path transaction.
+
+        Natural-key duplicates remain successful no-ops. If a malformed row
+        breaks the batch, fall back to isolated writes so one bad record does
+        not discard later valid records.
+        """
+
+        if not snapshots and not parse_failures:
+            return BatchPersistenceReport(0, 0, 0, 0)
+
+        try:
+            with self._session_factory() as session:
+                if snapshots:
+                    values = [self._snapshot_values(row) for row in snapshots]
+                    dialect_name = session.get_bind().dialect.name
+                    if dialect_name == "postgresql":
+                        statement = postgresql_insert(HotspotSnapshot).values(
+                            values
+                        )
+                    elif dialect_name == "sqlite":
+                        statement = sqlite_insert(HotspotSnapshot).values(values)
+                    else:  # supported runtimes use PostgreSQL or SQLite
+                        raise RuntimeError(
+                            f"unsupported snapshot batch dialect: {dialect_name}"
+                        )
+                    session.execute(
+                        statement.on_conflict_do_nothing(
+                            index_elements=["hotspot_id", "observed_at"]
+                        )
+                    )
+                if parse_failures:
+                    session.add_all(
+                        [
+                            self._parse_failure_model(row)
+                            for row in parse_failures
+                        ]
+                    )
+                session.commit()
+            return BatchPersistenceReport(
+                snapshot_saved=len(snapshots),
+                snapshot_failed=0,
+                parse_failure_saved=len(parse_failures),
+                parse_failure_failed=0,
+            )
+        except Exception as exc:
+            LOGGER.error(
+                "Polling batch persistence failed; isolating records (%s)",
+                type(exc).__name__,
+            )
+
+        snapshot_saved = 0
+        snapshot_failed = 0
+        for record in snapshots:
+            try:
+                self.save_snapshot(record)
+                snapshot_saved += 1
+            except Exception as exc:
+                snapshot_failed += 1
+                LOGGER.error(
+                    "Hotspot snapshot fallback persistence failed: id=%d (%s)",
+                    record.hotspot_id,
+                    type(exc).__name__,
+                )
+
+        parse_failure_saved = 0
+        parse_failure_failed = 0
+        for record in parse_failures:
+            try:
+                self.save_parse_failure(record)
+                parse_failure_saved += 1
+            except Exception as exc:
+                parse_failure_failed += 1
+                LOGGER.error(
+                    "Hotspot parse-failure fallback persistence failed: "
+                    "id=%d (%s)",
+                    record.hotspot_id,
+                    type(exc).__name__,
+                )
+        return BatchPersistenceReport(
+            snapshot_saved=snapshot_saved,
+            snapshot_failed=snapshot_failed,
+            parse_failure_saved=parse_failure_saved,
+            parse_failure_failed=parse_failure_failed,
+        )

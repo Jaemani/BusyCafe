@@ -13,7 +13,7 @@ from math import exp, floor
 from typing import Literal, Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.config import (
     CONF_HIGH,
@@ -239,7 +239,14 @@ def materialize_all(
         .subquery()
     )
     rows = session.execute(
-        select(Hotspot, HotspotSnapshot)
+        select(
+            Hotspot.id,
+            Hotspot.name,
+            Hotspot.lat,
+            Hotspot.lng,
+            HotspotSnapshot.congest_level,
+            HotspotSnapshot.observed_at,
+        )
         .join(latest, latest.c.hotspot_id == Hotspot.id)
         .join(
             HotspotSnapshot,
@@ -251,26 +258,34 @@ def materialize_all(
     ).all()
     observations = tuple(
         HotspotObservation(
-            hotspot_id=hotspot.id,
-            name=hotspot.name,
-            lat=hotspot.lat,
-            lng=hotspot.lng,
-            level=snapshot.congest_level,
-            observed_at=_database_datetime(snapshot.observed_at),
+            hotspot_id=hotspot_id,
+            name=name,
+            lat=lat,
+            lng=lng,
+            level=congest_level,
+            observed_at=_database_datetime(observed_at),
         )
-        for hotspot, snapshot in rows
+        for hotspot_id, name, lat, lng, congest_level, observed_at in rows
     )
+    # Materialization only needs score identities and cafe coordinates. Avoid
+    # transferring cached POI/source JSON and previous contributor JSON from a
+    # remote PostgreSQL database on every ingest cycle.
     existing_scores = {
-        item.cafe_id: item for item in session.scalars(select(CafeScore))
+        item.cafe_id: item
+        for item in session.scalars(
+            select(CafeScore).options(load_only(CafeScore.cafe_id))
+        )
     }
-    cafes = session.scalars(
-        select(Cafe).where(Cafe.active.is_(True)).order_by(Cafe.id)
+    cafes = session.execute(
+        select(Cafe.id, Cafe.lat, Cafe.lng)
+        .where(Cafe.active.is_(True))
+        .order_by(Cafe.id)
     ).all()
     counts: dict[Coverage, int] = {"covered": 0, "fringe": 0, "uncovered": 0}
-    for cafe in cafes:
+    for cafe_id, cafe_lat, cafe_lng in cafes:
         estimate = score_cafe(
-            cafe.lat,
-            cafe.lng,
+            cafe_lat,
+            cafe_lng,
             observations,
             now=computed_at,
         )
@@ -299,9 +314,9 @@ def materialize_all(
                 else None
             ),
         }
-        existing = existing_scores.get(cafe.id)
+        existing = existing_scores.get(cafe_id)
         if existing is None:
-            session.add(CafeScore(cafe_id=cafe.id, **values))
+            session.add(CafeScore(cafe_id=cafe_id, **values))
         else:
             for key, value in values.items():
                 setattr(existing, key, value)

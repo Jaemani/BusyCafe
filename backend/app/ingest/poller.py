@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -19,6 +20,7 @@ from app.clients.seoul_citydata import SeoulAPIError, parse_population
 from app.config import (
     HTTP_MAX_RETRIES,
     HTTP_RETRY_BASE_DELAY_SECONDS,
+    POLL_FETCH_CONCURRENCY,
     POLL_MAX_CONSECUTIVE_FAILURES,
 )
 
@@ -84,6 +86,8 @@ class PollReport:
     targets: int
     saved: int
     failed: int
+    fetch_seconds: float = 0.0
+    persistence_seconds: float = 0.0
 
 
 class PopulationTargetMismatch(ValueError):
@@ -165,15 +169,19 @@ def poll_once(
     save_parse_failure: ParseFailureWriter,
     clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.perf_counter,
     max_retries: int = HTTP_MAX_RETRIES,
     retry_base_delay_seconds: float = HTTP_RETRY_BASE_DELAY_SECONDS,
     max_consecutive_failures: int = POLL_MAX_CONSECUTIVE_FAILURES,
+    fetch_concurrency: int = POLL_FETCH_CONCURRENCY,
     logger: logging.Logger = LOGGER,
 ) -> PollReport:
     """Poll every target once, isolating retries and failures per target.
 
-    ``max_retries`` counts retries after the initial request.  Backoff delays
-    are ``base``, ``base * 2``, ... and can be replaced in tests.
+    ``max_retries`` counts retries after the initial request. Backoff delays
+    are ``base``, ``base * 2``, ... and can be replaced in tests. Fetches run
+    in bounded batches; parsing and persistence stay in deterministic target
+    order on the caller thread.
     """
 
     if max_retries < 0:
@@ -182,11 +190,15 @@ def poll_once(
         raise ValueError("retry_base_delay_seconds must be >= 0")
     if max_consecutive_failures <= 0:
         raise ValueError("max_consecutive_failures must be > 0")
+    if fetch_concurrency <= 0:
+        raise ValueError("fetch_concurrency must be > 0")
 
     target_list = tuple(targets)
     saved = 0
     failed = 0
     consecutive_failures = 0
+    fetch_seconds = 0.0
+    persistence_seconds = 0.0
 
     def record_target_failure(target_index: int) -> bool:
         """Count one failure and open the outage circuit when bounded."""
@@ -207,12 +219,30 @@ def poll_once(
         )
         return True
 
-    for target_index, target in enumerate(target_list):
-        payload: dict[str, Any] | None = None
+    def persist_snapshot(record: SnapshotRecord) -> None:
+        nonlocal persistence_seconds
+        started = monotonic()
+        try:
+            save_snapshot(record)
+        finally:
+            persistence_seconds += monotonic() - started
+
+    def persist_parse_failure(record: ParseFailureRecord) -> None:
+        nonlocal persistence_seconds
+        started = monotonic()
+        try:
+            save_parse_failure(record)
+        finally:
+            persistence_seconds += monotonic() - started
+
+    def fetch_target(
+        target: PollTarget,
+    ) -> tuple[dict[str, Any] | None, float]:
+        elapsed = 0.0
         for attempt in range(max_retries + 1):
+            fetch_started = monotonic()
             try:
                 payload = client.fetch_population_raw(target.area_name)
-                break
             except SeoulAPIError as exc:
                 if attempt == max_retries:
                     logger.error(
@@ -221,7 +251,8 @@ def poll_once(
                         target.area_name,
                         type(exc).__name__,
                     )
-                    break
+                    elapsed += monotonic() - fetch_started
+                    return None, elapsed
                 delay = retry_base_delay_seconds * (2**attempt)
                 logger.warning(
                     "Hotspot poll attempt %d failed; retrying in %.2fs: %s (%s)",
@@ -231,18 +262,31 @@ def poll_once(
                     type(exc).__name__,
                 )
                 sleep(delay)
+                elapsed += monotonic() - fetch_started
             except Exception as exc:
                 logger.error(
                     "Hotspot fetch failed without retry: %s (%s)",
                     target.area_name,
                     type(exc).__name__,
                 )
-                break
+                elapsed += monotonic() - fetch_started
+                return None, elapsed
+            else:
+                elapsed += monotonic() - fetch_started
+                return payload, elapsed
+        return None, elapsed
+
+    def process_payload(
+        target_index: int,
+        target: PollTarget,
+        payload: dict[str, Any] | None,
+    ) -> bool:
+        """Persist one ordered result; return true when circuit opens."""
+
+        nonlocal consecutive_failures, persistence_seconds, saved
 
         if payload is None:
-            if record_target_failure(target_index):
-                break
-            continue
+            return record_target_failure(target_index)
 
         try:
             fetched_at = _as_utc(clock())
@@ -253,8 +297,8 @@ def poll_once(
                 type(exc).__name__,
             )
             if record_target_failure(target_index):
-                break
-            continue
+                return True
+            return False
 
         try:
             record = build_snapshot_record(
@@ -274,7 +318,7 @@ def poll_once(
                 raw_json=payload,
             )
             try:
-                save_parse_failure(failure)
+                persist_parse_failure(failure)
             except Exception as persistence_exc:
                 logger.error(
                     "Hotspot parse-failure persistence failed: %s (%s)",
@@ -287,11 +331,11 @@ def poll_once(
                 type(exc).__name__,
             )
             if record_target_failure(target_index):
-                break
-            continue
+                return True
+            return False
 
         try:
-            save_snapshot(record)
+            persist_snapshot(record)
         except Exception as exc:  # persistence failure must not stop later targets
             logger.error(
                 "Hotspot snapshot persistence failed: %s (%s)",
@@ -299,9 +343,68 @@ def poll_once(
                 type(exc).__name__,
             )
             if record_target_failure(target_index):
-                break
-            continue
+                return True
+            return False
         saved += 1
         consecutive_failures = 0
+        return False
 
-    return PollReport(targets=len(target_list), saved=saved, failed=failed)
+    def process_result(
+        target_index: int,
+        target: PollTarget,
+        result: tuple[dict[str, Any] | None, float],
+    ) -> bool:
+        nonlocal fetch_seconds
+        payload, elapsed = result
+        fetch_seconds += elapsed
+        return process_payload(target_index, target, payload)
+
+    # Avoid executor overhead for one target and keep injected local clients
+    # on their caller thread.
+    if len(target_list) == 1:
+        process_result(0, target_list[0], fetch_target(target_list[0]))
+        return PollReport(
+            targets=1,
+            saved=saved,
+            failed=failed,
+            fetch_seconds=fetch_seconds,
+            persistence_seconds=persistence_seconds,
+        )
+
+    with ThreadPoolExecutor(
+        max_workers=fetch_concurrency,
+        thread_name_prefix="seoul-poll",
+    ) as executor:
+        batch_start = 0
+        while batch_start < len(target_list):
+            # Never speculatively call beyond the remaining circuit budget.
+            # A healthy ordered result resets the budget before next batch.
+            batch_size = min(
+                fetch_concurrency,
+                max_consecutive_failures - consecutive_failures,
+            )
+            batch = target_list[batch_start : batch_start + batch_size]
+            futures = [
+                executor.submit(fetch_target, target) for target in batch
+            ]
+            for offset, (target, future) in enumerate(zip(batch, futures)):
+                target_index = batch_start + offset
+                if process_result(target_index, target, future.result()):
+                    for pending in futures[offset + 1 :]:
+                        pending.cancel()
+                    return PollReport(
+                        targets=len(target_list),
+                        saved=saved,
+                        failed=failed,
+                        fetch_seconds=fetch_seconds,
+                        persistence_seconds=persistence_seconds,
+                    )
+            batch_start += len(batch)
+
+    return PollReport(
+        targets=len(target_list),
+        saved=saved,
+        failed=failed,
+        fetch_seconds=fetch_seconds,
+        persistence_seconds=persistence_seconds,
+    )

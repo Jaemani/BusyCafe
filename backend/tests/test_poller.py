@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -117,6 +118,23 @@ def test_poll_once_retries_with_exponential_backoff_then_saves() -> None:
     assert len(saved) == 1
 
 
+def test_poll_report_measures_fetch_and_persistence_without_payload_data() -> None:
+    payload = load_citydata_fixture()
+    ticks = iter([1.0, 1.25, 2.0, 2.75])
+
+    report = poll_once(
+        [PollTarget(88, "POI088", "광화문광장")],
+        client=FakePopulationClient({"광화문광장": [payload]}),
+        save_snapshot=lambda _: None,
+        save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
+        clock=lambda: datetime(2026, 7, 11, 7, 26, tzinfo=UTC),
+        monotonic=lambda: next(ticks),
+    )
+
+    assert report.fetch_seconds == pytest.approx(0.25)
+    assert report.persistence_seconds == pytest.approx(0.75)
+
+
 def test_final_failure_does_not_prevent_next_target() -> None:
     good_payload = fixture_for_area("홍대 관광특구", "POI001", label="붐빔")
     client = FakePopulationClient(
@@ -140,6 +158,7 @@ def test_final_failure_does_not_prevent_next_target() -> None:
         sleep=sleeps.append,
         max_retries=3,
         retry_base_delay_seconds=0.25,
+        fetch_concurrency=1,
     )
 
     assert client.calls == ["실패 지역"] * 4 + ["홍대 관광특구"]
@@ -171,6 +190,7 @@ def test_consecutive_failure_circuit_skips_remaining_targets() -> None:
         sleep=lambda _: pytest.fail("sleep must not be called"),
         max_retries=0,
         max_consecutive_failures=3,
+        fetch_concurrency=1,
     )
 
     assert client.calls == [target.area_name for target in targets[:3]]
@@ -204,6 +224,7 @@ def test_success_resets_consecutive_failure_circuit() -> None:
         sleep=lambda _: pytest.fail("sleep must not be called"),
         max_retries=0,
         max_consecutive_failures=2,
+        fetch_concurrency=1,
     )
 
     assert client.calls == [target.area_name for target in targets]
@@ -244,6 +265,7 @@ def test_persistence_failure_is_isolated_without_refetching() -> None:
         save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
         clock=lambda: datetime(2026, 7, 11, 7, 26, tzinfo=UTC),
         sleep=lambda _: pytest.fail("sleep must not be called"),
+        fetch_concurrency=1,
     )
 
     assert client.calls == ["첫 지역", "둘째 지역"]
@@ -278,6 +300,7 @@ def test_target_mismatch_is_not_retried_and_preserves_raw_failure(
         save_parse_failure=failures.append,
         clock=lambda: datetime(2026, 7, 11, 7, 26, tzinfo=UTC),
         sleep=sleeps.append,
+        fetch_concurrency=1,
     )
 
     assert client.calls == ["광화문광장", "홍대 관광특구"]
@@ -311,3 +334,88 @@ def test_schema_parse_failure_is_not_retried() -> None:
     assert failures[0].error_type == "ValidationError"
     assert failures[0].error_message == "population response validation failed"
     assert failures[0].raw_json == payload
+
+
+def test_fetches_concurrently_but_persists_in_target_order() -> None:
+    targets = [
+        PollTarget(index, f"POI{index:03d}", f"지역 {index}")
+        for index in range(1, 4)
+    ]
+    payloads = {
+        target.area_name: fixture_for_area(target.area_name, target.area_cd)
+        for target in targets
+    }
+    barrier = threading.Barrier(len(targets))
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    class ConcurrentClient:
+        def fetch_population_raw(self, area_name: str) -> dict[str, Any]:
+            nonlocal active, max_active
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            try:
+                barrier.wait(timeout=2)
+                return payloads[area_name]
+            finally:
+                with lock:
+                    active -= 1
+
+    saved: list[SnapshotRecord] = []
+    report = poll_once(
+        targets,
+        client=ConcurrentClient(),
+        save_snapshot=saved.append,
+        save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
+        clock=lambda: datetime(2026, 7, 11, 7, 26, tzinfo=UTC),
+        fetch_concurrency=3,
+    )
+
+    assert max_active == 3
+    assert [record.hotspot_id for record in saved] == [1, 2, 3]
+    assert report.saved == 3
+    assert report.failed == 0
+
+
+def test_poll_rejects_nonpositive_fetch_concurrency() -> None:
+    with pytest.raises(ValueError, match="fetch_concurrency must be > 0"):
+        poll_once(
+            [],
+            client=FakePopulationClient({}),
+            save_snapshot=lambda _: None,
+            save_parse_failure=lambda _: None,
+            fetch_concurrency=0,
+        )
+
+
+def test_concurrent_fetch_never_calls_beyond_circuit_budget() -> None:
+    targets = [
+        PollTarget(index, f"POI{index:03d}", f"실패 지역 {index}")
+        for index in range(1, 11)
+    ]
+    calls = 0
+    lock = threading.Lock()
+
+    class FailingClient:
+        def fetch_population_raw(self, _area_name: str) -> dict[str, Any]:
+            nonlocal calls
+            with lock:
+                calls += 1
+            raise SeoulAPIError("down")
+
+    report = poll_once(
+        targets,
+        client=FailingClient(),
+        save_snapshot=lambda _: pytest.fail("unexpected snapshot"),
+        save_parse_failure=lambda _: pytest.fail("unexpected parse failure"),
+        sleep=lambda _: pytest.fail("sleep must not be called"),
+        max_retries=0,
+        max_consecutive_failures=5,
+        fetch_concurrency=4,
+    )
+
+    assert calls == 5
+    assert report.saved == 0
+    assert report.failed == len(targets)

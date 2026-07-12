@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import SecretStr
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -154,6 +155,70 @@ def test_each_save_uses_an_independent_transaction(session_factory):
         assert count == 1
 
 
+def test_batch_save_uses_one_commit_and_keeps_natural_key_idempotency(
+    session_factory,
+):
+    hotspot_id = add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+    first = record_for(hotspot_id)
+    second = replace(
+        first,
+        observed_at=first.observed_at + timedelta(minutes=5),
+    )
+    engine = session_factory.kw["bind"]
+    commits = 0
+
+    def count_commit(_connection) -> None:
+        nonlocal commits
+        commits += 1
+
+    event.listen(engine, "commit", count_commit)
+    try:
+        report = SnapshotRepository(session_factory).save_batch(
+            [first, first, second], []
+        )
+    finally:
+        event.remove(engine, "commit", count_commit)
+
+    assert report.snapshot_saved == 3
+    assert report.snapshot_failed == 0
+    assert commits == 1
+    with session_factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(HotspotSnapshot)
+        ) == 2
+
+
+def test_batch_save_falls_back_and_isolates_invalid_snapshot(session_factory):
+    hotspot_id = add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+    valid = record_for(hotspot_id)
+    invalid = replace(
+        valid,
+        observed_at=valid.observed_at - timedelta(minutes=5),
+        congest_level=9,
+    )
+
+    report = SnapshotRepository(session_factory).save_batch(
+        [invalid, valid], []
+    )
+
+    assert report.snapshot_saved == 1
+    assert report.snapshot_failed == 1
+    with session_factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(HotspotSnapshot)
+        ) == 1
+
+
 def test_repository_appends_parse_failures_with_raw_json(session_factory):
     hotspot_id = add_hotspot(
         session_factory,
@@ -181,7 +246,9 @@ def test_repository_appends_parse_failures_with_raw_json(session_factory):
         assert "retained-only-as-raw" not in stored[0].error_message
 
 
-def test_run_poll_cycle_uses_database_targets_without_real_http(session_factory):
+def test_run_poll_cycle_uses_database_targets_without_real_http(
+    session_factory, caplog
+):
     add_hotspot(
         session_factory,
         area_code="POI088",
@@ -196,11 +263,26 @@ def test_run_poll_cycle_uses_database_targets_without_real_http(session_factory)
     )
     client = FixtureClient(load_citydata_fixture())
 
+    caplog.set_level(logging.INFO, logger="app.ingest.worker")
     report = run_poll_cycle(session_factory, client=client)
 
     assert client.calls == ["광화문광장"]
     assert report.targets == report.saved == 1
     assert report.status == "complete"
+    assert report.poll_seconds >= 0
+    assert report.fetch_seconds >= 0
+    assert report.persistence_seconds >= 0
+    assert report.materialize_seconds >= 0
+    assert report.finalize_seconds >= 0
+    assert report.total_seconds >= sum(
+        (report.materialize_seconds, report.finalize_seconds)
+    )
+    assert "Polling cycle phases: status=complete" in caplog.text
+    assert "poll=" in caplog.text
+    assert "fetch_sum=" in caplog.text
+    assert "persist_sum=" in caplog.text
+    assert "materialize=" in caplog.text
+    assert "finalize=" in caplog.text
     with session_factory() as session:
         assert session.scalar(select(func.count()).select_from(HotspotSnapshot)) == 1
         cycle = session.scalar(select(IngestCycle))
@@ -285,6 +367,38 @@ def test_keyboard_interrupt_marks_cycle_failed_then_reraises(session_factory):
         assert cycle.completed_at is not None
 
 
+def test_batch_interrupt_never_records_uncommitted_snapshots_as_saved(
+    session_factory, monkeypatch
+):
+    add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+
+    def interrupt_batch(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(SnapshotRepository, "save_batch", interrupt_batch)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_poll_cycle(
+            session_factory,
+            client=FixtureClient(load_citydata_fixture()),
+        )
+
+    with session_factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(HotspotSnapshot)
+        ) == 0
+        cycle = session.scalar(select(IngestCycle))
+        assert cycle is not None
+        assert cycle.status == "failed"
+        assert cycle.saved == 0
+        assert cycle.failed == 1
+
+
 def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
     database_url = f"sqlite+pysqlite:///{tmp_path / 'worker.db'}"
     setup_engine = create_engine(database_url)
@@ -299,7 +413,13 @@ def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
         is_polled=True,
     )
     setup_engine.dispose()
-    client = FixtureClient(load_citydata_fixture())
+    class ClosableFixtureClient(FixtureClient):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = ClosableFixtureClient(load_citydata_fixture())
     received_keys: list[str] = []
 
     def client_factory(key: str) -> FixtureClient:
@@ -319,6 +439,7 @@ def test_worker_once_honors_database_url_and_uses_injected_client(tmp_path):
     assert result == 0
     assert received_keys == ["test-key"]
     assert client.calls == ["광화문광장"]
+    assert client.closed
     check_engine = create_engine(database_url)
     with Session(check_engine) as session:
         assert session.scalar(select(func.count()).select_from(HotspotSnapshot)) == 1

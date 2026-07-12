@@ -10,6 +10,8 @@ import httpx
 
 from app.config import (
     HTTP_CONNECT_TIMEOUT_SECONDS,
+    HTTP_MAX_CONNECTIONS,
+    HTTP_MAX_KEEPALIVE_CONNECTIONS,
     HTTP_TIMEOUT_SECONDS,
     HTTP_USER_AGENT,
     SEOUL_API_BASE_URL,
@@ -35,6 +37,13 @@ def suppress_secret_bearing_http_logs() -> None:
 def _timeout() -> httpx.Timeout:
     return httpx.Timeout(
         HTTP_TIMEOUT_SECONDS, connect=HTTP_CONNECT_TIMEOUT_SECONDS
+    )
+
+
+def _limits() -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=HTTP_MAX_CONNECTIONS,
+        max_keepalive_connections=HTTP_MAX_KEEPALIVE_CONNECTIONS,
     )
 
 
@@ -100,20 +109,31 @@ class SeoulCityDataClient:
             raise ValueError("api_key must not be empty")
         suppress_secret_bearing_http_logs()
         self._api_key = api_key
-        self._transport = transport
+        # httpx.Client is thread-safe. One long-lived client reuses a bounded
+        # connection pool across hotspots and polling cycles.
+        self._client = httpx.Client(
+            timeout=_timeout(),
+            limits=_limits(),
+            headers={"User-Agent": HTTP_USER_AGENT},
+            transport=transport,
+        )
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "SeoulCityDataClient":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     def fetch_population_raw(self, area_name: str) -> dict[str, Any]:
         if not area_name.strip():
             raise ValueError("area_name must not be empty")
         try:
-            with httpx.Client(
-                timeout=_timeout(),
-                headers={"User-Agent": HTTP_USER_AGENT},
-                transport=self._transport,
-            ) as client:
-                response = client.get(_build_url(self._api_key, area_name))
-                response.raise_for_status()
-                payload = response.json()
+            response = self._client.get(_build_url(self._api_key, area_name))
+            response.raise_for_status()
+            payload = response.json()
         except httpx.HTTPStatusError as exc:
             # The API key is embedded in the URL, so never propagate httpx's
             # exception string (which includes the request URL).
