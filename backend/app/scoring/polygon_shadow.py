@@ -90,16 +90,16 @@ class PolygonCafeEstimate:
     contributors: tuple[PolygonContributor, ...] | None
 
 
-def _validate_parameters(
+def _validate_geo_parameters(
     *,
     r_max_m: float,
     covered_m: float,
     k_neighbors: int,
     d_floor_m: float,
     tau_min: float,
-    conf_high: float,
-    conf_mid: float,
 ) -> None:
+    """Validate the spatial/freshness parameters shared by every shadow model."""
+
     if r_max_m <= 0:
         raise ValueError("r_max_m must be positive")
     if not 0 <= covered_m <= r_max_m:
@@ -110,6 +110,25 @@ def _validate_parameters(
         raise ValueError("d_floor_m must be positive")
     if tau_min <= 0:
         raise ValueError("tau_min must be positive")
+
+
+def _validate_parameters(
+    *,
+    r_max_m: float,
+    covered_m: float,
+    k_neighbors: int,
+    d_floor_m: float,
+    tau_min: float,
+    conf_high: float,
+    conf_mid: float,
+) -> None:
+    _validate_geo_parameters(
+        r_max_m=r_max_m,
+        covered_m=covered_m,
+        k_neighbors=k_neighbors,
+        d_floor_m=d_floor_m,
+        tau_min=tau_min,
+    )
     if not 0 <= conf_mid <= conf_high <= 1:
         raise ValueError("confidence thresholds must satisfy 0 <= mid <= high <= 1")
 
@@ -124,18 +143,9 @@ def _confidence_tier(
     return "low"
 
 
-def _validate_observation(observation: PolygonHotspotObservation) -> None:
-    if observation.level not in (1, 2, 3, 4):
-        raise ValueError("observation level must be between 1 and 4")
-    if observation.observed_at.tzinfo is None:
-        raise ValueError("observed_at must be timezone-aware")
-    if not observation.area_cd or not observation.name:
-        raise ValueError("area_cd and name must be non-empty")
-    if not observation.geometry_version:
-        raise ValueError("geometry_version must be non-empty")
-    if observation.geometry_normalization not in ("original", "make_valid"):
-        raise ValueError("unsupported geometry_normalization")
-    geometry = observation.geometry
+def _validate_geometry(geometry: BaseGeometry) -> None:
+    """Reject anything that is not a normalized valid WGS84 Polygon geometry."""
+
     if not isinstance(geometry, BaseGeometry):
         raise ValueError("geometry must be a Shapely geometry")
     if (
@@ -153,6 +163,20 @@ def _validate_observation(observation: PolygonHotspotObservation) -> None:
     ):
         if not lower <= value <= upper:
             raise ValueError(f"geometry {name} is outside WGS84 bounds")
+
+
+def _validate_observation(observation: PolygonHotspotObservation) -> None:
+    if observation.level not in (1, 2, 3, 4):
+        raise ValueError("observation level must be between 1 and 4")
+    if observation.observed_at.tzinfo is None:
+        raise ValueError("observed_at must be timezone-aware")
+    if not observation.area_cd or not observation.name:
+        raise ValueError("area_cd and name must be non-empty")
+    if not observation.geometry_version:
+        raise ValueError("geometry_version must be non-empty")
+    if observation.geometry_normalization not in ("original", "make_valid"):
+        raise ValueError("unsupported geometry_normalization")
+    _validate_geometry(observation.geometry)
 
 
 def _boundary_distance_m(

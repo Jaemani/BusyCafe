@@ -81,6 +81,32 @@ POLYGON_SHADOW_D_FLOOR_M: Final = D_FLOOR_M
 POLYGON_SHADOW_TAU_MIN: Final = TAU_MIN
 POLYGON_SHADOW_CONF_HIGH: Final = CONF_HIGH
 POLYGON_SHADOW_CONF_MID: Final = CONF_MID
+# Metres per degree of latitude used by the v3 density challenger's local
+# equirectangular polygon-area approximation. A geodesy constant (WGS84 mean),
+# not a tuning parameter; longitude metres per degree are derived as this value
+# times cos(latitude), matching polygon_shadow._boundary_distance_m.
+M_PER_DEG_LAT: Final = 111_320.0
+# Offline-only density challenger. Population density (people/m^2) replaces the
+# 1-4 congestion label as the interpolated signal. A separate namespace mirrors
+# the v2 polygon defaults so calibrating either model never perturbs the other;
+# confidence tiers are intentionally absent because there is no level mapping.
+DENSITY_SHADOW_MODEL_VERSION: Final = "v3-density-shadow"
+DENSITY_SHADOW_GEOMETRY_VERSION: Final = POLYGON_SHADOW_GEOMETRY_VERSION
+DENSITY_SHADOW_R_MAX_M: Final = POLYGON_SHADOW_R_MAX_M
+DENSITY_SHADOW_COVERED_M: Final = POLYGON_SHADOW_COVERED_M
+DENSITY_SHADOW_K_NEIGHBORS: Final = POLYGON_SHADOW_K_NEIGHBORS
+DENSITY_SHADOW_D_FLOOR_M: Final = POLYGON_SHADOW_D_FLOOR_M
+DENSITY_SHADOW_TAU_MIN: Final = POLYGON_SHADOW_TAU_MIN
+# People/m^2 floor added before taking the logarithm so a genuinely empty
+# hotspot (ppltn == 0) maps to a finite log-density instead of -inf. Chosen well
+# below one person spread over the largest supported polygon (1 / 1e8 = 1e-8),
+# so it never dominates a real non-zero density.
+DENSITY_SHADOW_LOG_EPSILON: Final = 1e-9
+# Sanity bounds (m^2) for official Seoul hotspot polygons. Areas outside this
+# range signal a projection or ingest error rather than a real place; official
+# OA-21285 polygons fall well inside it.
+DENSITY_SHADOW_AREA_MIN_M2: Final = 1e2
+DENSITY_SHADOW_AREA_MAX_M2: Final = 1e8
 SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
 # Confidence V2 remains a shadow input-quality score until empirical
 # calibration passes Track 1 Gate D. These weights intentionally exclude the
@@ -135,6 +161,12 @@ OVERTURE_CAFE_CATEGORIES: Final = (
     "tea_room",
     "coffee_roastery",
 )
+
+# `--confidence-report` (read-only, no network) bucket range for the Overture
+# confidence-threshold study. Does not affect ingest filtering.
+OVERTURE_CONFIDENCE_REPORT_MIN: Final = 0.50
+OVERTURE_CONFIDENCE_REPORT_MAX: Final = 1.00
+OVERTURE_CONFIDENCE_REPORT_STEP: Final = 0.05
 
 CONGESTION_LEVELS: Final = {
     "여유": 1,
