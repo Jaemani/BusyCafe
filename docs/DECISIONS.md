@@ -50,6 +50,7 @@
 - [ADR-0005: 관리형 PostgreSQL과 분리 worker 기반 실시간 운영](adr/ADR-0005-live-production-runtime.md) — 2026-07-11, Accepted
 - [ADR-0006: 세 개 제품 트랙과 유니버설 혼잡 데이터 계약](adr/ADR-0006-universal-expansion-tracks.md) — 2026-07-11, Accepted
 - [ADR-0007: 구현 병렬화와 공개·승격 게이트 분리](adr/ADR-0007-parallel-implementation-release-gates.md) — 2026-07-12, Accepted
+- [ADR-0008: 운영 수집은 전용 상시 worker에서 실행](adr/ADR-0008-dedicated-production-worker.md) — 2026-07-12, Accepted
 
 ## 현재 제품 경로 요약
 

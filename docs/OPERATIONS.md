@@ -111,7 +111,7 @@ curl --fail --silent http://127.0.0.1:8190/api/health
 - latest cycle이 `complete`이거나, 직전 complete가 fresh한 상태에서 현재 cycle이 `running`
 - bbox 카페 응답에 현재 `model_version`, coverage와 evidence 존재
 
-### 4. 자동 수집 연결
+### 4. 수집 worker 연결
 
 GitHub repository secret에 `DATABASE_URL`, `SEOUL_API_KEY`를 설정한다. 값을 출력하지 않고
 secret 이름만 확인한다.
@@ -122,10 +122,14 @@ gh workflow run poll-production.yml
 gh run list --workflow poll-production.yml --limit 3
 ```
 
-수동 run에서 migration, 121개 수집과 score materialize가 성공한 뒤 scheduled run 한 번을
-추가 확인한다. worker의 one-shot exit code와 `ingest_cycles.status=complete`를 모두 확인한다.
-GitHub cron 지연이 반복되어 25분 freshness 기준을 지키지 못하면
-`backend/Dockerfile`의 상시 worker로 전환한다.
+GitHub workflow는 read-only canary와 장애 시 수동 fallback에만 사용한다. 2026-07-12
+실측에서 cron event가 약 1시간 간격으로 지연·누락됐고 hosted runner의 서울 API 연결도
+반복 실패했으므로 production 10분 scheduler로 사용하지 않는다. canonical 운영 경로는
+[ADR-0008](adr/ADR-0008-dedicated-production-worker.md)의 `backend/Dockerfile` 상시 worker다.
+
+상시 worker에서 121개 수집과 score materialize가 성공한 뒤 worker의 one-shot exit code와
+`ingest_cycles.status=complete`를 확인한다. 이후 1시간 동안 6개 연속 complete cycle과
+complete age 25분 이내를 검증하기 전 poll 운영 gate를 통과로 표시하지 않는다.
 
 ### 5. read API 전환
 

@@ -423,7 +423,7 @@ materialize를 재실행해 4,933개 score 갱신을 복구했다. worker sessio
 - 심각도: SEV-3
 - 시작/감지/해결: 2026-07-12
 - 작성자: Codex
-- 관련 GitHub Actions run: `29181020574`
+- 관련 GitHub Actions run: `29181020574`, `29181460312`, `29182006480`
 
 ### 요약
 
@@ -441,12 +441,27 @@ worker 명령에는 8분 SIGINT 제한과 30초 hard-kill fallback을 별도로 
 `KeyboardInterrupt`와 `SystemExit`도 실패 cycle로 마감한 뒤 다시 전파한다. 5개 target이
 연속 실패하면 outage circuit을 열어 남은 target은 호출하지 않고 즉시 cycle을 끝낸다.
 
+후속 실측에서 read-only 1-target canary run `29181444784`는 12초에 성공했지만, serial
+121-target run `29181460312`는 snapshot 121건을 처리하고도 8분 worker deadline에 걸렸다.
+bounded concurrency와 batch persistence를 적용한 run `29182006480`은 65.536초에 종료됐으나,
+첫 5개 target의 GitHub runner→서울 API 요청이 모두 실패해 circuit이 정상 작동했다.
+동일 시각 로컬 연결은 성공했으므로 코드·키·서울 API 전체 장애로 단정할 수 없고,
+GitHub hosted runner 경로의 간헐적 연결 실패가 현재 가장 강한 가설이다.
+
+또한 `*/10` schedule의 실제 실행 시각이 약 1시간 간격이었고 최대 3시간 46분 누락됐다.
+따라서 GitHub Actions cron은 25분 freshness 약속을 보장할 수 없다. poll gate는 끄고
+monitor gate만 유지했으며, 운영 scheduler를 별도 상시 Docker worker로 이전할 때까지
+인시던트는 Monitoring 상태로 둔다.
+
 ### 재발 방지 조치
 
 - [x] interrupt가 cycle을 `failed`와 `completed_at`으로 마감하는 회귀 테스트 추가
 - [x] worker deadline과 GitHub job deadline을 분리해 cleanup 여유 확보
 - [x] 연속 5개 target 실패 시 bounded circuit breaker 적용 및 회귀 테스트 추가
 - [x] DB 접근 없는 GitHub runner 1곳 read-only canary 경로 추가
-- [ ] mid-cycle interrupt에서 완료 target counter를 보존하는 progress 보고 추가
+- [x] 4개 bounded fetch, connection reuse, snapshot batch transaction으로 정상 경로 단축
+- [x] poll/monitor gate를 분리해 poll 중단 중에도 stale 경보 유지
+- [x] phase별 poll/fetch/persist/materialize/finalize/total duration 기록
+- [x] mid-cycle interrupt에서 미커밋 target을 saved로 계산하지 않는 회귀 테스트
 - [ ] hard kill·runner 장애처럼 cleanup 불가능한 경우의 오래된 `running` 회수 정책 추가
-- [ ] 수정 배포 후 수동 poll과 이어지는 scheduled cycle의 `121/121/0` 확인
+- [ ] 상시 Docker worker 배포 후 1시간 연속 6 cycle의 `121/121/0` 확인

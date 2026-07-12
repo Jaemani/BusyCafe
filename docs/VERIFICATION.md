@@ -563,3 +563,51 @@
 - 검증: backend `184 passed`, compileall PASS, frontend typecheck/build PASS,
   `git diff --check` PASS.
 - 판정: 구현·자동 검증 PASS. 실제 브라우저 stale 시나리오와 Phase 6 현장 관측은 대기다.
+
+## 2026-07-12 — Supabase live read 승격과 수집 worker 운영 실패
+
+- 코드 기준: freshness·license `9801383`, outage circuit `2895f27`, read-only canary
+  `0f2b9c3`, poll v2 `aabea03`, gate 분리 `12b29a2`.
+- Vercel deployment: `dpl_H97BiHsYg18yHezTB1S2NcQnWuv1`, direct host
+  `busy-cafe-muwrcw8tl-jaemanis-projects.vercel.app`, exact alias
+  `busy-cafe.vercel.app`.
+- 승격 직후 direct/alias health: `data_mode=live`, cafes 4,933,
+  latest complete `targets/saved/failed=121/121/0`, `stale_warn_min=25`.
+  bbox, cafe detail, forecast와 `/api/sources`도 HTTP 200으로 확인했다.
+- CI: run `29180965164`, `29181347156`, `29181421631`, `29181975649`에서 backend,
+  frontend와 PostgreSQL 17 실제 migration smoke가 모두 PASS했다.
+
+### 장애와 완화 실측
+
+- run `29181020574`: 첫 target부터 서울 API 요청이 반복 실패했다. serial retry가 8분 job
+  limit에 도달해 취소됐고, 기존 worker는 latest cycle을 `running`으로 남겼다.
+- 로컬 동일 key의 `광화문·덕수궁` 1회 호출은 같은 날 즉시 성공했다. GitHub runner에서
+  DB 접근 없이 실행한 fixed 1-target canary run `29181444784`도 12초에 PASS했다.
+- run `29181460312`: serial full poll은 121개 snapshot을 처리했지만 worker 8분 deadline에
+  도달했다. SIGINT cleanup 수정으로 latest cycle은 `failed`로 마감됐고 `running` 고착은
+  재발하지 않았다.
+- poll v2: httpx connection pool과 fetch concurrency를 4로 제한하고, 결과 검증 순서를
+  target 순서로 고정했으며, 121개 snapshot 정상 저장을 1 transaction으로 바꿨다.
+  synthetic 121-target 20ms fixture는 concurrency 1의 3.343초에서 concurrency 4의
+  0.923초로 약 3.6배 단축됐다.
+- score materialize: 로컬 실제 4,933개 DB에서 변경 전 1.15초, 변경 후 0.98~1.00초였다.
+  coverage `2,317/1,523/1,093`과 score/level/evidence diff는 0건이었다.
+- run `29182006480`: poll v2는 65.536초에 fail-closed 종료했다. 첫 5개 GitHub runner 서울
+  요청이 모두 실패해 circuit이 열렸고 `targets/saved/failed=121/0/121`이었다. phase는
+  `poll=52.387s`, `fetch_sum=132.696s`, `persist_sum=0`, `materialize=7.022s`,
+  `finalize=1.131s`였다.
+- 최종 자동 검증: backend 215 passed, compileall PASS, frontend typecheck/build PASS,
+  `git diff --check` PASS. Vite 500kB chunk warning과 Starlette/httpx deprecation warning은
+  기존과 동일하다.
+
+### scheduler 판정
+
+- GitHub scheduled poll event는 `18:02, 19:21, 20:22, 21:14, 22:09, 23:09,
+  00:09, 03:55 UTC`에 생성됐다. 10분 cron과 달리 대체로 약 1시간 간격이고 최대
+  3시간 46분 공백이 있었다.
+- `PRODUCTION_POLL_ENABLED=false`, `PRODUCTION_MONITOR_ENABLED=true`로 분리했다.
+  monitor run `29182058524`는 latest failed/stale 상태를 exit 1로 정확히 탐지했다.
+- 판정: Supabase live read와 stale UI는 PASS. GitHub hosted runner poll과 cron은
+  10분/25분 freshness 운영 경로로 FAIL. ADR-0008에 따라 전용 상시 Docker worker 배포와
+  1시간 6 complete-cycle 검증이 `[HUMAN]` 블로커다. Phase 6와 확장 track 승격은 계속
+  차단한다.

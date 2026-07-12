@@ -8,6 +8,22 @@
 
 - BusyCafe 자체 코드에 Apache License 2.0을 적용하고, 외부 데이터의 제공자별
   라이선스·출처표시 조건과 명확히 구분
+- live health의 complete-cycle freshness를 이용한 프론트 갱신 지연 표시
+- Phase 6의 두 관측자 독립 라벨과 quadratic weighted Cohen's kappa 평가
+- DB write 없는 GitHub runner 서울 API canary와 독립 poll/monitor 운영 게이트
+
+### Changed
+
+- 공개 Vercel API를 Supabase PostgreSQL read 경로로 승격
+- 서울 API client를 4개 bounded connection pool로 재사용하고, fetch 결과는 대상 순서대로
+  검증한 뒤 snapshot을 한 transaction으로 저장
+- score materialize 조회를 계산에 필요한 좌표·레벨·PK로 제한
+
+### Fixed
+
+- 외부 API가 연속 실패할 때 최악 85분까지 retry할 수 있던 poll을 5-target circuit으로 제한
+- GitHub job timeout이 durable ingest cycle을 `running`으로 남기던 interrupt cleanup
+- poll 중단 시 미커밋 snapshot을 `saved`로 과대 계상할 수 있던 cycle counter
 
 ## [0.1.0-preview.1] — 2026-07-12
 

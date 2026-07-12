@@ -1,7 +1,11 @@
 # ADR-0005: 실시간 운영은 관리형 PostgreSQL과 분리 worker를 사용한다
 
-- 상태: Accepted (credentials/initial bootstrap 대기)
+- 상태: Accepted (DB/API 승격 완료, worker 이전 대기)
 - 날짜: 2026-07-11
+
+> scheduler 선택은 2026-07-12 실측 후
+> [ADR-0008](ADR-0008-dedicated-production-worker.md)이 대체한다. 이 문서의 GitHub Actions
+> 기본 scheduler 설명은 역사적 bootstrap 경로로만 유지한다.
 
 ## 결정
 
