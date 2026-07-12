@@ -29,6 +29,8 @@ from app.config import (
     TEMPORAL_BASELINE_SHADOW_MODEL_VERSION,
     TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS,
     TEMPORAL_BASELINE_SHADOW_SHRINKAGE_PRIOR_EFFECTIVE_N,
+    TEMPORAL_BASELINE_SHADOW_SPECIAL_RECENCY_HALF_LIFE_DAYS,
+    TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS,
     TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS,
 )
 
@@ -82,6 +84,8 @@ class TemporalBaselineProvenance:
     calendar_version: str
     source_version: str
     source_hashes: tuple[str, ...]
+    window_days: int
+    recency_half_life_days: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,10 +260,8 @@ def estimate_temporal_baseline_shadow(
     calendar_version: str,
     source_version: str,
     source_hashes: Sequence[str],
-    window_days: int = TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS,
-    recency_half_life_days: float = (
-        TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS
-    ),
+    window_days: int | None = None,
+    recency_half_life_days: float | None = None,
     min_bucket_raw_n: int = TEMPORAL_BASELINE_SHADOW_MIN_BUCKET_RAW_N,
     shrinkage_prior_effective_n: float = (
         TEMPORAL_BASELINE_SHADOW_SHRINKAGE_PRIOR_EFFECTIVE_N
@@ -268,13 +270,37 @@ def estimate_temporal_baseline_shadow(
 ) -> TemporalBaselineEstimate:
     """Estimate a cell/hour baseline using observations before ``cutoff`` only."""
 
+    holidays = frozenset(public_holidays)
+    target_day = classify_temporal_day(target_date, holidays)
+    is_special_target = target_day.day_type in (
+        "public_holiday",
+        "long_holiday",
+    )
+    selected_window_days = (
+        window_days
+        if window_days is not None
+        else (
+            TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS
+            if is_special_target
+            else TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS
+        )
+    )
+    selected_half_life_days = (
+        recency_half_life_days
+        if recency_half_life_days is not None
+        else (
+            TEMPORAL_BASELINE_SHADOW_SPECIAL_RECENCY_HALF_LIFE_DAYS
+            if is_special_target
+            else TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS
+        )
+    )
     _validate_parameters(
         cell_id=cell_id,
         target_date=target_date,
         hour=hour,
         cutoff=cutoff,
-        window_days=window_days,
-        recency_half_life_days=recency_half_life_days,
+        window_days=selected_window_days,
+        recency_half_life_days=selected_half_life_days,
         min_bucket_raw_n=min_bucket_raw_n,
         shrinkage_prior_effective_n=shrinkage_prior_effective_n,
         masked_imputation=masked_imputation,
@@ -282,10 +308,8 @@ def estimate_temporal_baseline_shadow(
         source_version=source_version,
         source_hashes=source_hashes,
     )
-    holidays = frozenset(public_holidays)
-    target_day = classify_temporal_day(target_date, holidays)
-    window_start = cutoff - timedelta(days=window_days)
-    window = BaselineWindow(window_start, cutoff, window_days)
+    window_start = cutoff - timedelta(days=selected_window_days)
+    window = BaselineWindow(window_start, cutoff, selected_window_days)
 
     seen: set[tuple[str, date, int]] = set()
     eligible: list[_Point] = []
@@ -309,7 +333,7 @@ def estimate_temporal_baseline_shadow(
         value = masked_imputation if observation.masked else observation.total
         assert value is not None
         age_days = (cutoff - observation.observed_date).days
-        weight = exp(-log(2.0) * age_days / recency_half_life_days)
+        weight = exp(-log(2.0) * age_days / selected_half_life_days)
         eligible.append(
             _Point(
                 observation=observation,
@@ -390,7 +414,7 @@ def estimate_temporal_baseline_shadow(
     provenance = TemporalBaselineProvenance(
         model_version=TEMPORAL_BASELINE_SHADOW_MODEL_VERSION,
         transformation="log1p",
-        weighting=f"exponential-half-life-days:{recency_half_life_days:g}",
+        weighting=f"exponential-half-life-days:{selected_half_life_days:g}",
         classification="iso-weekday+day-type;long-holiday-block>=3-v1",
         selected_level=selected_level,
         masking=f"constant-imputation:{masked_imputation:g}",
@@ -398,6 +422,8 @@ def estimate_temporal_baseline_shadow(
         calendar_version=calendar_version,
         source_version=source_version,
         source_hashes=tuple(source_hashes),
+        window_days=selected_window_days,
+        recency_half_life_days=selected_half_life_days,
     )
     if chosen_depth is None:
         return TemporalBaselineEstimate(

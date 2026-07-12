@@ -131,6 +131,11 @@ DENSITY_SHADOW_AREA_MAX_M2: Final = 1e8
 TEMPORAL_BASELINE_SHADOW_MODEL_VERSION: Final = "v1-temporal-baseline-shadow"
 TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS: Final = 84
 TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS: Final = 28.0
+# Public/long-holiday observations are intrinsically sparse.  Shadow runs use
+# a longer history and slower decay for those targets only; both remain
+# caller-overridable and require empirical calibration before promotion.
+TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS: Final = 1_095
+TEMPORAL_BASELINE_SHADOW_SPECIAL_RECENCY_HALF_LIFE_DAYS: Final = 365.0
 TEMPORAL_BASELINE_SHADOW_MIN_BUCKET_RAW_N: Final = 3
 TEMPORAL_BASELINE_SHADOW_SHRINKAGE_PRIOR_EFFECTIVE_N: Final = 4.0
 # The verified OA-22784 source masks low-population totals with ``*``.  The

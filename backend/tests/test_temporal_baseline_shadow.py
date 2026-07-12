@@ -4,6 +4,12 @@ from datetime import date, timedelta
 
 import pytest
 
+from app.config import (
+    TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS,
+    TEMPORAL_BASELINE_SHADOW_SPECIAL_RECENCY_HALF_LIFE_DAYS,
+    TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS,
+    TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS,
+)
 from app.scoring.temporal_baseline_shadow import (
     HistoricalCellObservation,
     classify_temporal_day,
@@ -118,6 +124,62 @@ def test_cutoff_and_window_exclude_target_future_and_old_observations() -> None:
     assert result.mean == pytest.approx(100.0)
     assert result.window.start_inclusive == TARGET - timedelta(days=30)
     assert result.window.end_exclusive == TARGET
+    assert result.provenance.window_days == 30
+    assert result.provenance.recency_half_life_days == (
+        TEMPORAL_BASELINE_SHADOW_RECENCY_HALF_LIFE_DAYS
+    )
+
+
+def test_special_target_uses_long_history_while_ordinary_target_does_not() -> None:
+    prior_same_weekday = TARGET - timedelta(days=364)
+    observations = [
+        observation(364, 120.0),
+        observation(0, 9_999.0),  # cutoff date must still be excluded
+        observation(-1, 9_999.0),  # future must still be excluded
+    ]
+
+    special = estimate_temporal_baseline_shadow(
+        CELL,
+        TARGET,
+        14,
+        observations,
+        cutoff=TARGET,
+        public_holidays={TARGET, prior_same_weekday},
+        calendar_version=CALENDAR_VERSION,
+        source_version=SOURCE_VERSION,
+        source_hashes=SOURCE_HASHES,
+        min_bucket_raw_n=1,
+        shrinkage_prior_effective_n=0,
+    )
+    ordinary = estimate_temporal_baseline_shadow(
+        CELL,
+        TARGET,
+        14,
+        observations,
+        cutoff=TARGET,
+        public_holidays=set(),
+        calendar_version=CALENDAR_VERSION,
+        source_version=SOURCE_VERSION,
+        source_hashes=SOURCE_HASHES,
+        min_bucket_raw_n=1,
+        shrinkage_prior_effective_n=0,
+    )
+
+    assert special.day_type == "long_holiday"
+    assert special.raw_n == 1
+    assert special.mean == pytest.approx(120.0)
+    assert special.window.days == TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS
+    assert special.provenance.window_days == (
+        TEMPORAL_BASELINE_SHADOW_SPECIAL_WINDOW_DAYS
+    )
+    assert special.provenance.recency_half_life_days == (
+        TEMPORAL_BASELINE_SHADOW_SPECIAL_RECENCY_HALF_LIFE_DAYS
+    )
+
+    assert ordinary.day_type == "working_day"
+    assert ordinary.raw_n == 0
+    assert ordinary.mean is None
+    assert ordinary.window.days == TEMPORAL_BASELINE_SHADOW_WINDOW_DAYS
 
 
 def test_result_is_deterministic_and_input_order_independent() -> None:
