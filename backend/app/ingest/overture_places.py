@@ -11,6 +11,7 @@ import json
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from math import isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -200,25 +201,70 @@ def _values(record: OvertureCafeRecord, *, release: str) -> dict[str, object]:
     }
 
 
+def _validate_scope_bbox(
+    scope_bbox: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Validate an inclusive WGS84 point scope used for one seed operation."""
+
+    min_lng, min_lat, max_lng, max_lat = scope_bbox
+    if not all(isfinite(value) for value in scope_bbox):
+        raise OvertureIngestError("scope bbox coordinates must be finite")
+    if not (-180 <= min_lng < max_lng <= 180):
+        raise OvertureIngestError("scope bbox longitude bounds are invalid")
+    if not (-90 <= min_lat < max_lat <= 90):
+        raise OvertureIngestError("scope bbox latitude bounds are invalid")
+    return min_lng, min_lat, max_lng, max_lat
+
+
+def _record_is_in_scope(
+    record: OvertureCafeRecord,
+    *,
+    scope_bbox: tuple[float, float, float, float],
+) -> bool:
+    """Return whether a point lies in the bbox, including all four edges."""
+
+    min_lng, min_lat, max_lng, max_lat = scope_bbox
+    return min_lng <= record.lng <= max_lng and min_lat <= record.lat <= max_lat
+
+
 def seed_overture_cafes(
     session: Session,
     records: Iterable[OvertureCafeRecord],
     *,
     release: str,
+    scope_bbox: tuple[float, float, float, float],
     dry_run: bool = False,
 ) -> OvertureSeedReport:
-    """Idempotently materialize one release and deactivate missing records."""
+    """Materialize one release inside an explicit, edge-inclusive point bbox.
+
+    Missing-record deactivation is limited to cafes whose stored point lies in
+    the same bbox. Every input record must also lie inside it; mixed or wrongly
+    bounded extracts fail before any database mutation.
+    """
+
+    validated_scope = _validate_scope_bbox(scope_bbox)
 
     records_by_id: dict[str, OvertureCafeRecord] = {}
     for record in records:
+        if not _record_is_in_scope(record, scope_bbox=validated_scope):
+            raise OvertureIngestError(
+                f"Overture record is outside seed scope: {record.overture_id}"
+            )
         if record.overture_id in records_by_id:
             raise OvertureIngestError(f"duplicate Overture ID: {record.overture_id}")
         records_by_id[record.overture_id] = record
     if not records_by_id:
         raise OvertureIngestError("refusing to replace the POI cache with an empty extract")
 
+    min_lng, min_lat, max_lng, max_lat = validated_scope
+    existing_query = select(Cafe).where(
+        Cafe.lng >= min_lng,
+        Cafe.lng <= max_lng,
+        Cafe.lat >= min_lat,
+        Cafe.lat <= max_lat,
+    )
     existing_by_id = {
-        cafe.overture_id: cafe for cafe in session.scalars(select(Cafe))
+        cafe.overture_id: cafe for cafe in session.scalars(existing_query)
     }
     inserted_count = updated_count = unchanged_count = deactivated_count = 0
     for overture_id in sorted(records_by_id):

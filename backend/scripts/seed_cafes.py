@@ -13,7 +13,7 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
-from app.config import OVERTURE_MIN_CONFIDENCE, OVERTURE_RELEASE
+from app.config import OVERTURE_MIN_CONFIDENCE, OVERTURE_RELEASE, SEOUL_BBOX
 from app.database import create_db_engine
 from app.ingest.overture_places import (
     build_confidence_report,
@@ -102,6 +102,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 session,
                 records,
                 release=args.release,
+                scope_bbox=SEOUL_BBOX,
                 dry_run=not args.apply,
             )
         print(

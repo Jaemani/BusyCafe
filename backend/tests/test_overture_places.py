@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
+from app.config import SEOUL_BBOX
 from app.ingest.overture_places import (
     OvertureCafeRecord,
     OvertureIngestError,
@@ -97,16 +98,19 @@ def test_seed_is_idempotent_and_deactivates_missing_records(engine) -> None:
             session,
             [record("overture:1"), record("overture:2", name="둘")],
             release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
         )
         second = seed_overture_cafes(
             session,
             [record("overture:1"), record("overture:2", name="둘")],
             release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
         )
         third = seed_overture_cafes(
             session,
             [record("overture:1", name="바뀐 이름")],
             release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
         )
 
         assert first.inserted_count == 2
@@ -124,6 +128,7 @@ def test_dry_run_has_no_database_effect_and_duplicate_ids_fail(engine) -> None:
             session,
             [record()],
             release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
             dry_run=True,
         )
         assert report.inserted_count == 1
@@ -133,7 +138,63 @@ def test_dry_run_has_no_database_effect_and_duplicate_ids_fail(engine) -> None:
                 session,
                 [record(), record()],
                 release="2026-06-17.0",
+                scope_bbox=SEOUL_BBOX,
             )
+
+
+def test_seed_deactivation_is_limited_to_explicit_scope(engine) -> None:
+    scope_a = (126.90, 37.50, 127.00, 37.60)
+    scope_b = (127.10, 37.50, 127.20, 37.60)
+    record_a = record("overture:a", lng=126.95, lat=37.55)
+    record_b = record("overture:b", lng=127.15, lat=37.55)
+
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session, [record_a], release="2026-06-17.0", scope_bbox=scope_a
+        )
+        report = seed_overture_cafes(
+            session, [record_b], release="2026-06-17.0", scope_bbox=scope_b
+        )
+
+        assert report.deactivated_count == 0
+        assert session.scalar(
+            select(Cafe.active).where(Cafe.overture_id == "overture:a")
+        ) is True
+        assert session.scalar(
+            select(Cafe.active).where(Cafe.overture_id == "overture:b")
+        ) is True
+
+
+def test_seed_rejects_record_outside_scope_before_database_mutation(engine) -> None:
+    scope = (126.90, 37.50, 127.00, 37.60)
+
+    with Session(engine) as session:
+        with pytest.raises(OvertureIngestError, match="outside seed scope"):
+            seed_overture_cafes(
+                session,
+                [
+                    record("overture:inside", lng=126.95, lat=37.55),
+                    record("overture:outside", lng=127.01, lat=37.55),
+                ],
+                release="2026-06-17.0",
+                scope_bbox=scope,
+            )
+
+        assert session.scalar(select(func.count()).select_from(Cafe)) == 0
+
+
+def test_seed_scope_edges_are_inclusive(engine) -> None:
+    scope = (126.90, 37.50, 127.00, 37.60)
+
+    with Session(engine) as session:
+        report = seed_overture_cafes(
+            session,
+            [record("overture:edge", lng=127.00, lat=37.60)],
+            release="2026-06-17.0",
+            scope_bbox=scope,
+        )
+
+        assert report.inserted_count == 1
 
 
 def test_confidence_report_buckets_pass_count_and_categories() -> None:
