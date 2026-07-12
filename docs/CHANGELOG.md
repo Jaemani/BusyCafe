@@ -14,6 +14,8 @@
 - 공식 121개 polygon의 포함·겹침·경계거리를 사용하는 offline `v2-polygon-shadow`
 - 입력 품질과 정확도 확률을 분리한 Confidence V2 구성요소
 - v1/v2 historical paired evaluator, fail-closed promotion gate와 전 카페 구조 비교 도구
+- Phase 6 사전 등록 분석 계획(`docs/PHASE6_PREREGISTRATION.md`): divergence 층화
+  sign test, v2 과소 추정 guardrail, 스코어 교체와 coverage 확장의 분리 승격 규칙
 
 ### Changed
 

@@ -111,3 +111,7 @@
 - 신뢰도 V2 구성요소와 `model_version`을 저장하되, 외부 API 필드 변경은 소비자 호환성을 보장하는 버전 정책과 함께 진행한다.
 - v2의 coverage 확대와 score 변화는 정확도 증거로 해석하지 않는다. 기존 Phase 6 기준선과
   결과 확인 후 만든 divergence 감사 목록을 분리해 선택 편향을 막는다.
+- v1/v2 우열 판정과 승격 규칙은 첫 현장 관측 전에
+  [`PHASE6_PREREGISTRATION.md`](../PHASE6_PREREGISTRATION.md)로 사전 등록했다. primary
+  표본은 divergence 검출력이 없으므로 S2 divergence 층의 sign test만 판정에 사용하고,
+  v2 하향 과소 추정 guardrail과 coverage 확장 분리 결정을 게이트에 포함한다.
