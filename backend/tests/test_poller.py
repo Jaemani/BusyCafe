@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import threading
 from collections.abc import Iterable
 from datetime import UTC, datetime
@@ -197,6 +198,33 @@ def test_consecutive_failure_circuit_skips_remaining_targets() -> None:
     assert report.targets == 7
     assert report.saved == 0
     assert report.failed == 7
+
+
+def test_retry_log_includes_sanitized_error_category(caplog) -> None:
+    target = PollTarget(hotspot_id=1, area_cd="POI001", area_name="광화문광장")
+    logger = logging.getLogger("test.poller.sanitized")
+    client = FakePopulationClient(
+        {
+            "광화문광장": [
+                SeoulAPIError("Seoul request failed (ConnectTimeout)")
+            ]
+        }
+    )
+
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        report = poll_once(
+            [target],
+            client=client,
+            save_snapshot=lambda _record: None,
+            save_parse_failure=lambda _record: None,
+            max_retries=0,
+            sleep=lambda _seconds: None,
+            logger=logger,
+        )
+
+    assert report.failed == 1
+    assert "Seoul request failed (ConnectTimeout)" in caplog.text
+    assert "secret-key" not in caplog.text
 
 
 def test_success_resets_consecutive_failure_circuit() -> None:

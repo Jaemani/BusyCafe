@@ -246,20 +246,23 @@ def poll_once(
             except SeoulAPIError as exc:
                 if attempt == max_retries:
                     logger.error(
-                        "Hotspot poll failed after %d attempt(s): %s (%s)",
+                        "Hotspot poll failed after %d attempt(s): %s (%s: %s)",
                         attempt + 1,
                         target.area_name,
                         type(exc).__name__,
+                        exc,
                     )
                     elapsed += monotonic() - fetch_started
                     return None, elapsed
                 delay = retry_base_delay_seconds * (2**attempt)
                 logger.warning(
-                    "Hotspot poll attempt %d failed; retrying in %.2fs: %s (%s)",
+                    "Hotspot poll attempt %d failed; retrying in %.2fs: "
+                    "%s (%s: %s)",
                     attempt + 1,
                     delay,
                     target.area_name,
                     type(exc).__name__,
+                    exc,
                 )
                 sleep(delay)
                 elapsed += monotonic() - fetch_started
