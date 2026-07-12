@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from app.ingest.overture_places import (
     OvertureCafeRecord,
     OvertureIngestError,
+    build_confidence_report,
+    format_confidence_report,
     parse_overture_row,
     seed_overture_cafes,
 )
@@ -132,3 +134,108 @@ def test_dry_run_has_no_database_effect_and_duplicate_ids_fail(engine) -> None:
                 [record(), record()],
                 release="2026-06-17.0",
             )
+
+
+def test_confidence_report_buckets_pass_count_and_categories() -> None:
+    # confidence=0.50 pins the observed floor to the report's lowest edge, so
+    # this fixture isolates bucketing/category counting from the separate
+    # cache_pre_filtered heuristic (covered on its own below).
+    records = [
+        record("overture:0", confidence=0.50, primary_category="bubble_tea"),
+        record("overture:1", confidence=0.55, primary_category="cafe"),
+        record("overture:2", confidence=0.81, primary_category="cafe"),
+        record("overture:3", confidence=0.81, primary_category="coffee_shop"),
+        record("overture:4", confidence=0.99, primary_category="tea_room"),
+    ]
+
+    report = build_confidence_report(records, threshold=0.80)
+
+    assert report.total_count == 5
+    assert report.passing_count == 3
+    assert report.observed_min_confidence == 0.50
+    assert report.cache_pre_filtered is False
+    assert report.below_range_count == 0
+    assert report.category_counts == {
+        "bubble_tea": 1,
+        "cafe": 2,
+        "coffee_shop": 1,
+        "tea_room": 1,
+    }
+
+    bucket_by_range = {(bucket.lower, bucket.upper): bucket for bucket in report.buckets}
+    assert bucket_by_range[(0.50, 0.55)].count == 1
+    assert bucket_by_range[(0.55, 0.60)].count == 1
+    assert bucket_by_range[(0.55, 0.60)].cache_filtered is False
+    assert bucket_by_range[(0.80, 0.85)].count == 2
+    assert bucket_by_range[(0.95, 1.00)].count == 1
+    assert sum(bucket.count for bucket in report.buckets) == 5
+
+
+def test_confidence_report_flags_buckets_below_the_download_time_floor() -> None:
+    """A cache produced by cache_seoul_extract can never contain records below
+
+    whatever --min-confidence was used at download time. build_confidence_report
+    must say so instead of reporting a misleading zero for those buckets.
+    """
+
+    records = [
+        record("overture:1", confidence=0.81),
+        record("overture:2", confidence=0.93),
+    ]
+
+    report = build_confidence_report(records, threshold=0.80)
+
+    assert report.cache_pre_filtered is True
+    assert report.observed_min_confidence == 0.81
+
+    below_floor = [bucket for bucket in report.buckets if bucket.upper <= 0.80]
+    assert below_floor  # sanity: buckets 0.50-0.80 exist
+    assert all(bucket.cache_filtered and bucket.count == 0 for bucket in below_floor)
+
+    at_or_above_floor = [bucket for bucket in report.buckets if bucket.lower >= 0.80]
+    assert at_or_above_floor
+    assert all(not bucket.cache_filtered for bucket in at_or_above_floor)
+
+
+def test_confidence_report_no_filter_flag_when_full_range_is_present() -> None:
+    records = [record("overture:1", confidence=0.50), record("overture:2", confidence=0.99)]
+
+    report = build_confidence_report(records, threshold=0.80)
+
+    assert report.cache_pre_filtered is False
+    assert all(not bucket.cache_filtered for bucket in report.buckets)
+
+
+def test_confidence_report_handles_below_range_and_exact_boundary_values() -> None:
+    records = [
+        record("overture:1", confidence=0.45),  # below the 0.50 report floor
+        record("overture:2", confidence=1.00),  # exact upper edge
+    ]
+
+    report = build_confidence_report(records, threshold=0.80)
+
+    assert report.below_range_count == 1
+    last_bucket = report.buckets[-1]
+    assert (last_bucket.lower, last_bucket.upper) == (0.95, 1.00)
+    assert last_bucket.count == 1
+    assert sum(bucket.count for bucket in report.buckets) == 1
+
+
+def test_confidence_report_empty_cache_has_no_observed_floor() -> None:
+    report = build_confidence_report([], threshold=0.80)
+
+    assert report.total_count == 0
+    assert report.observed_min_confidence is None
+    assert report.cache_pre_filtered is False
+    assert all(bucket.count == 0 and not bucket.cache_filtered for bucket in report.buckets)
+
+
+def test_format_confidence_report_reports_filter_note_and_bucket_lines() -> None:
+    report = build_confidence_report([record("overture:1", confidence=0.90)], threshold=0.80)
+
+    rendered = format_confidence_report(report, cache_path=Path("data/x.parquet"))
+
+    assert "records in cache: 1" in rendered
+    assert "pass current threshold (>= 0.80): 1/1" in rendered
+    assert "cache filtered, re-download required" in rendered
+    assert "- cafe: 1" in rendered

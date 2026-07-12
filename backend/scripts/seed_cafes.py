@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 from app.config import OVERTURE_MIN_CONFIDENCE, OVERTURE_RELEASE
 from app.database import create_db_engine
 from app.ingest.overture_places import (
+    build_confidence_report,
     cache_seoul_extract,
+    format_confidence_report,
     iter_cached_records,
     seed_overture_cafes,
 )
@@ -52,11 +54,35 @@ def _parser() -> argparse.ArgumentParser:
         "--min-confidence", type=float, default=OVERTURE_MIN_CONFIDENCE
     )
     parser.add_argument("--apply", action="store_true", help="write DB (default dry-run)")
+    parser.add_argument(
+        "--confidence-report",
+        action="store_true",
+        help=(
+            "read-only: print a confidence-bucket/category distribution for an "
+            "already-downloaded --cache extract, then exit. No DB writes, no "
+            "network. Cannot be combined with --download or --apply."
+        ),
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.confidence_report:
+        if args.download or args.apply:
+            raise SystemExit(
+                "--confidence-report is read-only and cannot combine with "
+                "--download or --apply"
+            )
+        try:
+            records = tuple(iter_cached_records(args.cache))
+        except FileNotFoundError:
+            raise SystemExit(
+                f"cache file not found: {args.cache} (run --download first)"
+            )
+        report = build_confidence_report(records, threshold=args.min_confidence)
+        print(format_confidence_report(report, cache_path=args.cache))
+        return 0
     if args.download:
         count = cache_seoul_extract(
             args.cache,

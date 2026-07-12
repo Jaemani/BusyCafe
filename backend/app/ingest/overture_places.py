@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.config import (
     OVERTURE_CAFE_CATEGORIES,
+    OVERTURE_CONFIDENCE_REPORT_MAX,
+    OVERTURE_CONFIDENCE_REPORT_MIN,
+    OVERTURE_CONFIDENCE_REPORT_STEP,
     OVERTURE_MIN_CONFIDENCE,
     OVERTURE_S3_URI_TEMPLATE,
     SEOUL_BBOX,
@@ -252,3 +255,151 @@ def seed_overture_cafes(
         active_count=len(records_by_id),
         dry_run=dry_run,
     )
+
+
+# --- Confidence-threshold study (`--confidence-report`) -------------------
+#
+# Read-only, no network: `cache_seoul_extract` always applies a hard
+# `confidence >= min_confidence` SQL filter *before* writing the local
+# extract, and the extract itself does not persist which threshold was used.
+# So a local cache can never prove "there are zero cafes below 0.80" — it can
+# only ever show "zero cafes below whatever floor this extract was
+# downloaded with". We approximate that floor as the lowest confidence value
+# actually observed in the extract and flag every bucket entirely below it
+# as filtered-not-zero, rather than silently printing 0.
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidenceBucket:
+    lower: float
+    upper: float
+    count: int
+    cache_filtered: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidenceReport:
+    total_count: int
+    threshold: float
+    passing_count: int
+    observed_min_confidence: float | None
+    cache_pre_filtered: bool
+    below_range_count: int
+    buckets: tuple[ConfidenceBucket, ...]
+    category_counts: dict[str, int]
+
+
+def _confidence_bucket_edges(
+    *,
+    lower: float = OVERTURE_CONFIDENCE_REPORT_MIN,
+    upper: float = OVERTURE_CONFIDENCE_REPORT_MAX,
+    step: float = OVERTURE_CONFIDENCE_REPORT_STEP,
+) -> tuple[float, ...]:
+    step_count = round((upper - lower) / step)
+    return tuple(round(lower + step * i, 2) for i in range(step_count + 1))
+
+
+def build_confidence_report(
+    records: Iterable[OvertureCafeRecord],
+    *,
+    threshold: float = OVERTURE_MIN_CONFIDENCE,
+) -> ConfidenceReport:
+    """Compute a read-only confidence distribution over already-loaded records.
+
+    Pure function: never opens the network or a DB session. Callers pass
+    records already produced by `iter_cached_records` (local file only).
+    """
+
+    edges = _confidence_bucket_edges()
+    bucket_count = len(edges) - 1
+    counts = [0] * bucket_count
+    below_range_count = 0
+    total_count = 0
+    passing_count = 0
+    observed_min: float | None = None
+    category_counts: dict[str, int] = {}
+
+    # Tolerate float round-trip noise (e.g. (0.95 - 0.50) / 0.05 evaluating to
+    # 8.999999999999998 instead of 9.0) both when bucketing a confidence value
+    # and when comparing the observed floor to bucket edges below.
+    epsilon = 1e-9
+
+    for record in records:
+        total_count += 1
+        confidence = record.confidence
+        observed_min = confidence if observed_min is None else min(observed_min, confidence)
+        if confidence >= threshold:
+            passing_count += 1
+        category_counts[record.primary_category] = (
+            category_counts.get(record.primary_category, 0) + 1
+        )
+
+        if confidence < edges[0]:
+            below_range_count += 1
+            continue
+        index = min(
+            int((confidence - edges[0]) / OVERTURE_CONFIDENCE_REPORT_STEP + epsilon),
+            bucket_count - 1,
+        )
+        counts[index] += 1
+
+    cache_pre_filtered = observed_min is not None and observed_min > edges[0] + epsilon
+
+    buckets = tuple(
+        ConfidenceBucket(
+            lower=edges[index],
+            upper=edges[index + 1],
+            count=counts[index],
+            cache_filtered=(
+                cache_pre_filtered
+                and observed_min is not None
+                and edges[index + 1] <= observed_min + epsilon
+            ),
+        )
+        for index in range(bucket_count)
+    )
+
+    return ConfidenceReport(
+        total_count=total_count,
+        threshold=threshold,
+        passing_count=passing_count,
+        observed_min_confidence=observed_min,
+        cache_pre_filtered=cache_pre_filtered,
+        below_range_count=below_range_count,
+        buckets=buckets,
+        category_counts=category_counts,
+    )
+
+
+def format_confidence_report(report: ConfidenceReport, *, cache_path: Path) -> str:
+    """Render a stable human-readable confidence-distribution report."""
+
+    lines = [
+        "Overture confidence report (read-only, no DB writes, no network)",
+        f"cache: {cache_path}",
+        f"records in cache: {report.total_count}",
+        f"pass current threshold (>= {report.threshold:.2f}): {report.passing_count}/{report.total_count}",
+    ]
+    if report.observed_min_confidence is not None:
+        lines.append(f"observed min confidence in cache: {report.observed_min_confidence:.4f}")
+    if report.cache_pre_filtered:
+        lines.append(
+            "NOTE: this cache was produced by a download-time confidence filter "
+            f"(cache_seoul_extract's SQL WHERE clause) at ~{report.observed_min_confidence:.2f}. "
+            "Bucket counts below that floor are NOT zero real candidates — the "
+            "extract never contained them. Re-download with a lower "
+            "--min-confidence to study that range."
+        )
+    if report.below_range_count:
+        lines.append(
+            f"below {OVERTURE_CONFIDENCE_REPORT_MIN:.2f} (out of report range): "
+            f"{report.below_range_count}"
+        )
+    lines.append("buckets:")
+    for bucket in report.buckets:
+        label = "cache filtered, re-download required" if bucket.cache_filtered else str(bucket.count)
+        lines.append(f"- [{bucket.lower:.2f}, {bucket.upper:.2f}): {label}")
+    lines.append("by category:")
+    for category in sorted(report.category_counts):
+        lines.append(f"- {category}: {report.category_counts[category]}")
+    return "\n".join(lines)
