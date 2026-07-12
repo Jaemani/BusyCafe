@@ -19,6 +19,11 @@ const COVERAGE_LABELS = {
   fringe: "경계 지역 · 참고용",
   uncovered: "실시간 미커버",
 } as const;
+const EVIDENCE_STRENGTH_LABELS = {
+  high: "높음",
+  mid: "보통",
+  low: "낮음",
+} as const;
 
 function setExternalLink(selector: string, href: string | null): boolean {
   const link = requiredElement<HTMLAnchorElement>(selector);
@@ -47,9 +52,9 @@ export function showCafePanel(cafe: CafeProperties): void {
   requiredElement<HTMLElement>("#cafe-level").textContent =
     cafe.level === null ? LEVEL_LABELS[0] : LEVEL_LABELS[cafe.level];
   requiredElement<HTMLElement>("#cafe-coverage").textContent = COVERAGE_LABELS[cafe.coverage];
-  requiredElement<HTMLElement>("#cafe-confidence").textContent = cafe.confidence === null
-    ? "신뢰도 산정 전"
-    : `신뢰도 ${Math.round(cafe.confidence * 100)}%`;
+  requiredElement<HTMLElement>("#cafe-confidence").textContent = cafe.confidenceTier === null
+    ? "근거 강도 산정 전"
+    : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[cafe.confidenceTier]}`;
   requiredElement<HTMLElement>("#estimate-dot").dataset.level = String(cafe.level ?? 0);
   requiredElement<HTMLElement>("#cafe-evidence").textContent = formatEvidence(cafe);
   requiredElement<HTMLElement>("#cafe-source").textContent =

@@ -255,7 +255,7 @@ h1 {
 
 .legend span { display: inline-flex; align-items: center; gap: 0.33rem; }
 .legend[data-state="preview"] .legend-level,
-.legend[data-state="live"] .legend-preview { display: none; }
+.legend[data-state="scored"] .legend-preview { display: none; }
 .legend-marker { display: inline-block; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgb(30 46 38 / 10%); }
 .level-calm { background: #2d8b68; }
 .level-normal { background: #c5a53a; }

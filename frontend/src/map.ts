@@ -312,7 +312,7 @@ export async function initializeCafeMap(
 
   const updateLegend = (hasScores: boolean): void => {
     const legend = document.querySelector<HTMLElement>("#map-legend");
-    if (legend) legend.dataset.state = hasScores ? "live" : "preview";
+    if (legend) legend.dataset.state = hasScores ? "scored" : "preview";
   };
 
   const refresh = async (): Promise<void> => {
