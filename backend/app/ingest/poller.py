@@ -84,8 +84,12 @@ class ParseFailureRecord:
 @dataclass(frozen=True, slots=True)
 class PollReport:
     targets: int
+    # ``saved`` is successful fetch+persistence handling, including duplicate
+    # no-ops. It remains the durable ingest-cycle health counter.
     saved: int
     failed: int
+    # Filled by the worker after batch persistence; pure polling has no DB.
+    inserted: int = 0
     fetch_seconds: float = 0.0
     persistence_seconds: float = 0.0
 

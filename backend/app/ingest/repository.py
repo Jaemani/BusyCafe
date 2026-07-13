@@ -22,7 +22,11 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class BatchPersistenceReport:
+    # ``snapshot_saved`` counts successfully handled fetches, including a
+    # natural-key duplicate. ``snapshot_inserted`` counts new durable rows.
+    # Cycle completeness uses the former; materialization uses the latter.
     snapshot_saved: int
+    snapshot_inserted: int
     snapshot_failed: int
     parse_failure_saved: int
     parse_failure_failed: int
@@ -96,12 +100,12 @@ class SnapshotRepository:
         )
         return snapshot_id is not None
 
-    def save_snapshot(self, record: SnapshotRecord) -> None:
-        """Insert one record, treating its natural-key duplicate as a no-op."""
+    def save_snapshot(self, record: SnapshotRecord) -> bool:
+        """Insert one record; return false for a successful duplicate no-op."""
 
         with self._session_factory() as session:
             if self._snapshot_exists(session, record):
-                return
+                return False
 
             session.add(
                 HotspotSnapshot(
@@ -123,8 +127,9 @@ class SnapshotRepository:
                 # Another worker may have inserted the same natural key after
                 # the preflight query.  Only that race is an idempotent no-op.
                 if self._snapshot_exists(session, record):
-                    return
+                    return False
                 raise
+            return True
 
     def save_parse_failure(self, record: ParseFailureRecord) -> None:
         """Append one raw parse failure in its own transaction."""
@@ -180,7 +185,7 @@ class SnapshotRepository:
         """
 
         if not snapshots and not parse_failures:
-            return BatchPersistenceReport(0, 0, 0, 0)
+            return BatchPersistenceReport(0, 0, 0, 0, 0)
 
         try:
             with self._session_factory() as session:
@@ -197,11 +202,13 @@ class SnapshotRepository:
                         raise RuntimeError(
                             f"unsupported snapshot batch dialect: {dialect_name}"
                         )
-                    session.execute(
+                    inserted_ids = session.scalars(
                         statement.on_conflict_do_nothing(
                             index_elements=["hotspot_id", "observed_at"]
-                        )
-                    )
+                        ).returning(HotspotSnapshot.id)
+                    ).all()
+                else:
+                    inserted_ids = []
                 if parse_failures:
                     session.add_all(
                         [
@@ -212,6 +219,7 @@ class SnapshotRepository:
                 session.commit()
             return BatchPersistenceReport(
                 snapshot_saved=len(snapshots),
+                snapshot_inserted=len(inserted_ids),
                 snapshot_failed=0,
                 parse_failure_saved=len(parse_failures),
                 parse_failure_failed=0,
@@ -223,11 +231,13 @@ class SnapshotRepository:
             )
 
         snapshot_saved = 0
+        snapshot_inserted = 0
         snapshot_failed = 0
         for record in snapshots:
             try:
-                self.save_snapshot(record)
+                inserted = self.save_snapshot(record)
                 snapshot_saved += 1
+                snapshot_inserted += int(inserted)
             except Exception as exc:
                 snapshot_failed += 1
                 LOGGER.error(
@@ -252,6 +262,7 @@ class SnapshotRepository:
                 )
         return BatchPersistenceReport(
             snapshot_saved=snapshot_saved,
+            snapshot_inserted=snapshot_inserted,
             snapshot_failed=snapshot_failed,
             parse_failure_saved=parse_failure_saved,
             parse_failure_failed=parse_failure_failed,

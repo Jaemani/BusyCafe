@@ -136,7 +136,12 @@ HTTP_MAX_KEEPALIVE_CONNECTIONS: Final = 4
 
 # Polling interval confirmed after the portal reported no call-count limit.
 # Scoring defaults remain subject to Phase 6 calibration.
-POLL_INTERVAL_MIN: Final = 10
+POLL_INTERVAL_MIN: Final = 5
+# Production pg_cron starts away from the top of the hour, then dispatches the
+# health monitor after the normal one-cycle worker runtime.  Scheduler code
+# derives its full minute lists from these centralized values.
+PRODUCTION_POLL_MINUTE_OFFSET: Final = 2
+PRODUCTION_MONITOR_DELAY_MIN: Final = 2
 POLL_MAX_CONSECUTIVE_FAILURES: Final = 5
 # Bounds upstream pressure while reducing the 121-place cycle latency.
 # Seoul endpoint accepted the same five targets sequentially while the

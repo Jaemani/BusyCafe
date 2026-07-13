@@ -2,10 +2,54 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.configure_supabase_scheduler import JOBS, SECRET_NAME, dispatch_command
+import pytest
+
+from app.config import (
+    POLL_INTERVAL_MIN,
+    PRODUCTION_MONITOR_DELAY_MIN,
+    PRODUCTION_POLL_MINUTE_OFFSET,
+)
+from scripts.configure_supabase_scheduler import (
+    JOBS,
+    SECRET_NAME,
+    dispatch_command,
+    minute_schedule,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _scheduled_minutes(schedule: str) -> tuple[int, ...]:
+    return tuple(int(value) for value in schedule.split()[0].split(","))
+
+
+def test_production_poll_runs_every_five_minutes_and_monitor_is_offset() -> None:
+    assert POLL_INTERVAL_MIN == 5
+    assert PRODUCTION_POLL_MINUTE_OFFSET == 2
+    assert PRODUCTION_MONITOR_DELAY_MIN == 2
+    poll_minutes = _scheduled_minutes(JOBS[0].schedule)
+    monitor_minutes = _scheduled_minutes(JOBS[1].schedule)
+
+    assert poll_minutes == tuple(range(2, 60, 5))
+    assert monitor_minutes == tuple(range(4, 60, 5))
+    assert len(poll_minutes) == len(monitor_minutes) == 12
+    assert {
+        (minute + PRODUCTION_MONITOR_DELAY_MIN) % 60
+        for minute in poll_minutes
+    } == set(monitor_minutes)
+
+
+@pytest.mark.parametrize(
+    ("interval", "offset"),
+    [(0, 0), (7, 0), (5, -1), (5, 5)],
+)
+def test_minute_schedule_rejects_invalid_interval_or_offset(
+    interval: int,
+    offset: int,
+) -> None:
+    with pytest.raises(ValueError):
+        minute_schedule(interval, offset)
 
 
 def test_dispatch_commands_use_vault_without_embedding_secret() -> None:

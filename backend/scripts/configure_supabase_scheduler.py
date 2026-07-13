@@ -9,9 +9,26 @@ from dataclasses import dataclass
 
 import psycopg
 
+from app.config import (
+    POLL_INTERVAL_MIN,
+    PRODUCTION_MONITOR_DELAY_MIN,
+    PRODUCTION_POLL_MINUTE_OFFSET,
+)
+
 
 SECRET_NAME = "busy_cafe_github_pat"
 REPOSITORY = "Jaemani/BusyCafe"
+
+
+def minute_schedule(interval_min: int, offset_min: int) -> str:
+    """Build one explicit hourly minute list for pg_cron's five-field syntax."""
+
+    if interval_min < 1 or 60 % interval_min != 0:
+        raise ValueError("interval_min must divide 60")
+    if not 0 <= offset_min < interval_min:
+        raise ValueError("offset_min must be within one interval")
+    minutes = ",".join(str(value) for value in range(offset_min, 60, interval_min))
+    return f"{minutes} * * * *"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,12 +41,22 @@ class Job:
 JOBS = (
     Job(
         "busy-cafe-poll-production",
-        "7,17,27,37,47,57 * * * *",
+        minute_schedule(
+            POLL_INTERVAL_MIN,
+            PRODUCTION_POLL_MINUTE_OFFSET,
+        ),
         "poll-production.yml",
     ),
     Job(
         "busy-cafe-monitor-production",
-        "9,19,29,39,49,59 * * * *",
+        minute_schedule(
+            POLL_INTERVAL_MIN,
+            (
+                PRODUCTION_POLL_MINUTE_OFFSET
+                + PRODUCTION_MONITOR_DELAY_MIN
+            )
+            % POLL_INTERVAL_MIN,
+        ),
         "monitor-production.yml",
     ),
 )

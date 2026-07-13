@@ -126,8 +126,8 @@ def test_repository_persists_json_values_and_duplicate_is_noop(session_factory):
     repository = SnapshotRepository(session_factory)
     record = record_for(hotspot_id)
 
-    repository.save_snapshot(record)
-    repository.save_snapshot(record)
+    assert repository.save_snapshot(record) is True
+    assert repository.save_snapshot(record) is False
 
     with session_factory() as session:
         snapshots = session.scalars(select(HotspotSnapshot)).all()
@@ -185,6 +185,7 @@ def test_batch_save_uses_one_commit_and_keeps_natural_key_idempotency(
         event.remove(engine, "commit", count_commit)
 
     assert report.snapshot_saved == 3
+    assert report.snapshot_inserted == 2
     assert report.snapshot_failed == 0
     assert commits == 1
     with session_factory() as session:
@@ -212,6 +213,7 @@ def test_batch_save_falls_back_and_isolates_invalid_snapshot(session_factory):
     )
 
     assert report.snapshot_saved == 1
+    assert report.snapshot_inserted == 1
     assert report.snapshot_failed == 1
     with session_factory() as session:
         assert session.scalar(
@@ -268,6 +270,7 @@ def test_run_poll_cycle_uses_database_targets_without_real_http(
 
     assert client.calls == ["광화문광장"]
     assert report.targets == report.saved == 1
+    assert report.inserted == 1
     assert report.status == "complete"
     assert report.poll_seconds >= 0
     assert report.fetch_seconds >= 0
@@ -278,6 +281,7 @@ def test_run_poll_cycle_uses_database_targets_without_real_http(
         (report.materialize_seconds, report.finalize_seconds)
     )
     assert "Polling cycle phases: status=complete" in caplog.text
+    assert "inserted=1" in caplog.text
     assert "poll=" in caplog.text
     assert "fetch_sum=" in caplog.text
     assert "persist_sum=" in caplog.text
@@ -289,6 +293,48 @@ def test_run_poll_cycle_uses_database_targets_without_real_http(
         assert cycle is not None
         assert cycle.status == "complete"
         assert cycle.completed_at is not None
+
+
+def test_duplicate_cycle_stays_complete_and_skips_materialization(
+    session_factory,
+) -> None:
+    hotspot_id = add_hotspot(
+        session_factory,
+        area_code="POI088",
+        name="광화문광장",
+        is_polled=True,
+    )
+    repository = SnapshotRepository(session_factory)
+    assert repository.save_snapshot(record_for(hotspot_id)) is True
+    materialize_calls = 0
+
+    def count_materialize(_session: Session) -> None:
+        nonlocal materialize_calls
+        materialize_calls += 1
+
+    report = run_poll_cycle(
+        session_factory,
+        client=FixtureClient(load_citydata_fixture()),
+        materializer=count_materialize,
+    )
+
+    assert report.targets == report.saved == 1
+    assert report.inserted == 0
+    assert report.failed == 0
+    assert report.status == "complete"
+    assert report.materialize_seconds == 0
+    assert materialize_calls == 0
+    with session_factory() as session:
+        assert session.scalar(
+            select(func.count()).select_from(HotspotSnapshot)
+        ) == 1
+        cycle = session.scalar(
+            select(IngestCycle).order_by(IngestCycle.id.desc()).limit(1)
+        )
+        assert cycle is not None
+        assert cycle.targets == cycle.saved == 1
+        assert cycle.failed == 0
+        assert cycle.status == "complete"
 
 
 def test_cycle_is_committed_running_before_first_external_call(session_factory):

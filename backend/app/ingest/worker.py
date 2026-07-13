@@ -47,7 +47,10 @@ CycleStatus = Literal["running", "complete", "partial", "failed"]
 class CycleReport:
     cycle_id: int
     targets: int
+    # Successful target fetches durably handled, including duplicate no-ops.
     saved: int
+    # New hotspot snapshot rows; zero means scores are already current.
+    inserted: int
     failed: int
     status: CycleStatus
     poll_seconds: float
@@ -70,10 +73,11 @@ def _log_cycle_phases(
     """Log only bounded operational timings, never payloads or request URLs."""
 
     LOGGER.info(
-        "Polling cycle phases: status=%s poll=%.3fs fetch_sum=%.3fs "
+        "Polling cycle phases: status=%s inserted=%d poll=%.3fs fetch_sum=%.3fs "
         "persist_sum=%.3fs "
         "materialize=%.3fs finalize=%.3fs total=%.3fs",
         status,
+        poll_report.inserted if poll_report else 0,
         poll_seconds,
         poll_report.fetch_seconds if poll_report else 0.0,
         poll_report.persistence_seconds if poll_report else 0.0,
@@ -125,6 +129,7 @@ def run_poll_cycle(
             poll_report = replace(
                 fetched_report,
                 saved=batch_report.snapshot_saved,
+                inserted=batch_report.snapshot_inserted,
                 failed=(
                     fetched_report.failed + batch_report.snapshot_failed
                 ),
@@ -136,12 +141,13 @@ def run_poll_cycle(
             )
         finally:
             poll_seconds = monotonic() - poll_started
-        with session_factory() as session:
-            materialize_started = monotonic()
-            try:
-                materializer(session)
-            finally:
-                materialize_seconds = monotonic() - materialize_started
+        if poll_report.inserted > 0:
+            with session_factory() as session:
+                materialize_started = monotonic()
+                try:
+                    materializer(session)
+                finally:
+                    materialize_seconds = monotonic() - materialize_started
     except (Exception, KeyboardInterrupt, SystemExit):
         # ``poll-production.yml`` gives the worker an explicit SIGINT deadline
         # before the GitHub job timeout.  Python turns SIGINT into
@@ -204,6 +210,7 @@ def run_poll_cycle(
         cycle_id=cycle_id,
         targets=poll_report.targets,
         saved=poll_report.saved,
+        inserted=poll_report.inserted,
         failed=poll_report.failed,
         status=status,
         poll_seconds=poll_seconds,
@@ -255,10 +262,11 @@ def main(
     def cycle() -> CycleReport:
         report = run_poll_cycle(session_factory, client=client)
         LOGGER.info(
-            "Polling cycle %s: targets=%d saved=%d failed=%d",
+            "Polling cycle %s: targets=%d saved=%d inserted=%d failed=%d",
             report.status,
             report.targets,
             report.saved,
+            report.inserted,
             report.failed,
         )
         return report
