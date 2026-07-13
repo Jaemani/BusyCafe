@@ -215,6 +215,25 @@ STALE_WARN_MIN: Final = 25
 CURRENT_DISPLAY_MAX_AGE_MIN: Final = 120
 FRESHNESS_MAX_FUTURE_SKEW_MIN: Final = 2
 MAX_CAFES_PER_VIEWPORT: Final = 5_000
+# Public read API cache policy. Vercel keys shared-cache entries by the full
+# path and query string, so the frontend must request canonical tile bboxes to
+# reuse these entries. Map/detail data may lag one ingest cycle already; keep
+# edge freshness far below POLL_INTERVAL_MIN while allowing stale delivery
+# briefly during background revalidation or an origin failure.
+API_MAP_BROWSER_MAX_AGE_SEC: Final = 30
+API_MAP_EDGE_MAX_AGE_SEC: Final = 60
+API_MAP_STALE_WHILE_REVALIDATE_SEC: Final = 120
+API_MAP_STALE_IF_ERROR_SEC: Final = 600
+# Health drives the stale banner and therefore gets a much shorter edge TTL.
+API_HEALTH_BROWSER_MAX_AGE_SEC: Final = 0
+API_HEALTH_EDGE_MAX_AGE_SEC: Final = 10
+API_HEALTH_STALE_WHILE_REVALIDATE_SEC: Final = 10
+API_HEALTH_STALE_IF_ERROR_SEC: Final = 60
+# Attribution/source metadata changes only with a deployment.
+API_STATIC_BROWSER_MAX_AGE_SEC: Final = 3_600
+API_STATIC_EDGE_MAX_AGE_SEC: Final = 86_400
+API_STATIC_STALE_WHILE_REVALIDATE_SEC: Final = 604_800
+API_STATIC_STALE_IF_ERROR_SEC: Final = 604_800
 EVAL_DEFAULT_HOTSPOT_NAMES: Final = ("홍대 관광특구", "성수카페거리")
 EVAL_CANDIDATES_PER_BAND: Final = 4
 EVAL_NEAR_MAX_M: Final = 300

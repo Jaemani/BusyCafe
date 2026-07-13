@@ -375,10 +375,6 @@ def _cafe_response(
     )
 
 
-def _set_cache_headers(response: Response) -> None:
-    response.headers["Cache-Control"] = "private, max-age=30, stale-while-revalidate=60"
-
-
 @router.get("/sources", response_model=SourceManifestResponse)
 def sources() -> SourceManifestResponse:
     return _SOURCE_MANIFEST
@@ -414,7 +410,6 @@ def list_cafes(
     if min_conf > 0:
         statement = statement.where(CafeScore.confidence >= min_conf)
     rows = db.execute(statement).all()
-    _set_cache_headers(response)
     truncated = len(rows) > MAX_CAFES_PER_VIEWPORT
     response.headers[VIEWPORT_TRUNCATED_HEADER] = str(truncated).lower()
     if truncated:
@@ -435,7 +430,6 @@ def list_cafes(
 @router.get("/cafes/{cafe_id}", response_model=CafeDetailResponse)
 def get_cafe(
     cafe_id: int,
-    response: Response,
     db: Session = Depends(get_db),
 ) -> CafeDetailResponse:
     latest_observed_at = (
@@ -503,7 +497,6 @@ def get_cafe(
             key=forecast_distance,
             default=None,
         )
-    _set_cache_headers(response)
     return CafeDetailResponse(
         **base.model_dump(),
         primary_hotspot_id=score.primary_hotspot_id if score else None,

@@ -16,7 +16,12 @@ from app.config import (
     SCORING_MODEL_VERSION,
 )
 from app.database import get_db
-from app.main import create_app
+from app.main import (
+    HEALTH_CACHE_CONTROL,
+    MAP_CACHE_CONTROL,
+    STATIC_CACHE_CONTROL,
+    create_app,
+)
 from app.models import (
     Base,
     Cafe,
@@ -156,7 +161,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     )
 
     assert response.status_code == 200
-    assert "max-age=30" in response.headers["cache-control"]
+    assert response.headers["cache-control"] == MAP_CACHE_CONTROL
     assert response.headers["x-busycafe-viewport-truncated"] == "false"
     payload = response.json()
     assert [item["name"] for item in payload] == ["정확한 카페"]
@@ -227,6 +232,38 @@ def test_detail_api_returns_scoring_model_version(api_client) -> None:
     assert response.status_code == 200
     assert response.json()["model_version"] == SCORING_MODEL_VERSION
     assert response.json()["freshness"] == "fresh"
+    assert response.headers["cache-control"] == MAP_CACHE_CONTROL
+
+
+def test_public_read_cache_policies_match_mutability(api_client) -> None:
+    hotspots = api_client.get("/api/hotspots")
+    health = api_client.get("/api/health")
+    sources = api_client.get("/api/sources")
+
+    assert hotspots.headers["cache-control"] == MAP_CACHE_CONTROL
+    assert health.headers["cache-control"] == HEALTH_CACHE_CONTROL
+    assert sources.headers["cache-control"] == STATIC_CACHE_CONTROL
+
+
+@pytest.mark.parametrize(
+    ("path", "headers"),
+    [
+        ("/api/cafes?bbox=bad", {}),
+        ("/api/cafes/999999", {}),
+        (
+            "/api/cafes?bbox=126.9,37.5,127.1,37.7",
+            {"Authorization": "Bearer must-not-be-shared"},
+        ),
+    ],
+)
+def test_errors_and_authenticated_requests_are_not_publicly_cached(
+    api_client,
+    path: str,
+    headers: dict[str, str],
+) -> None:
+    response = api_client.get(path, headers=headers)
+
+    assert response.headers.get("cache-control") is None
 
 
 def test_cafe_source_label_exposes_permit_verification(api_client) -> None:
@@ -566,7 +603,7 @@ def test_sources_returns_static_license_manifest(api_client) -> None:
     response = api_client.get("/api/sources")
 
     assert response.status_code == 200
-    assert "s-maxage=60" in response.headers["cache-control"]
+    assert response.headers["cache-control"] == STATIC_CACHE_CONTROL
     payload = response.json()
     sources = {item["id"]: item for item in payload["sources"]}
     assert set(sources) == {
