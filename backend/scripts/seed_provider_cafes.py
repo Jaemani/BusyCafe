@@ -238,8 +238,6 @@ def seed_provider_cafes(
                     overture_id=None,
                     **values,
                 )
-                session.add(created)
-                session.flush()
                 created_by_origin[origin] = created
             continue
         changed_fields = tuple(
@@ -257,6 +255,12 @@ def seed_provider_cafes(
             changed_field_counts[field] = changed_field_counts.get(field, 0) + 1
             if not dry_run:
                 setattr(existing, field, values[field])
+
+    if created_by_origin:
+        session.add_all(created_by_origin.values())
+        # Provider references need canonical cafe IDs. Flush the full cafe
+        # batch once instead of forcing one remote round trip per cafe.
+        session.flush()
 
     provider_inserted = provider_updated = provider_unchanged = 0
     for reference in references:

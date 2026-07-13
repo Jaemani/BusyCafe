@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from app.ingest.provider_cafe_catalog import (
@@ -49,8 +49,14 @@ def _reference(
     )
 
 
-def _candidate(identifier: str = "permit-1") -> ProviderNeutralCafeCandidate:
-    reference = _reference("seoul_refreshment_permits", identifier, "200")
+def _candidate(
+    identifier: str = "permit-1",
+    *,
+    place_id: str = "200",
+) -> ProviderNeutralCafeCandidate:
+    reference = _reference(
+        "seoul_refreshment_permits", identifier, place_id
+    )
     return ProviderNeutralCafeCandidate(
         canonical_source="seoul_refreshment_permits",
         canonical_source_id=identifier,
@@ -129,6 +135,49 @@ def test_seed_dry_run_then_apply_is_additive_and_idempotent(session: Session) ->
     assert repeated.provider_unchanged_count == 2
     assert repeated.provider_deactivated_count == 0
     assert repeated.cafe_deactivated_count == 0
+
+
+def test_seed_flushes_new_cafes_as_one_batch_before_provider_links(
+    session: Session,
+) -> None:
+    catalog = ProviderCatalogRecords(
+        existing_provider_refs=(),
+        new_cafe_candidates=tuple(
+            _candidate(f"permit-{index}", place_id=str(200 + index))
+            for index in range(3)
+        ),
+    )
+    flush_batches: list[tuple[int, int]] = []
+
+    def capture_flush(
+        flushing_session: Session,
+        flush_context: object,
+        instances: object,
+    ) -> None:
+        del flush_context, instances
+        flush_batches.append(
+            (
+                sum(
+                    isinstance(item, Cafe) for item in flushing_session.new
+                ),
+                sum(
+                    isinstance(item, CafeProviderPlace)
+                    for item in flushing_session.new
+                ),
+            )
+        )
+
+    event.listen(session, "before_flush", capture_flush)
+    try:
+        report = seed_provider_cafes(
+            session, catalog, dry_run=False, now=NOW
+        )
+    finally:
+        event.remove(session, "before_flush", capture_flush)
+
+    assert report.cafe_inserted_count == 3
+    assert report.provider_inserted_count == 3
+    assert flush_batches == [(3, 0), (0, 3)]
 
 
 def test_seed_updates_permit_origin_and_provider_without_deactivation(
