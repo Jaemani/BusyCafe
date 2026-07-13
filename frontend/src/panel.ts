@@ -60,6 +60,8 @@ export function showCafePanel(cafe: CafeProperties): void {
   requiredElement<HTMLElement>("#cafe-confidence").textContent =
     cafe.freshness === "stale"
       ? "오래된 근거 · 현재값 미표시"
+      : cafe.freshness === "delayed"
+        ? "지연 데이터 · 참고용"
       : cafe.confidenceTier === null
         ? "근거 강도 산정 전"
         : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[cafe.confidenceTier]}`;

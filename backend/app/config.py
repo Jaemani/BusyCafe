@@ -176,6 +176,9 @@ CONF_V2_ALIGNMENT_TAU_MIN: Final = 10.0
 CONF_V2_PARTIAL_CYCLE_FACTOR: Final = 0.50
 CONF_V2_VALIDATION_TARGET_SAMPLES: Final = 120
 STALE_WARN_MIN: Final = 25
+# Current area level remains usable as explicitly delayed evidence for at most
+# two hours. It is never relabeled fresh after STALE_WARN_MIN.
+CURRENT_DISPLAY_MAX_AGE_MIN: Final = 120
 FRESHNESS_MAX_FUTURE_SKEW_MIN: Final = 2
 MAX_CAFES_PER_VIEWPORT: Final = 5_000
 EVAL_DEFAULT_HOTSPOT_NAMES: Final = ("홍대 관광특구", "성수카페거리")

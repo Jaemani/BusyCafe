@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.config import (
+    CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
     MAX_CAFES_PER_VIEWPORT,
     OVERTURE_RELEASE,
@@ -176,11 +177,11 @@ def _observation_freshness(
         return "stale"
     age_min = (now - normalized).total_seconds() / 60.0
     if (
-        age_min > STALE_WARN_MIN
+        age_min > CURRENT_DISPLAY_MAX_AGE_MIN
         or age_min < -FRESHNESS_MAX_FUTURE_SKEW_MIN
     ):
         return "stale"
-    return "fresh"
+    return "delayed" if age_min > STALE_WARN_MIN else "fresh"
 
 
 def _cafe_response(
@@ -203,7 +204,8 @@ def _cafe_response(
             now=current_time,
         )
     )
-    expose_current = score is not None and freshness == "fresh"
+    expose_level = score is not None and freshness in ("fresh", "delayed")
+    expose_confidence = score is not None and freshness == "fresh"
     return CafeMapResponse(
         id=cafe.id,
         name=cafe.name,
@@ -217,10 +219,10 @@ def _cafe_response(
             + (" · 배포 스냅샷" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "")
         ),
         model_version=score.model_version if score else None,
-        level=score.level if expose_current else None,
-        score=score.score if expose_current else None,
-        confidence=score.confidence if expose_current else None,
-        confidence_tier=score.confidence_tier if expose_current else None,
+        level=score.level if expose_level else None,
+        score=score.score if expose_level else None,
+        confidence=score.confidence if expose_confidence else None,
+        confidence_tier=score.confidence_tier if expose_confidence else None,
         freshness=freshness,
         coverage=(score.coverage if score else "uncovered"),
         evidence=EvidenceResponse(
@@ -406,7 +408,7 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
                 observed_at=observed_at,
                 level=(
                     snapshot.congest_level
-                    if snapshot and freshness == "fresh"
+                    if snapshot and freshness in ("fresh", "delayed")
                     else None
                 ),
                 freshness=freshness,
@@ -428,6 +430,7 @@ def health(db: Session = Depends(get_db)) -> HealthResponse:
             "snapshot" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "live"
         ),
         stale_warn_min=STALE_WARN_MIN,
+        current_display_max_age_min=CURRENT_DISPLAY_MAX_AGE_MIN,
         last_ingest_at=_utc(db.scalar(select(func.max(HotspotSnapshot.fetched_at)))),
         last_complete_cycle_at=_utc(
             db.scalar(

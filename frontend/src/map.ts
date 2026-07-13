@@ -88,6 +88,10 @@ function addCafeLayers(map: maplibregl.Map): void {
     clusterRadius: 42,
     clusterProperties: {
       max_level: ["max", ["coalesce", ["get", "level"], 0]],
+      delayed_count: [
+        "+",
+        ["case", ["==", ["get", "freshness"], "delayed"], 1, 0],
+      ],
     },
   });
 
@@ -113,7 +117,12 @@ function addCafeLayers(map: maplibregl.Map): void {
       "circle-radius": ["step", ["get", "point_count"], 18, 30, 22, 100, 27],
       "circle-stroke-color": "rgba(255, 255, 255, 0.92)",
       "circle-stroke-width": 3,
-      "circle-opacity": 0.92,
+      "circle-opacity": [
+        "case",
+        ["==", ["get", "delayed_count"], ["get", "point_count"]],
+        0.66,
+        0.92,
+      ],
     },
   });
 
@@ -127,7 +136,15 @@ function addCafeLayers(map: maplibregl.Map): void {
       "text-size": 11,
       "text-font": ["Noto Sans Regular"],
     },
-    paint: { "text-color": "#ffffff" },
+    paint: {
+      "text-color": "#ffffff",
+      "text-opacity": [
+        "case",
+        ["==", ["get", "delayed_count"], ["get", "point_count"]],
+        0.74,
+        1,
+      ],
+    },
   });
 
   map.addLayer({
@@ -170,6 +187,8 @@ function addCafeLayers(map: maplibregl.Map): void {
       ],
       "circle-opacity": [
         "case",
+        ["==", ["get", "freshness"], "delayed"],
+        0.55,
         ["<", ["coalesce", ["get", "confidence"], 0], 0.3],
         0.62,
         0.95,

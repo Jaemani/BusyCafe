@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.routes import _observation_freshness
 from app.config import (
+    CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
     OVERTURE_RELEASE,
     SCORING_MODEL_VERSION,
@@ -175,7 +176,7 @@ def test_detail_api_returns_scoring_model_version(api_client) -> None:
     assert response.json()["freshness"] == "fresh"
 
 
-def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -> None:
+def test_delayed_snapshot_shows_level_without_confidence(api_client) -> None:
     stale_time = datetime.now(UTC) - timedelta(minutes=26)
     factory = api_client.app.state.test_session_factory
     with factory() as session:
@@ -191,9 +192,9 @@ def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -
 
     assert len(listing) == 1
     item = listing[0]
-    assert item["freshness"] == "stale"
-    assert item["level"] is None
-    assert item["score"] is None
+    assert item["freshness"] == "delayed"
+    assert item["level"] == 2
+    assert item["score"] == 2.0
     assert item["confidence"] is None
     assert item["confidence_tier"] is None
     assert item["coverage"] == "covered"
@@ -206,15 +207,40 @@ def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -
     ).json() == []
 
     detail = api_client.get(f"/api/cafes/{item['id']}").json()
-    assert detail["freshness"] == "stale"
-    assert detail["level"] is None
-    assert detail["score"] is None
+    assert detail["freshness"] == "delayed"
+    assert detail["level"] == 2
+    assert detail["score"] == 2.0
     assert detail["forecast_1h"] is None
 
     hotspot = api_client.get("/api/hotspots").json()[0]
-    assert hotspot["freshness"] == "stale"
-    assert hotspot["level"] is None
+    assert hotspot["freshness"] == "delayed"
+    assert hotspot["level"] == 2
     assert hotspot["observed_at"] is not None
+
+
+def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -> None:
+    stale_time = datetime.now(UTC) - timedelta(
+        minutes=CURRENT_DISPLAY_MAX_AGE_MIN + 1
+    )
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        snapshot = session.query(HotspotSnapshot).one()
+        snapshot.observed_at = stale_time
+        snapshot.fetched_at = stale_time
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    ).json()[0]
+
+    assert item["freshness"] == "stale"
+    assert item["level"] is None
+    assert item["score"] is None
+    assert item["confidence"] is None
+    assert item["confidence_tier"] is None
+    assert item["coverage"] == "covered"
+    assert item["evidence"]["observed_at"] is not None
 
 
 def test_observation_freshness_boundary_and_future_skew() -> None:
@@ -225,6 +251,17 @@ def test_observation_freshness_boundary_and_future_skew() -> None:
     ) == "fresh"
     assert _observation_freshness(
         now - timedelta(minutes=25, microseconds=1), now=now
+    ) == "delayed"
+    assert _observation_freshness(
+        now - timedelta(minutes=CURRENT_DISPLAY_MAX_AGE_MIN), now=now
+    ) == "delayed"
+    assert _observation_freshness(
+        now
+        - timedelta(
+            minutes=CURRENT_DISPLAY_MAX_AGE_MIN,
+            microseconds=1,
+        ),
+        now=now,
     ) == "stale"
     assert _observation_freshness(None, now=now) == "stale"
     assert _observation_freshness(
@@ -271,6 +308,7 @@ def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["data_mode"] == "live"
     assert response.json()["stale_warn_min"] == 25
+    assert response.json()["current_display_max_age_min"] == 120
     assert response.json()["cafes_count"] == 1
     assert response.json()["snapshots_last_hour"] == 1
     assert response.json()["last_complete_cycle_at"].endswith("Z")

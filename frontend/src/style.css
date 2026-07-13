@@ -257,6 +257,7 @@ h1 {
 .legend[data-state="preview"] .legend-level,
 .legend[data-state="scored"] .legend-preview { display: none; }
 .legend-marker { display: inline-block; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgb(30 46 38 / 10%); }
+.legend-marker.delayed { opacity: 0.55; }
 .level-calm { background: #2d8b68; }
 .level-normal { background: #c5a53a; }
 .level-crowded { background: #d9772f; }
