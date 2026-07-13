@@ -16,7 +16,7 @@ def _validation_script() -> str:
     step = next(
         index
         for index, line in enumerate(lines)
-        if line.strip() == "name: Check secrets and dry-run bound"
+        if line.strip() == "- name: Check secrets and dry-run bound"
     )
     run = next(
         index
