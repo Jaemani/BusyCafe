@@ -117,6 +117,7 @@ def test_seed_is_idempotent_and_deactivates_missing_records(engine) -> None:
         assert second.unchanged_count == 2
         assert third.updated_count == 1
         assert third.deactivated_count == 1
+        assert third.changed_field_counts == (("name", 1), ("source_release", 1))
         assert session.scalar(select(func.count()).select_from(Cafe)) == 2
         assert session.scalar(select(Cafe).where(Cafe.overture_id == "overture:1")).name == "바뀐 이름"
         assert session.scalar(select(Cafe).where(Cafe.overture_id == "overture:2")).active is False
@@ -140,6 +141,31 @@ def test_dry_run_has_no_database_effect_and_duplicate_ids_fail(engine) -> None:
                 release="2026-06-17.0",
                 scope_bbox=SEOUL_BBOX,
             )
+
+
+def test_seed_dry_run_aggregates_changed_fields_without_values_or_ids(engine) -> None:
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [record("overture:1"), record("overture:2")],
+            release="old-release",
+            scope_bbox=SEOUL_BBOX,
+        )
+
+        report = seed_overture_cafes(
+            session,
+            [
+                record("overture:1", phone="02-000-0001"),
+                record("overture:2", phone="02-000-0002"),
+            ],
+            release="new-release",
+            scope_bbox=SEOUL_BBOX,
+            dry_run=True,
+        )
+
+        assert report.updated_count == 2
+        assert report.changed_field_counts == (("phone", 2), ("source_release", 2))
+        assert all("overture:" not in field for field, _ in report.changed_field_counts)
 
 
 def test_seed_deactivation_is_limited_to_explicit_scope(engine) -> None:

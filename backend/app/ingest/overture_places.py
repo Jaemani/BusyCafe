@@ -56,6 +56,7 @@ class OvertureSeedReport:
     deactivated_count: int
     active_count: int
     dry_run: bool
+    changed_field_counts: tuple[tuple[str, int], ...] = ()
 
 
 def _optional_text(value: object, *, limit: int) -> str | None:
@@ -267,6 +268,7 @@ def seed_overture_cafes(
         cafe.overture_id: cafe for cafe in session.scalars(existing_query)
     }
     inserted_count = updated_count = unchanged_count = deactivated_count = 0
+    changed_field_counts: dict[str, int] = {}
     for overture_id in sorted(records_by_id):
         record = records_by_id[overture_id]
         values = _values(record, release=release)
@@ -276,12 +278,18 @@ def seed_overture_cafes(
             if not dry_run:
                 session.add(Cafe(overture_id=overture_id, **values))
             continue
-        if all(getattr(existing, key) == value for key, value in values.items()):
+        changed_fields = tuple(
+            key for key, value in values.items() if getattr(existing, key) != value
+        )
+        if not changed_fields:
             unchanged_count += 1
             continue
         updated_count += 1
+        for key in changed_fields:
+            changed_field_counts[key] = changed_field_counts.get(key, 0) + 1
         if not dry_run:
-            for key, value in values.items():
+            for key in changed_fields:
+                value = values[key]
                 setattr(existing, key, value)
 
     for overture_id, existing in existing_by_id.items():
@@ -300,6 +308,7 @@ def seed_overture_cafes(
         deactivated_count=deactivated_count,
         active_count=len(records_by_id),
         dry_run=dry_run,
+        changed_field_counts=tuple(sorted(changed_field_counts.items())),
     )
 
 

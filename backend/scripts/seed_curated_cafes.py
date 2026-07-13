@@ -28,6 +28,17 @@ class CuratedSeedStage:
     applied: OvertureSeedReport | None
 
 
+def _format_changed_field_counts(report: OvertureSeedReport) -> str:
+    """Render aggregate field names and counts only; never record values or IDs."""
+
+    if not report.changed_field_counts:
+        return "updated fields: none"
+    counts = ", ".join(
+        f"{field}={count}" for field, count in report.changed_field_counts
+    )
+    return f"updated fields: {counts}"
+
+
 def stage_curated_seed(
     session: Session,
     records: Sequence[OvertureCafeRecord],
@@ -93,6 +104,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{report.inserted_count}/{report.updated_count}/"
         f"{report.unchanged_count}/{report.deactivated_count}"
     )
+    print(_format_changed_field_counts(report))
     return 0
 
 

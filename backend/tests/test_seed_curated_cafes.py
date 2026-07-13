@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from app.ingest.overture_places import OvertureCafeRecord, OvertureSeedReport
-from scripts.seed_curated_cafes import CuratedSeedError, stage_curated_seed
+from scripts.seed_curated_cafes import (
+    CuratedSeedError,
+    _format_changed_field_counts,
+    stage_curated_seed,
+)
 
 
 def _record() -> OvertureCafeRecord:
@@ -21,7 +25,12 @@ def _record() -> OvertureCafeRecord:
     )
 
 
-def _report(*, dry_run: bool, deactivated: int = 0) -> OvertureSeedReport:
+def _report(
+    *,
+    dry_run: bool,
+    deactivated: int = 0,
+    changed_field_counts: tuple[tuple[str, int], ...] = (),
+) -> OvertureSeedReport:
     return OvertureSeedReport(
         source_count=1,
         inserted_count=1,
@@ -30,7 +39,20 @@ def _report(*, dry_run: bool, deactivated: int = 0) -> OvertureSeedReport:
         deactivated_count=deactivated,
         active_count=1,
         dry_run=dry_run,
+        changed_field_counts=changed_field_counts,
     )
+
+
+def test_changed_field_output_is_aggregate_only() -> None:
+    report = _report(
+        dry_run=True,
+        changed_field_counts=(("phone", 3), ("source_release", 10)),
+    )
+
+    assert _format_changed_field_counts(report) == (
+        "updated fields: phone=3, source_release=10"
+    )
+    assert _format_changed_field_counts(_report(dry_run=True)) == "updated fields: none"
 
 
 def test_default_stage_is_dry_run_only(monkeypatch: pytest.MonkeyPatch) -> None:
