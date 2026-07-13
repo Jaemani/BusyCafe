@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.clients.kakao_local import KakaoLocalClient, parse_category
+from app.clients.kakao_local import KakaoAPIError, KakaoLocalClient, parse_category
 from app.clients.seoul_citydata import SeoulAPIError, SeoulCityDataClient, parse_population
 
 
@@ -115,16 +115,98 @@ def test_kakao_client_sends_auth_header_and_parameters() -> None:
         assert request.url.params["radius"] == "1000"
         return httpx.Response(200, json=RAW_PAYLOAD)
 
-    client = KakaoLocalClient("rest-key", transport=httpx.MockTransport(handler))
-    response = client.search_category_raw(
-        longitude=126.9769, latitude=37.5759, radius_m=1000
-    )
-    assert response == RAW_PAYLOAD
+    with KakaoLocalClient(
+        "rest-key", transport=httpx.MockTransport(handler)
+    ) as client:
+        pooled_client = client._client
+        response = client.search_category_raw(
+            longitude=126.9769, latitude=37.5759, radius_m=1000
+        )
+        second = client.search_category_raw(
+            longitude=126.9769, latitude=37.5759, radius_m=1000
+        )
+        assert client._client is pooled_client
+        assert client.request_count == 2
+        assert response == second == RAW_PAYLOAD
+    assert pooled_client.is_closed
 
 
 def test_kakao_client_validates_api_limits_before_request() -> None:
-    client = KakaoLocalClient("rest-key", transport=httpx.MockTransport(lambda _: None))
-    with pytest.raises(ValueError, match="radius_m"):
-        client.search_category_raw(
-            longitude=126.9769, latitude=37.5759, radius_m=20_001
-        )
+    with KakaoLocalClient(
+        "rest-key", transport=httpx.MockTransport(lambda _: None)
+    ) as client:
+        with pytest.raises(ValueError, match="radius_m"):
+            client.search_category_raw(
+                longitude=126.9769, latitude=37.5759, radius_m=20_001
+            )
+
+
+def test_kakao_client_sends_rectangle_without_circle_parameters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["rect"] == "126,37,127,38"
+        assert "x" not in request.url.params
+        assert "y" not in request.url.params
+        assert "radius" not in request.url.params
+        return httpx.Response(200, json=RAW_PAYLOAD)
+
+    with KakaoLocalClient(
+        "rest-key", transport=httpx.MockTransport(handler)
+    ) as client:
+        assert client.search_category_raw(rect=(126, 37, 127, 38)) == RAW_PAYLOAD
+
+
+def test_kakao_client_retries_429_using_bounded_retry_after() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(429, headers={"Retry-After": "99"})
+        return httpx.Response(200, json=RAW_PAYLOAD)
+
+    with KakaoLocalClient(
+        "rest-key",
+        transport=httpx.MockTransport(handler),
+        sleep=delays.append,
+        max_retries=2,
+    ) as client:
+        assert client.search_category_raw(rect=(126, 37, 127, 38)) == RAW_PAYLOAD
+        assert client.request_count == 2
+    assert delays == [30.0]
+
+
+def test_kakao_client_retries_transport_error_with_exponential_backoff() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectError("temporary", request=request)
+        return httpx.Response(200, json=RAW_PAYLOAD)
+
+    with KakaoLocalClient(
+        "rest-key",
+        transport=httpx.MockTransport(handler),
+        sleep=delays.append,
+        max_retries=2,
+        retry_base_delay_seconds=0.25,
+    ) as client:
+        assert client.search_category_raw(rect=(126, 37, 127, 38)) == RAW_PAYLOAD
+    assert delays == [0.25, 0.5]
+
+
+def test_kakao_client_does_not_retry_non_transient_http_error() -> None:
+    delays: list[float] = []
+    with KakaoLocalClient(
+        "rest-key",
+        transport=httpx.MockTransport(lambda _: httpx.Response(403)),
+        sleep=delays.append,
+    ) as client:
+        with pytest.raises(KakaoAPIError, match="HTTP 403"):
+            client.search_category_raw(rect=(126, 37, 127, 38))
+        assert client.request_count == 1
+    assert delays == []

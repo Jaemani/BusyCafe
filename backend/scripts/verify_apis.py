@@ -142,11 +142,12 @@ def _fetch_service(service: str, key: str) -> dict[str, Any]:
             SEOUL_VERIFY_AREA_NAME
         )
     if service == "kakao":
-        return KakaoLocalClient(key).search_category_raw(
-            longitude=KAKAO_VERIFY_LNG,
-            latitude=KAKAO_VERIFY_LAT,
-            radius_m=KAKAO_VERIFY_RADIUS_M,
-        )
+        with KakaoLocalClient(key) as client:
+            return client.search_category_raw(
+                longitude=KAKAO_VERIFY_LNG,
+                latitude=KAKAO_VERIFY_LAT,
+                radius_m=KAKAO_VERIFY_RADIUS_M,
+            )
     raise ValueError(f"unsupported service: {service}")
 
 

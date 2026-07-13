@@ -89,7 +89,9 @@ LIVING_POPULATION_COMPACT_PARQUET_COMPRESSION: Final = "zstd"
 LIVING_POPULATION_COMPACT_PARQUET_ROW_GROUP_SIZE: Final = 100_000
 LIVING_POPULATION_COMPACT_MISSING_CELL_AUDIT_LIMIT: Final = 20
 
-# Legacy Phase 0 verification only; not part of the product runtime.
+# Kakao Local is an offline catalog-enrichment source. It is never called from
+# the map request path. Sweep tuning lives here so completeness/cost changes
+# are explicit and testable.
 KAKAO_LOCAL_BASE_URL: Final = "https://dapi.kakao.com"
 KAKAO_CATEGORY_PATH: Final = "/v2/local/search/category.json"
 KAKAO_CAFE_CATEGORY_CODE: Final = "CE7"
@@ -97,6 +99,13 @@ KAKAO_PAGE_SIZE: Final = 15
 KAKAO_MAX_PAGES: Final = 3
 KAKAO_MAX_RESULTS_PER_QUERY: Final = KAKAO_PAGE_SIZE * KAKAO_MAX_PAGES
 KAKAO_MAX_RADIUS_M: Final = 20_000
+KAKAO_SWEEP_MAX_DEPTH: Final = 14
+KAKAO_SWEEP_MIN_CELL_SPAN_DEG: Final = 0.00005
+KAKAO_SWEEP_MAX_CALLS: Final = 80_000
+KAKAO_RETRYABLE_STATUS_CODES: Final = frozenset({429, 500, 502, 503, 504})
+KAKAO_RETRY_AFTER_MAX_SECONDS: Final = 30.0
+KAKAO_CACHE_DIR: Final = BACKEND_DIR / "data" / "kakao"
+KAKAO_CACHE_FILENAME: Final = "kakao-ce7-seoul.jsonl"
 KAKAO_VERIFY_LNG: Final = 126.9769
 KAKAO_VERIFY_LAT: Final = 37.5759
 KAKAO_VERIFY_RADIUS_M: Final = 1_000
@@ -250,6 +259,11 @@ OVERTURE_CAFE_CATEGORIES: Final = (
     "coffee_roastery",
 )
 
+# Permit-origin rows are admitted only after strict one-to-one confirmation by
+# a CE7 provider place. This catalog-quality value is not forecast confidence.
+PROVIDER_CAFE_RELEASE: Final = "OA-16095+kakao-local"
+PROVIDER_VERIFIED_CAFE_CONFIDENCE: Final = 1.0
+
 # `--confidence-report` (read-only, no network) bucket range for the Overture
 # confidence-threshold study. Does not affect ingest filtering.
 OVERTURE_CONFIDENCE_REPORT_MIN: Final = 0.50
@@ -274,7 +288,7 @@ class Settings(BaseSettings):
     )
 
     seoul_api_key: SecretStr | None = None
-    kakao_rest_key: SecretStr | None = None  # legacy verify_apis.py only
+    kakao_rest_key: SecretStr | None = None
     database_url: str = (
         "postgresql+psycopg://cafe_crowd:cafe_crowd_dev@localhost:5432/cafe_crowd"
     )
