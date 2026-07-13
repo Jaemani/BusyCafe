@@ -1,0 +1,45 @@
+name: Configure Supabase production scheduler
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Create or update pg_cron jobs"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-supabase-scheduler-configuration
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Verify scheduler prerequisites
+        if: ${{ inputs.apply != true }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python scripts/configure_supabase_scheduler.py
+      - name: Apply and verify scheduler
+        if: ${{ inputs.apply == true }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: uv run python scripts/configure_supabase_scheduler.py --apply
