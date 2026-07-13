@@ -30,3 +30,13 @@ def test_scheduler_workflow_is_manual_and_dry_run_by_default() -> None:
     assert "DATABASE_URL: ${{ secrets.DATABASE_URL }}" in workflow
     assert "--apply" in workflow
     assert "echo \"$DATABASE_URL\"" not in workflow
+
+
+def test_production_workflows_are_dispatched_only_by_external_scheduler() -> None:
+    for workflow_name in ("poll-production.yml", "monitor-production.yml"):
+        workflow = (ROOT / ".github/workflows" / workflow_name).read_text(
+            encoding="utf-8"
+        )
+        trigger = workflow[workflow.index("on:\n") : workflow.index("\npermissions:")]
+        assert "workflow_dispatch:" in trigger
+        assert "schedule:" not in trigger

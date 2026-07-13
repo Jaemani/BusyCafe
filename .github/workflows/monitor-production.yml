@@ -1,9 +1,6 @@
 name: Monitor production freshness
 
 on:
-  schedule:
-    # Run two minutes after the poll slot so completed cycles are observable.
-    - cron: "9,19,29,39,49,59 * * * *"
   workflow_dispatch:
 
 permissions:

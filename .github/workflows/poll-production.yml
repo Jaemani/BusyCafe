@@ -1,9 +1,6 @@
 name: Poll production city data
 
 on:
-  schedule:
-    # Avoid GitHub Actions' heavily loaded top-of-ten-minute boundary.
-    - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
     inputs:
       probe_only:
