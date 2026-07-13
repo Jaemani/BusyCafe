@@ -9,7 +9,17 @@ import type {
   CafeViewport,
 } from "./cafe-provider";
 import { CachedApiCafeProvider } from "./cafe-provider";
-import { hideCafePanel, showCafePanel } from "./panel";
+import {
+  getOpenCafeId,
+  hideCafePanel,
+  showCafePanel,
+  updateOpenCafePanel,
+} from "./panel";
+import {
+  ageCafeCollection,
+  hasVisualFreshnessChange,
+  type FreshnessLimits,
+} from "./observation-age";
 import {
   evaluateRuntimeHealth,
   fetchRuntimeHealth,
@@ -25,6 +35,9 @@ const CLUSTER_COUNT_LAYER = "cafe-cluster-count";
 const CAFE_LAYER = "cafe-points";
 const CAFE_HIT_LAYER = "cafe-hit-area";
 const MIN_CAFE_ZOOM = 11;
+const DELAY_TICK_MS = 30_000;
+const CAFE_BACKGROUND_REFRESH_MS = 5 * 60_000;
+const RESUME_REFRESH_MIN_AGE_MS = 60_000;
 
 const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
@@ -66,6 +79,10 @@ function readCafeProperties(feature: MapGeoJSONFeature): CafeProperties | null {
     distanceM: properties.distanceM ?? null,
     observedAt: properties.observedAt ?? null,
     observationAgeMinutes: properties.observationAgeMinutes ?? null,
+    observationAgeMeasuredAtMs:
+      typeof properties.observationAgeMeasuredAtMs === "number"
+        ? properties.observationAgeMeasuredAtMs
+        : Date.now(),
   };
 }
 
@@ -209,7 +226,10 @@ function addCafeLayers(map: maplibregl.Map): void {
   });
 }
 
-function bindInteractions(map: maplibregl.Map): void {
+function bindInteractions(
+  map: maplibregl.Map,
+  onCafeSelect: (cafeId: string) => void,
+): void {
   map.on("click", CLUSTER_LAYER, async (event) => {
     const feature = event.features?.[0];
     const clusterId = feature?.properties?.cluster_id;
@@ -226,7 +246,7 @@ function bindInteractions(map: maplibregl.Map): void {
     const feature = event.features?.[0];
     if (!feature) return;
     const cafe = readCafeProperties(feature);
-    if (cafe) showCafePanel(cafe);
+    if (cafe) onCafeSelect(cafe.id);
   });
 
   for (const layer of [CLUSTER_LAYER, CAFE_HIT_LAYER]) {
@@ -291,8 +311,10 @@ export async function initializeCafeMap(
   let requestController: AbortController | null = null;
   let requestSequence = 0;
   let runtimeHealth: RuntimeHealthState | "unknown" | null = null;
+  let freshnessLimits: FreshnessLimits | null = null;
   let displayedCafeCount: number | null = null;
   let displayedDelayedCount = 0;
+  let displayedStaleCount = 0;
   let displayedDelayRange: { min: number; max: number } | null = null;
 
   const renderCafeStatus = (): void => {
@@ -305,11 +327,16 @@ export async function initializeCafeMap(
       : runtimeHealth === "unknown"
         ? " · 데이터 모드 확인 불가"
         : "";
-    if (runtimeKind === "delayed" || displayedDelayedCount > 0) {
+    if (
+      runtimeKind === "delayed" ||
+      displayedDelayedCount > 0 ||
+      displayedStaleCount > 0
+    ) {
       const countLabel = displayedCafeCount > 0
         ? ` · 카페 ${displayedCafeCount.toLocaleString("ko-KR")}곳`
         : "";
-      const partialLabel = displayedDelayedCount > 0 && displayedDelayedCount < displayedCafeCount
+      const laggedCount = displayedDelayedCount + displayedStaleCount;
+      const partialLabel = laggedCount > 0 && laggedCount < displayedCafeCount
         ? "일부 데이터"
         : "데이터";
       const delayLabel = displayedDelayRange === null
@@ -331,63 +358,128 @@ export async function initializeCafeMap(
     statusElement.dataset.state = "ready";
   };
 
-  void fetchRuntimeHealth()
-    .then((health) => {
-      runtimeHealth = evaluateRuntimeHealth(health);
-      renderCafeStatus();
-    })
-    .catch(() => {
-      runtimeHealth = "unknown";
-      renderCafeStatus();
-    });
+  let rawCafeCollection = EMPTY_COLLECTION;
+  let displayedCafeCollection = EMPTY_COLLECTION;
+  let hasLoadedCafeData = false;
+
+  const refreshRuntimeHealth = (): void => {
+    void fetchRuntimeHealth()
+      .then((health) => {
+        runtimeHealth = evaluateRuntimeHealth(health);
+        freshnessLimits = {
+          freshMaxAgeMinutes: health.staleWarnMin,
+          displayMaxAgeMinutes: health.currentDisplayMaxAgeMin,
+        };
+        updateDisplayedCollection();
+        renderCafeStatus();
+      })
+      .catch(() => {
+        runtimeHealth = "unknown";
+        renderCafeStatus();
+      });
+  };
 
   const updateLegend = (hasScores: boolean): void => {
     const legend = document.querySelector<HTMLElement>("#map-legend");
     if (legend) legend.dataset.state = hasScores ? "scored" : "preview";
   };
 
-  const refresh = async (): Promise<void> => {
+  const updateDisplayedCollection = (forceMapUpdate = false): void => {
+    if (!hasLoadedCafeData) return;
+    const nextCollection = ageCafeCollection(
+      rawCafeCollection,
+      Date.now(),
+      freshnessLimits,
+    );
+    const shouldUpdateMap = forceMapUpdate ||
+      hasVisualFreshnessChange(displayedCafeCollection, nextCollection);
+    displayedCafeCollection = nextCollection;
+    if (shouldUpdateMap) {
+      const source = map.getSource(CAFE_SOURCE) as GeoJSONSource | undefined;
+      source?.setData(displayedCafeCollection);
+    }
+    updateLegend(
+      displayedCafeCollection.features.some((feature) => feature.properties.level !== null),
+    );
+    displayedCafeCount = displayedCafeCollection.features.length;
+    const delayedFeatures = displayedCafeCollection.features.filter(
+      (feature) => feature.properties.freshness === "delayed",
+    );
+    const delayedAges = delayedFeatures
+      .map((feature) => feature.properties.observationAgeMinutes)
+      .filter((age): age is number => age !== null && Number.isFinite(age))
+      .map((age) => Math.ceil(age));
+    displayedDelayedCount = delayedFeatures.length;
+    displayedStaleCount = displayedCafeCollection.features.filter(
+      (feature) => feature.properties.freshness === "stale",
+    ).length;
+    displayedDelayRange = delayedAges.length > 0
+      ? { min: Math.min(...delayedAges), max: Math.max(...delayedAges) }
+      : null;
+
+    const openCafeId = getOpenCafeId();
+    if (openCafeId !== null) {
+      const openCafe = displayedCafeCollection.features.find(
+        (feature) => feature.properties.id === openCafeId,
+      );
+      if (openCafe) updateOpenCafePanel(openCafe.properties);
+      else hideCafePanel();
+    }
+    renderCafeStatus();
+  };
+
+  const selectCafe = (cafeId: string): void => {
+    const cafe = displayedCafeCollection.features.find(
+      (feature) => feature.properties.id === cafeId,
+    );
+    if (cafe) showCafePanel(cafe.properties);
+  };
+
+  let lastCafeFetchStartedAt = 0;
+  const refresh = async (background = false): Promise<void> => {
+    if (background && requestController !== null) return;
     requestController?.abort();
-    requestController = new AbortController();
+    const controller = new AbortController();
+    requestController = controller;
+    lastCafeFetchStartedAt = Date.now();
     const sequence = ++requestSequence;
-    displayedCafeCount = null;
-    displayedDelayedCount = 0;
-    displayedDelayRange = null;
-    statusElement.textContent = "현재 화면을 확인하는 중";
-    statusElement.dataset.state = "loading";
+    if (!background) {
+      displayedCafeCount = null;
+      displayedDelayedCount = 0;
+      displayedStaleCount = 0;
+      displayedDelayRange = null;
+      statusElement.textContent = "현재 화면을 확인하는 중";
+      statusElement.dataset.state = "loading";
+    }
 
     if (map.getZoom() < MIN_CAFE_ZOOM) {
       const source = map.getSource(CAFE_SOURCE) as GeoJSONSource | undefined;
       source?.setData(EMPTY_COLLECTION);
       updateLegend(false);
+      rawCafeCollection = EMPTY_COLLECTION;
+      displayedCafeCollection = EMPTY_COLLECTION;
+      hasLoadedCafeData = false;
+      requestController = null;
       statusElement.textContent = "카페를 보려면 지도를 확대해 주세요";
       statusElement.dataset.state = "empty";
       return;
     }
 
     try {
-      const result = await cafeProvider.getCafes(currentViewport(map), requestController.signal);
+      const result = await cafeProvider.getCafes(currentViewport(map), controller.signal);
       if (sequence !== requestSequence) return;
-      const source = map.getSource(CAFE_SOURCE) as GeoJSONSource | undefined;
-      source?.setData(result);
-      updateLegend(result.features.some((feature) => feature.properties.level !== null));
-      displayedCafeCount = result.features.length;
-      const delayedFeatures = result.features.filter(
-        (feature) => feature.properties.freshness === "delayed",
-      );
-      const delayedAges = delayedFeatures
-        .map((feature) => feature.properties.observationAgeMinutes)
-        .filter((age): age is number => age !== null && Number.isFinite(age));
-      displayedDelayedCount = delayedFeatures.length;
-      displayedDelayRange = delayedAges.length > 0
-        ? { min: Math.min(...delayedAges), max: Math.max(...delayedAges) }
-        : null;
-      renderCafeStatus();
+      rawCafeCollection = result;
+      hasLoadedCafeData = true;
+      updateDisplayedCollection(true);
     } catch (error) {
-      if (requestController.signal.aborted || sequence !== requestSequence) return;
-      statusElement.textContent =
-        error instanceof Error ? error.message : "카페 데이터를 불러오지 못했습니다";
-      statusElement.dataset.state = "error";
+      if (controller.signal.aborted || sequence !== requestSequence) return;
+      if (!background || !hasLoadedCafeData) {
+        statusElement.textContent =
+          error instanceof Error ? error.message : "카페 데이터를 불러오지 못했습니다";
+        statusElement.dataset.state = "error";
+      }
+    } finally {
+      if (requestController === controller) requestController = null;
     }
   };
 
@@ -395,7 +487,9 @@ export async function initializeCafeMap(
     hideCafePanel();
     displayedCafeCount = null;
     displayedDelayedCount = 0;
+    displayedStaleCount = 0;
     displayedDelayRange = null;
+    hasLoadedCafeData = false;
     statusElement.textContent = "지도 이동 중";
     statusElement.dataset.state = "moving";
   });
@@ -411,7 +505,7 @@ export async function initializeCafeMap(
     map.once("load", () => {
       window.clearTimeout(timeoutId);
       addCafeLayers(map);
-      bindInteractions(map);
+      bindInteractions(map, selectCafe);
       void refresh().then(resolve, reject);
     });
     map.on("error", () => {
@@ -419,5 +513,40 @@ export async function initializeCafeMap(
       statusElement.textContent = "일부 지도 데이터를 다시 불러오는 중입니다";
       statusElement.dataset.state = "loading";
     });
+  });
+
+  refreshRuntimeHealth();
+
+  const refreshInBackground = (): void => {
+    if (requestController !== null) return;
+    void refresh(true);
+    refreshRuntimeHealth();
+  };
+
+  const delayTimerId = window.setInterval(() => {
+    if (map.isMoving()) return;
+    updateDisplayedCollection();
+    if (
+      !document.hidden &&
+      Date.now() - lastCafeFetchStartedAt >= CAFE_BACKGROUND_REFRESH_MS
+    ) {
+      refreshInBackground();
+    }
+  }, DELAY_TICK_MS);
+
+  const refreshAfterResume = (): void => {
+    if (
+      document.hidden ||
+      Date.now() - lastCafeFetchStartedAt < RESUME_REFRESH_MIN_AGE_MS
+    ) return;
+    refreshInBackground();
+  };
+  document.addEventListener("visibilitychange", refreshAfterResume);
+  window.addEventListener("focus", refreshAfterResume);
+  map.once("remove", () => {
+    window.clearInterval(delayTimerId);
+    requestController?.abort();
+    document.removeEventListener("visibilitychange", refreshAfterResume);
+    window.removeEventListener("focus", refreshAfterResume);
   });
 }

@@ -21,6 +21,7 @@ export interface CafeProperties {
   distanceM: number | null;
   observedAt: string | null;
   observationAgeMinutes: number | null;
+  observationAgeMeasuredAtMs: number;
 }
 
 export type CafeFeature = Feature<Point, CafeProperties>;
@@ -96,6 +97,7 @@ export class CachedApiCafeProvider implements CafeProvider {
     }
     const items = (await response.json()) as CafeApiItem[];
     if (!Array.isArray(items)) throw new Error("카페 데이터 응답 형식이 올바르지 않습니다");
+    const observationAgeMeasuredAtMs = Date.now();
 
     const features = items.flatMap((item): CafeFeature[] => {
       if (
@@ -137,6 +139,7 @@ export class CachedApiCafeProvider implements CafeProvider {
             item.evidence.age_minutes >= 0
               ? item.evidence.age_minutes
               : null,
+          observationAgeMeasuredAtMs,
         },
       }];
     });

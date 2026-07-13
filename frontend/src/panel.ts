@@ -28,6 +28,8 @@ const EVIDENCE_STRENGTH_LABELS = {
   low: "낮음",
 } as const;
 
+let openCafeId: string | null = null;
+
 function setExternalLink(selector: string, href: string | null): boolean {
   const link = requiredElement<HTMLAnchorElement>(selector);
   if (!href) {
@@ -40,7 +42,7 @@ function setExternalLink(selector: string, href: string | null): boolean {
   return true;
 }
 
-export function showCafePanel(cafe: CafeProperties): void {
+function renderCafePanel(cafe: CafeProperties): void {
   requiredElement<HTMLElement>("#cafe-name").textContent = cafe.name;
   requiredElement<HTMLElement>("#cafe-address").textContent = cafe.address;
   requiredElement<HTMLElement>("#cafe-phone").textContent = cafe.phone ?? "전화 정보 없음";
@@ -84,7 +86,22 @@ export function showCafePanel(cafe: CafeProperties): void {
   document.body.classList.add("panel-open");
 }
 
+export function showCafePanel(cafe: CafeProperties): void {
+  openCafeId = cafe.id;
+  renderCafePanel(cafe);
+}
+
+export function updateOpenCafePanel(cafe: CafeProperties): void {
+  if (openCafeId !== cafe.id) return;
+  renderCafePanel(cafe);
+}
+
+export function getOpenCafeId(): string | null {
+  return openCafeId;
+}
+
 export function hideCafePanel(): void {
+  openCafeId = null;
   requiredElement<HTMLElement>("#cafe-panel").hidden = true;
   document.body.classList.remove("panel-open");
 }

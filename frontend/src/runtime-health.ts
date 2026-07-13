@@ -4,6 +4,7 @@ export type CycleStatus = "running" | "complete" | "partial" | "failed";
 export interface RuntimeHealth {
   dataMode: DataMode;
   staleWarnMin: number;
+  currentDisplayMaxAgeMin: number;
   lastCompleteCycleAt: string | null;
   lastCycleStatus: CycleStatus | null;
 }
@@ -31,6 +32,13 @@ export async function fetchRuntimeHealth(): Promise<RuntimeHealth> {
   ) {
     throw new Error("데이터 상태 임계값 오류");
   }
+  if (
+    typeof payload.current_display_max_age_min !== "number" ||
+    !Number.isInteger(payload.current_display_max_age_min) ||
+    payload.current_display_max_age_min <= payload.stale_warn_min
+  ) {
+    throw new Error("데이터 표시 임계값 오류");
+  }
   const status = payload.last_cycle_status;
   if (
     status !== null &&
@@ -44,6 +52,7 @@ export async function fetchRuntimeHealth(): Promise<RuntimeHealth> {
   return {
     dataMode: payload.data_mode,
     staleWarnMin: payload.stale_warn_min,
+    currentDisplayMaxAgeMin: payload.current_display_max_age_min,
     lastCompleteCycleAt: readNullableString(payload.last_complete_cycle_at),
     lastCycleStatus: status,
   };
