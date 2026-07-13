@@ -1,7 +1,4 @@
-"""External API schemas.
-
-The Seoul and Kakao models are backed by raw responses measured on 2026-07-11.
-"""
+"""External API schemas backed by dated, stored response fixtures."""
 
 from __future__ import annotations
 
@@ -89,6 +86,85 @@ class KakaoPlace(ExternalModel):
 class KakaoCategoryResponse(ExternalModel):
     meta: KakaoMeta
     documents: list[KakaoPlace]
+
+
+class SeoulRefreshmentPermit(ExternalModel):
+    """One OA-16095 permit row, preserving source status and category."""
+
+    municipality_code: str = Field(alias="OPNSFTEAMCODE", min_length=1)
+    management_number: str | None = Field(default=None, alias="MGTNO")
+    permit_date: str | None = Field(default=None, alias="APVPERMYMD")
+    trade_status_code: str = Field(alias="TRDSTATEGBN", min_length=1)
+    trade_status_name: str = Field(alias="TRDSTATENM", min_length=1)
+    detail_status_code: str = Field(alias="DTLSTATEGBN", min_length=1)
+    detail_status_name: str = Field(alias="DTLSTATENM", min_length=1)
+    closure_date: str | None = Field(default=None, alias="DCBYMD")
+    phone: str | None = Field(default=None, alias="SITETEL")
+    lot_address: str | None = Field(default=None, alias="SITEWHLADDR")
+    road_address: str | None = Field(default=None, alias="RDNWHLADDR")
+    business_name: str = Field(alias="BPLCNM", min_length=1)
+    last_modified_at: str | None = Field(default=None, alias="LASTMODTS")
+    source_updated_at: str | None = Field(default=None, alias="UPDATEDT")
+    business_type: str = Field(alias="UPTAENM", min_length=1)
+    projected_x_m: float | None = Field(default=None, alias="X")
+    projected_y_m: float | None = Field(default=None, alias="Y")
+    hygiene_type: str | None = Field(default=None, alias="SNTUPTAENM")
+
+    @field_validator(
+        "municipality_code",
+        "management_number",
+        "permit_date",
+        "trade_status_code",
+        "trade_status_name",
+        "detail_status_code",
+        "detail_status_name",
+        "closure_date",
+        "phone",
+        "lot_address",
+        "road_address",
+        "business_name",
+        "last_modified_at",
+        "source_updated_at",
+        "business_type",
+        "hygiene_type",
+        mode="before",
+    )
+    @classmethod
+    def strip_source_text(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("projected_x_m", "projected_y_m", mode="before")
+    @classmethod
+    def blank_coordinate_is_missing(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @property
+    def is_reported_open(self) -> bool:
+        """Conservative source-state predicate; not a cafe classifier."""
+
+        return (
+            self.trade_status_code == "01"
+            and self.trade_status_name == "영업/정상"
+            and self.detail_status_code == "01"
+            and self.detail_status_name == "영업"
+            and self.closure_date is None
+        )
+
+    @property
+    def has_projected_coordinates(self) -> bool:
+        return self.projected_x_m is not None and self.projected_y_m is not None
+
+
+class SeoulRefreshmentPermitPage(BaseModel):
+    total_count: int = Field(ge=0)
+    result_code: str
+    result_message: str
+    rows: list[SeoulRefreshmentPermit]
 
 
 class VerificationSummary(BaseModel):

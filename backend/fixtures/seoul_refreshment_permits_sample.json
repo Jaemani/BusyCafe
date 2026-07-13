@@ -1,0 +1,78 @@
+{
+  "_fixture_provenance": {
+    "dataset_id": "OA-16095",
+    "service": "LOCALDATA_072405",
+    "measured_on": "2026-07-13",
+    "selection": "Three category/status evidence rows selected from live rows 1-1000",
+    "sanitized_fields": ["SITETEL"]
+  },
+  "LOCALDATA_072405": {
+    "list_total_count": 146243,
+    "RESULT": {
+      "CODE": "INFO-000",
+      "MESSAGE": "정상 처리되었습니다"
+    },
+    "row": [
+      {
+        "OPNSFTEAMCODE": "3210000",
+        "MGTNO": "3210000-104-2017-00481",
+        "APVPERMYMD": "2017-11-24              ",
+        "TRDSTATEGBN": "01",
+        "TRDSTATENM": "영업/정상",
+        "DTLSTATEGBN": "01",
+        "DTLSTATENM": "영업",
+        "DCBYMD": "                        ",
+        "SITETEL": "",
+        "SITEWHLADDR": "서울특별시 서초구 서초동 1329-7 1층",
+        "RDNWHLADDR": "서울특별시 서초구 강남대로 343, 1층 (서초동)",
+        "BPLCNM": "스타벅스 서초우성사거리점",
+        "LASTMODTS": "2023-02-20 14:03:05",
+        "UPDATEDT": "2026-05-07 22:35:51",
+        "UPTAENM": "커피숍",
+        "X": "202513.119414067    ",
+        "Y": "443478.806945055    ",
+        "SNTUPTAENM": "커피숍"
+      },
+      {
+        "OPNSFTEAMCODE": "3210000",
+        "MGTNO": "3210000-104-2022-00003",
+        "APVPERMYMD": "2022-01-04              ",
+        "TRDSTATEGBN": "03",
+        "TRDSTATENM": "폐업",
+        "DTLSTATEGBN": "02",
+        "DTLSTATENM": "폐업",
+        "DCBYMD": "2023-12-29              ",
+        "SITETEL": "",
+        "SITEWHLADDR": "서울특별시 서초구 서초동 1641-10 서초금융연수원 내 1층",
+        "RDNWHLADDR": "서울특별시 서초구 사임당로23길 27, 서초금융연수원 내 1층 (서초동)",
+        "BPLCNM": "쇼네 주식회사",
+        "LASTMODTS": "2023-12-29 09:09:53",
+        "UPDATEDT": "2026-05-07 22:36:27",
+        "UPTAENM": "커피숍",
+        "X": "201730.78273369     ",
+        "Y": "443305.502426124    ",
+        "SNTUPTAENM": "커피숍"
+      },
+      {
+        "OPNSFTEAMCODE": "3170000",
+        "MGTNO": "3170000-104-2023-00012",
+        "APVPERMYMD": "2023-02-07              ",
+        "TRDSTATEGBN": "01",
+        "TRDSTATENM": "영업/정상",
+        "DTLSTATEGBN": "01",
+        "DTLSTATENM": "영업",
+        "DCBYMD": "                        ",
+        "SITETEL": "",
+        "SITEWHLADDR": "서울특별시 금천구 시흥동 814-35",
+        "RDNWHLADDR": "서울특별시 금천구 독산로28길 11, 1층 (시흥동)",
+        "BPLCNM": "이마트24 금천느티나무점",
+        "LASTMODTS": "2023-02-07 13:27:15",
+        "UPDATEDT": "2026-05-01 22:36:30",
+        "UPTAENM": "편의점",
+        "X": "191646.990306914    ",
+        "Y": "439365.351328562    ",
+        "SNTUPTAENM": "편의점"
+      }
+    ]
+  }
+}

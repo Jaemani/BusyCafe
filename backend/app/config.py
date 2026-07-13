@@ -25,6 +25,27 @@ SEOUL_RESPONSE_START_INDEX: Final = 1
 SEOUL_RESPONSE_END_INDEX: Final = 5
 SEOUL_VERIFY_AREA_NAME: Final = "광화문광장"
 
+# Official Seoul refreshment-food business permits (dataset OA-16095).
+# The dataset page and live Open API response were both checked on 2026-07-13.
+# Coordinates are projected metres, not latitude/longitude; the portal names
+# Korean 1985 / Modified Central Belt (EPSG:5174) and a three-day source lag.
+SEOUL_REFRESHMENT_PERMIT_DATASET_ID: Final = "OA-16095"
+SEOUL_REFRESHMENT_PERMIT_SERVICE: Final = "LOCALDATA_072405"
+SEOUL_REFRESHMENT_PERMIT_CRS: Final = "EPSG:5174"
+SEOUL_REFRESHMENT_PERMIT_WGS84_CRS: Final = "EPSG:4326"
+SEOUL_REFRESHMENT_PERMIT_MAX_PAGE_SIZE: Final = 1_000
+SEOUL_REFRESHMENT_PERMIT_SOURCE_LAG_DAYS: Final = 3
+SEOUL_REFRESHMENT_PERMIT_PROFILE_PATH: Final = (
+    BACKEND_DIR / "data" / "seoul_refreshment_permit_profile.json"
+)
+# Report-only candidates. No row is promoted to the cafe catalog until each
+# exact source category passes the full profile and a manual precision sample.
+SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES: Final = (
+    "커피숍",
+    "다방",
+    "전통찻집",
+    "떡카페",
+)
 # Official Seoul major-place master attachments (dataset OA-21285).
 SEOUL_DATAFILE_DOWNLOAD_URL: Final = (
     "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do"
