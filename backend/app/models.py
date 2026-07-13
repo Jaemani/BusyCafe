@@ -188,6 +188,17 @@ class Cafe(Base):
         CheckConstraint("lat BETWEEN -90 AND 90", name="lat_range"),
         CheckConstraint("lng BETWEEN -180 AND 180", name="lng_range"),
         CheckConstraint(
+            "length(origin_provider) > 0", name="origin_provider_nonempty"
+        ),
+        CheckConstraint(
+            "length(origin_source_id) > 0", name="origin_source_id_nonempty"
+        ),
+        UniqueConstraint(
+            "origin_provider",
+            "origin_source_id",
+            name="uq_cafes_origin_provider_source_id",
+        ),
+        CheckConstraint(
             "source_confidence BETWEEN 0.0 AND 1.0", name="source_confidence_range"
         ),
         Index("ix_cafes_bbox", "lng", "lat"),
@@ -195,11 +206,15 @@ class Cafe(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    # Overture GERS ID is the durable identity for our POI cache. Provider
-    # identifiers for outbound detail links are optional and never decide map
-    # coordinates or the canonical name.
-    overture_id: Mapped[str] = mapped_column(
-        String(64), unique=True, nullable=False
+    # ``id`` is the provider-neutral canonical identity. Overture remains the
+    # initial origin for existing rows, but provider aliases never replace the
+    # canonical primary key used by scores and API responses.
+    origin_provider: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="overture", server_default="overture"
+    )
+    origin_source_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    overture_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, nullable=True
     )
     source_release: Mapped[str] = mapped_column(String(32), nullable=False)
     source_confidence: Mapped[float] = mapped_column(Float, nullable=False)
@@ -219,6 +234,62 @@ class Cafe(Base):
     score: Mapped[CafeScore | None] = relationship(
         back_populates="cafe", cascade="all, delete-orphan", passive_deletes=True
     )
+    provider_places: Mapped[list[CafeProviderPlace]] = relationship(
+        back_populates="cafe", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    def __init__(self, **kwargs: Any) -> None:
+        if not kwargs.get("origin_source_id") and kwargs.get("overture_id"):
+            kwargs["origin_source_id"] = kwargs["overture_id"]
+        super().__init__(**kwargs)
+
+
+class CafeProviderPlace(Base):
+    """One verified provider identity attached to a canonical cafe."""
+
+    __tablename__ = "cafe_provider_places"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_place_id",
+            name="uq_cafe_provider_places_provider_place_id",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "provider",
+            name="uq_cafe_provider_places_cafe_provider",
+        ),
+        CheckConstraint("length(provider) > 0", name="provider_nonempty"),
+        CheckConstraint(
+            "length(provider_place_id) > 0", name="provider_place_id_nonempty"
+        ),
+        CheckConstraint("length(match_method) > 0", name="match_method_nonempty"),
+        CheckConstraint(
+            "match_distance_m IS NULL OR match_distance_m >= 0",
+            name="match_distance_nonnegative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cafe_id: Mapped[int] = mapped_column(
+        ForeignKey("cafes.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_place_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    detail_url: Mapped[str | None] = mapped_column(String(1_000))
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    match_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    match_distance_m: Mapped[float | None] = mapped_column(Float)
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+    cafe: Mapped[Cafe] = relationship(back_populates="provider_places")
 
 
 class CafeScore(Base):

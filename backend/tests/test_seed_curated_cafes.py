@@ -34,6 +34,7 @@ def _report(
     *,
     dry_run: bool,
     deactivated: int = 0,
+    provider_deactivated: int = 0,
     changed_field_counts: tuple[tuple[str, int], ...] = (),
 ) -> OvertureSeedReport:
     return OvertureSeedReport(
@@ -42,6 +43,7 @@ def _report(
         updated_count=0,
         unchanged_count=0,
         deactivated_count=deactivated,
+        provider_deactivated_count=provider_deactivated,
         active_count=1,
         dry_run=dry_run,
         changed_field_counts=changed_field_counts,
@@ -124,4 +126,24 @@ def test_explicit_safe_apply_runs_only_after_clean_preflight(
     stage = stage_curated_seed(object(), [_record()], release="test", apply=True)  # type: ignore[arg-type]
 
     assert calls == [True, False]
+    assert stage.applied is not None
+
+
+def test_provider_link_retirement_does_not_block_explicit_apply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def fake_seed(*args: object, dry_run: bool, **kwargs: object) -> OvertureSeedReport:
+        calls.append(dry_run)
+        return _report(dry_run=dry_run, provider_deactivated=1)
+
+    monkeypatch.setattr("scripts.seed_curated_cafes.seed_overture_cafes", fake_seed)
+
+    stage = stage_curated_seed(
+        object(), [_record()], release="test", apply=True  # type: ignore[arg-type]
+    )
+
+    assert calls == [True, False]
+    assert stage.preflight.provider_deactivated_count == 1
     assert stage.applied is not None

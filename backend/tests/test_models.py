@@ -12,6 +12,7 @@ from app.config import SCORING_MODEL_VERSION
 from app.models import (
     Base,
     Cafe,
+    CafeProviderPlace,
     CafeScore,
     Hotspot,
     HotspotParseFailure,
@@ -65,6 +66,7 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     parse_failure = HotspotParseFailure.__table__.c
     score = CafeScore.__table__.c
     cycle = IngestCycle.__table__.c
+    provider_place = CafeProviderPlace.__table__.c
 
     assert snapshot.observed_at.type.timezone is True
     assert snapshot.fetched_at.type.timezone is True
@@ -72,6 +74,8 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     assert score.computed_at.type.timezone is True
     assert cycle.started_at.type.timezone is True
     assert cycle.completed_at.type.timezone is True
+    assert provider_place.verified_at.type.timezone is True
+    assert provider_place.last_seen_at.type.timezone is True
     assert score.model_version.nullable is False
     assert isinstance(
         snapshot.forecast_json.type.dialect_impl(postgresql.dialect()),
@@ -217,6 +221,70 @@ def test_cafe_delete_cascades_materialized_score(engine):
         session.commit()
 
         assert session.get(CafeScore, shop_id) is None
+
+
+def test_provider_only_cafe_and_provider_identity_round_trip(engine):
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        shop = cafe(
+            overture_id=None,
+            origin_provider="kakao",
+            origin_source_id="12345",
+            source_release="2026-07-13",
+        )
+        shop.provider_places.append(
+            CafeProviderPlace(
+                provider="kakao",
+                provider_place_id="12345",
+                detail_url="https://place.map.kakao.com/12345",
+                match_method="source_primary",
+                verified_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.add(shop)
+        session.commit()
+
+        stored = session.scalar(select(Cafe).where(Cafe.id == shop.id))
+        assert stored is not None
+        assert stored.overture_id is None
+        assert stored.origin_provider == "kakao"
+        assert stored.provider_places[0].provider_place_id == "12345"
+
+        session.delete(stored)
+        session.commit()
+        assert session.scalars(select(CafeProviderPlace)).all() == []
+
+
+def test_provider_identity_uniqueness_fails_closed(engine):
+    now = datetime(2026, 7, 13, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        first = cafe()
+        second = cafe(overture_id="overture:second", name="둘째")
+        session.add_all([first, second])
+        session.flush()
+        session.add_all(
+            [
+                CafeProviderPlace(
+                    cafe_id=first.id,
+                    provider="naver",
+                    provider_place_id="777",
+                    match_method="exact_id",
+                    verified_at=now,
+                    last_seen_at=now,
+                ),
+                CafeProviderPlace(
+                    cafe_id=second.id,
+                    provider="naver",
+                    provider_place_id="777",
+                    match_method="exact_id",
+                    verified_at=now,
+                    last_seen_at=now,
+                ),
+            ]
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_parse_failures_are_append_only_and_hotspot_delete_cascades(engine):

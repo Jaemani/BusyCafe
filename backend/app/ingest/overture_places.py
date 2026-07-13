@@ -8,11 +8,14 @@ map viewport requests are local indexed queries only.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from math import floor, isclose, isfinite
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -29,11 +32,68 @@ from app.config import (
     SEOUL_BBOX,
 )
 from app.geo import haversine_m
-from app.models import Cafe
+from app.models import Cafe, CafeProviderPlace
 
 
 class OvertureIngestError(ValueError):
     """A bounded Overture extract cannot safely be materialized."""
+
+
+_NAVER_MAP_DETAIL_PATH = re.compile(r"^/p/entry/place/([0-9]+)/?$")
+_NAVER_MOBILE_DETAIL_PATH = re.compile(
+    r"^/(place|restaurant)/([0-9]+)(?:/(?:home|menu|review|photo))?/?$"
+)
+_KAKAO_DETAIL_PATH = re.compile(r"^/([0-9]+)/?$")
+
+
+def direct_website_provider_reference(
+    website: str | None,
+) -> tuple[str, str, str] | None:
+    """Extract only exact provider detail identities from an Overture website."""
+
+    if not website:
+        return None
+    parsed = urlparse(website.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    host = parsed.hostname
+    if host in {"map.naver.com", "m.map.naver.com"}:
+        matched = _NAVER_MAP_DETAIL_PATH.fullmatch(parsed.path)
+        if matched:
+            place_id = matched.group(1)
+            return (
+                "naver",
+                place_id,
+                f"https://map.naver.com/p/entry/place/{place_id}",
+            )
+        return None
+    if host == "m.place.naver.com":
+        matched = _NAVER_MOBILE_DETAIL_PATH.fullmatch(parsed.path)
+        if matched:
+            place_type, place_id = matched.groups()
+            return (
+                "naver",
+                place_id,
+                f"https://m.place.naver.com/{place_type}/{place_id}",
+            )
+        return None
+    if host == "place.map.kakao.com":
+        matched = _KAKAO_DETAIL_PATH.fullmatch(parsed.path)
+        if matched:
+            place_id = matched.group(1)
+            return (
+                "kakao",
+                place_id,
+                f"https://place.map.kakao.com/{place_id}",
+            )
+        return None
+    if host in {"www.google.com", "maps.google.com", "google.com"}:
+        query = parse_qs(parsed.query)
+        place_ids = query.get("query_place_id") or query.get("cid")
+        if place_ids and len(place_ids) == 1 and place_ids[0].strip():
+            place_id = place_ids[0].strip()
+            return "google", place_id, website.strip()
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +151,7 @@ class OvertureSeedReport:
     updated_count: int
     unchanged_count: int
     deactivated_count: int
+    provider_deactivated_count: int
     active_count: int
     dry_run: bool
     changed_field_counts: tuple[tuple[str, int], ...] = ()
@@ -294,6 +355,21 @@ def _record_is_in_scope(
     return min_lng <= record.lng <= max_lng and min_lat <= record.lat <= max_lat
 
 
+def _record_provider_references(
+    record: OvertureCafeRecord,
+) -> tuple[tuple[str, str, str | None, str], ...]:
+    references: list[tuple[str, str, str | None, str]] = [
+        ("overture", record.overture_id, None, "source_primary")
+    ]
+    direct = direct_website_provider_reference(record.website)
+    if direct is not None:
+        provider, provider_place_id, detail_url = direct
+        references.append(
+            (provider, provider_place_id, detail_url, "source_direct_url")
+        )
+    return tuple(references)
+
+
 def seed_overture_cafes(
     session: Session,
     records: Iterable[OvertureCafeRecord],
@@ -312,6 +388,7 @@ def seed_overture_cafes(
     validated_scope = _validate_scope_bbox(scope_bbox)
 
     records_by_id: dict[str, OvertureCafeRecord] = {}
+    incoming_provider_owners: dict[tuple[str, str], str] = {}
     for record in records:
         if not _record_is_in_scope(record, scope_bbox=validated_scope):
             raise OvertureIngestError(
@@ -320,6 +397,15 @@ def seed_overture_cafes(
         if record.overture_id in records_by_id:
             raise OvertureIngestError(f"duplicate Overture ID: {record.overture_id}")
         records_by_id[record.overture_id] = record
+        for provider, provider_place_id, _, _ in _record_provider_references(record):
+            key = (provider, provider_place_id)
+            previous_owner = incoming_provider_owners.setdefault(
+                key, record.overture_id
+            )
+            if previous_owner != record.overture_id:
+                raise OvertureIngestError(
+                    f"duplicate {provider} provider place ID in seed input"
+                )
     if not records_by_id:
         raise OvertureIngestError("refusing to replace the POI cache with an empty extract")
 
@@ -330,10 +416,130 @@ def seed_overture_cafes(
         Cafe.lat >= min_lat,
         Cafe.lat <= max_lat,
     )
+    scoped_cafes = tuple(session.scalars(existing_query))
     existing_by_id = {
-        cafe.overture_id: cafe for cafe in session.scalars(existing_query)
+        cafe.overture_id: cafe
+        for cafe in scoped_cafes
+        if cafe.overture_id is not None
     }
+    overture_owned_by_id = {
+        cafe.overture_id: cafe
+        for cafe in scoped_cafes
+        if cafe.origin_provider == "overture" and cafe.overture_id is not None
+    }
+    provider_places = tuple(session.scalars(select(CafeProviderPlace)))
+    provider_by_key = {
+        (place.provider, place.provider_place_id): place
+        for place in provider_places
+    }
+    provider_by_cafe_provider = {
+        (place.cafe_id, place.provider): place for place in provider_places
+    }
+    provider_places_by_cafe: dict[int, list[CafeProviderPlace]] = {}
+    for place in provider_places:
+        provider_places_by_cafe.setdefault(place.cafe_id, []).append(place)
+    seen_at = datetime.now(UTC)
+
+    def sync_provider_places(
+        cafe: Cafe | None,
+        references: tuple[tuple[str, str, str | None, str], ...],
+    ) -> list[CafeProviderPlace]:
+        new_places: list[CafeProviderPlace] = []
+        for provider, provider_place_id, detail_url, match_method in references:
+            owner = provider_by_key.get((provider, provider_place_id))
+            if cafe is None:
+                if owner is not None:
+                    raise OvertureIngestError(
+                        f"{provider} provider place ID already belongs to another cafe"
+                    )
+                new_places.append(
+                    CafeProviderPlace(
+                        provider=provider,
+                        provider_place_id=provider_place_id,
+                        detail_url=detail_url,
+                        active=True,
+                        match_method=match_method,
+                        verified_at=seen_at,
+                        last_seen_at=seen_at,
+                    )
+                )
+                continue
+            if owner is not None and owner.cafe_id != cafe.id:
+                raise OvertureIngestError(
+                    f"{provider} provider place ID already belongs to another cafe"
+                )
+            current = provider_by_cafe_provider.get((cafe.id, provider))
+            if current is not None and current.provider_place_id != provider_place_id:
+                if (
+                    cafe.origin_provider == "overture"
+                    and current.match_method == "source_direct_url"
+                    and match_method == "source_direct_url"
+                ):
+                    if not dry_run:
+                        provider_by_key.pop(
+                            (current.provider, current.provider_place_id), None
+                        )
+                        current.provider_place_id = provider_place_id
+                        current.detail_url = detail_url
+                        current.active = True
+                        current.verified_at = seen_at
+                        current.last_seen_at = seen_at
+                        provider_by_key[(provider, provider_place_id)] = current
+                    continue
+                raise OvertureIngestError(
+                    f"cafe already has a different {provider} provider place ID"
+                )
+            if current is None:
+                new_places.append(
+                    CafeProviderPlace(
+                        cafe_id=cafe.id,
+                        provider=provider,
+                        provider_place_id=provider_place_id,
+                        detail_url=detail_url,
+                        active=True,
+                        match_method=match_method,
+                        verified_at=seen_at,
+                        last_seen_at=seen_at,
+                    )
+                )
+            elif (
+                match_method == "source_direct_url"
+                and current.match_method != "source_direct_url"
+            ):
+                # Same identity is already owned by provider-catalog matching.
+                # Overture website ingestion must not refresh or reactivate it.
+                continue
+            elif not dry_run:
+                current.detail_url = detail_url
+                current.active = True
+                current.last_seen_at = seen_at
+        return new_places
+
+    def deactivate_removed_source_direct(
+        cafe: Cafe,
+        references: tuple[tuple[str, str, str | None, str], ...],
+    ) -> int:
+        if cafe.origin_provider != "overture":
+            return 0
+        incoming_by_provider = {
+            provider: provider_place_id
+            for provider, provider_place_id, _, match_method in references
+            if match_method == "source_direct_url"
+        }
+        deactivated = 0
+        for place in provider_places_by_cafe.get(cafe.id, ()):
+            if (
+                place.active
+                and place.match_method == "source_direct_url"
+                and place.provider not in incoming_by_provider
+            ):
+                deactivated += 1
+                if not dry_run:
+                    place.active = False
+        return deactivated
+
     inserted_count = updated_count = unchanged_count = deactivated_count = 0
+    provider_deactivated_count = 0
     changed_field_counts: dict[str, int] = {}
     coordinate_deltas_m: list[float] = []
     confidence_abs_deltas: list[float] = []
@@ -341,11 +547,30 @@ def seed_overture_cafes(
         record = records_by_id[overture_id]
         values = _values(record, release=release)
         existing = existing_by_id.get(overture_id)
+        references = _record_provider_references(record)
         if existing is None:
             inserted_count += 1
+            new_provider_places = sync_provider_places(None, references)
             if not dry_run:
-                session.add(Cafe(overture_id=overture_id, **values))
+                session.add(
+                    Cafe(
+                        overture_id=overture_id,
+                        origin_provider="overture",
+                        origin_source_id=overture_id,
+                        provider_places=new_provider_places,
+                        **values,
+                    )
+                )
             continue
+        new_provider_places = sync_provider_places(existing, references)
+        if not dry_run:
+            session.add_all(new_provider_places)
+        if existing.origin_provider != "overture":
+            unchanged_count += 1
+            continue
+        provider_deactivated_count += deactivate_removed_source_direct(
+            existing, references
+        )
         changed_fields = tuple(
             key
             for key, value in values.items()
@@ -370,11 +595,21 @@ def seed_overture_cafes(
                 value = values[key]
                 setattr(existing, key, value)
 
-    for overture_id, existing in existing_by_id.items():
-        if overture_id not in records_by_id and existing.active:
+    for overture_id, existing in overture_owned_by_id.items():
+        if overture_id in records_by_id:
+            continue
+        if existing.active:
             deactivated_count += 1
             if not dry_run:
                 existing.active = False
+                provider_place = provider_by_cafe_provider.get(
+                    (existing.id, "overture")
+                )
+                if provider_place is not None:
+                    provider_place.active = False
+        provider_deactivated_count += deactivate_removed_source_direct(
+            existing, ()
+        )
     if not dry_run:
         session.commit()
 
@@ -384,6 +619,7 @@ def seed_overture_cafes(
         updated_count=updated_count,
         unchanged_count=unchanged_count,
         deactivated_count=deactivated_count,
+        provider_deactivated_count=provider_deactivated_count,
         active_count=len(records_by_id),
         dry_run=dry_run,
         changed_field_counts=tuple(sorted(changed_field_counts.items())),

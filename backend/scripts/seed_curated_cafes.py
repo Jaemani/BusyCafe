@@ -132,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{report.inserted_count}/{report.updated_count}/"
         f"{report.unchanged_count}/{report.deactivated_count}"
     )
+    print(f"provider links deactivated: {report.provider_deactivated_count}")
     print(_format_changed_field_counts(report))
     print(
         _format_delta_summary(

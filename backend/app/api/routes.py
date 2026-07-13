@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from math import ceil, isfinite
 from typing import Any
@@ -11,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
@@ -38,11 +39,24 @@ from app.schemas import (
 
 
 router = APIRouter(prefix="/api", tags=["map"])
+VIEWPORT_TRUNCATED_HEADER = "X-BusyCafe-Viewport-Truncated"
 SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 _DIRECT_LINK_HOSTS = {
-    "naver": {"map.naver.com", "m.map.naver.com"},
+    "naver": {"map.naver.com", "m.map.naver.com", "m.place.naver.com"},
     "kakao": {"place.map.kakao.com"},
     "google": {"www.google.com", "maps.google.com", "google.com"},
+}
+_NAVER_MAP_DETAIL_PATH = re.compile(r"^/p/entry/place/([0-9]+)/?$")
+_NAVER_MOBILE_DETAIL_PATH = re.compile(
+    r"^/(?:place|restaurant)/([0-9]+)(?:/(?:home|menu|review|photo))?/?$"
+)
+_KAKAO_DETAIL_PATH = re.compile(r"^/([0-9]+)/?$")
+_ORIGIN_PROVIDER_LABELS = {
+    "overture": "Overture Places",
+    "naver": "네이버 지도 등록 장소",
+    "kakao": "카카오맵 등록 장소",
+    "google": "Google Maps 등록 장소",
+    "seoul_refreshment_permits": "서울시 영업 인허가 원장",
 }
 _SOURCE_MANIFEST = SourceManifestResponse(
     sources=[
@@ -97,6 +111,25 @@ _SOURCE_MANIFEST = SourceManifestResponse(
                 LicenseLink(
                     name="공공누리 제1유형",
                     url="https://www.kogl.or.kr/info/licenseType1.do",
+                )
+            ],
+        ),
+        DataSourceManifestItem(
+            id="kakao-local",
+            role="place_catalog_and_identity",
+            name="카카오 로컬 API",
+            attribution="카카오 로컬 API (카페 카테고리 CE7)",
+            source_url=(
+                "https://developers.kakao.com/docs/latest/ko/local/"
+                "dev-guide#search-by-category"
+            ),
+            licenses=[
+                LicenseLink(
+                    name="Kakao API 운영정책",
+                    url=(
+                        "https://developers.kakao.com/terms/latest/ko/"
+                        "site-policies"
+                    ),
                 )
             ],
         ),
@@ -160,8 +193,12 @@ def _safe_external_links(value: object) -> ExternalLinksResponse:
         parsed = urlparse(candidate)
         query = parse_qs(parsed.query)
         is_detail = {
-            "naver": "/place/" in parsed.path,
-            "kakao": parsed.path.strip("/").isdigit(),
+            "naver": (
+                bool(_NAVER_MAP_DETAIL_PATH.fullmatch(parsed.path))
+                if parsed.hostname in {"map.naver.com", "m.map.naver.com"}
+                else bool(_NAVER_MOBILE_DETAIL_PATH.fullmatch(parsed.path))
+            ),
+            "kakao": bool(_KAKAO_DETAIL_PATH.fullmatch(parsed.path)),
             "google": (
                 "/maps/place/" in parsed.path
                 or "query_place_id" in query
@@ -176,6 +213,54 @@ def _safe_external_links(value: object) -> ExternalLinksResponse:
     return ExternalLinksResponse(**links)
 
 
+def _cafe_external_links(cafe: Cafe) -> ExternalLinksResponse:
+    """Prefer active normalized provider rows; retain JSON during rollout."""
+
+    fallback = _safe_external_links(cafe.external_links_json)
+    resolved = fallback.model_dump()
+    for place in cafe.provider_places:
+        if place.provider not in _DIRECT_LINK_HOSTS:
+            continue
+        # A normalized identity is authoritative for its provider. Inactive or
+        # invalid rows must suppress stale rollout JSON instead of reviving it.
+        resolved[place.provider] = None
+        if not place.active:
+            continue
+        validated = _safe_external_links({place.provider: place.detail_url})
+        candidate = getattr(validated, place.provider)
+        if (
+            candidate is not None
+            and _provider_place_id_from_detail_url(place.provider, candidate)
+            == place.provider_place_id
+        ):
+            resolved[place.provider] = candidate
+    return ExternalLinksResponse(**resolved)
+
+
+def _provider_place_id_from_detail_url(
+    provider: str, candidate: str
+) -> str | None:
+    """Extract an exact identity from an already allow-listed detail URL."""
+
+    parsed = urlparse(candidate)
+    if provider == "naver":
+        matched = (
+            _NAVER_MAP_DETAIL_PATH.fullmatch(parsed.path)
+            if parsed.hostname in {"map.naver.com", "m.map.naver.com"}
+            else _NAVER_MOBILE_DETAIL_PATH.fullmatch(parsed.path)
+        )
+        return matched.group(1) if matched else None
+    if provider == "kakao":
+        matched = _KAKAO_DETAIL_PATH.fullmatch(parsed.path)
+        return matched.group(1) if matched else None
+    if provider == "google":
+        query = parse_qs(parsed.query)
+        place_ids = query.get("query_place_id") or query.get("cid")
+        if place_ids and len(place_ids) == 1 and place_ids[0].strip():
+            return place_ids[0].strip()
+    return None
+
+
 def _safe_website(value: str | None) -> str | None:
     if not value:
         return None
@@ -188,8 +273,11 @@ def _cafe_source_label(cafe: Cafe) -> str:
         isinstance(source, dict) and source.get("dataset_id") == "OA-16095"
         for source in cafe.source_json
     )
+    origin_label = _ORIGIN_PROVIDER_LABELS.get(
+        cafe.origin_provider, cafe.origin_provider
+    )
     label = (
-        f"Overture Places · {cafe.source_release} · "
+        f"{origin_label} · {cafe.source_release} · "
         f"장소 원장 품질 {cafe.source_confidence:.2f}"
     )
     if permit_verified:
@@ -283,7 +371,7 @@ def _cafe_response(
                 else None
             ),
         ),
-        external_links=_safe_external_links(cafe.external_links_json),
+        external_links=_cafe_external_links(cafe),
     )
 
 
@@ -312,6 +400,7 @@ def list_cafes(
     )
     statement = (
         select(Cafe, CafeScore, Hotspot, latest_observed_at)
+        .options(selectinload(Cafe.provider_places))
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
         .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
         .where(
@@ -320,12 +409,16 @@ def list_cafes(
             Cafe.lat.between(min_lat, max_lat),
         )
         .order_by(Cafe.id)
-        .limit(MAX_CAFES_PER_VIEWPORT)
+        .limit(MAX_CAFES_PER_VIEWPORT + 1)
     )
     if min_conf > 0:
         statement = statement.where(CafeScore.confidence >= min_conf)
     rows = db.execute(statement).all()
     _set_cache_headers(response)
+    truncated = len(rows) > MAX_CAFES_PER_VIEWPORT
+    response.headers[VIEWPORT_TRUNCATED_HEADER] = str(truncated).lower()
+    if truncated:
+        return []
     request_time = datetime.now(UTC)
     items = [
         _cafe_response(cafe, score, hotspot, observed_at, now=request_time)
@@ -353,6 +446,7 @@ def get_cafe(
     )
     row = db.execute(
         select(Cafe, CafeScore, Hotspot, latest_observed_at)
+        .options(selectinload(Cafe.provider_places))
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
         .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
         .where(Cafe.id == cafe_id, Cafe.active.is_(True))

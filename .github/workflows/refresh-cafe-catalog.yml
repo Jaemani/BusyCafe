@@ -27,18 +27,23 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+      KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
       CATALOG_DATA_DIR: data/catalog-refresh
       OVERTURE_CACHE: data/catalog-refresh/overture-seoul-cafes-min050.parquet
       PERMIT_CACHE: data/catalog-refresh/seoul-refreshment-candidates.jsonl
       PERMIT_MANIFEST: data/catalog-refresh/seoul-refreshment-candidates.manifest.json
       CURATED_CACHE: data/catalog-refresh/curated-seoul-cafes.jsonl
       CURATED_MANIFEST: data/catalog-refresh/curated-seoul-cafes.manifest.json
+      KAKAO_CACHE: data/catalog-refresh/kakao-ce7-seoul.jsonl
+      KAKAO_MANIFEST: data/catalog-refresh/kakao-ce7-seoul.jsonl.manifest.json
+      PROVIDER_CACHE: data/catalog-refresh/provider-seoul-cafes.jsonl
+      PROVIDER_MANIFEST: data/catalog-refresh/provider-seoul-cafes.manifest.json
     steps:
       - name: Check production secrets
         working-directory: .
         run: |
-          if [ -z "${DATABASE_URL:-}" ] || [ -z "${SEOUL_API_KEY:-}" ]; then
-            echo "Production DATABASE_URL and SEOUL_API_KEY are required." >&2
+          if [ -z "${DATABASE_URL:-}" ] || [ -z "${SEOUL_API_KEY:-}" ] || [ -z "${KAKAO_REST_KEY:-}" ]; then
+            echo "Production DATABASE_URL, SEOUL_API_KEY, and KAKAO_REST_KEY are required." >&2
             exit 1
           fi
           case "$DATABASE_URL" in
@@ -87,6 +92,26 @@ jobs:
           --output "$CURATED_CACHE"
           --manifest "$CURATED_MANIFEST"
 
+      - name: Sweep Kakao CE7 cafe catalog
+        run: >-
+          uv run python scripts/cache_kakao_cafes.py
+          --output "$KAKAO_CACHE"
+          --apply
+
+      - name: Build provider cafe catalog
+        run: >-
+          uv run python scripts/build_provider_cafe_catalog.py
+          --curated-cache "$CURATED_CACHE"
+          --permit-cache "$PERMIT_CACHE"
+          --kakao-cache "$KAKAO_CACHE"
+          --kakao-manifest "$KAKAO_MANIFEST"
+          --output "$PROVIDER_CACHE"
+          --manifest "$PROVIDER_MANIFEST"
+
+      - if: ${{ inputs.apply == true }}
+        name: Upgrade production database schema
+        run: uv run alembic -c alembic.ini upgrade head
+
       - name: Verify production database schema
         run: uv run alembic -c alembic.ini current --check-heads
 
@@ -95,11 +120,23 @@ jobs:
           uv run python scripts/seed_curated_cafes.py
           --cache "$CURATED_CACHE"
 
+      - name: Dry-run provider cafe seed
+        run: >-
+          uv run python scripts/seed_provider_cafes.py
+          --cache "$PROVIDER_CACHE"
+
       - if: ${{ inputs.apply == true }}
         name: Apply curated cafe seed
         run: >-
           uv run python scripts/seed_curated_cafes.py
           --cache "$CURATED_CACHE"
+          --apply
+
+      - if: ${{ inputs.apply == true }}
+        name: Apply provider cafe seed
+        run: >-
+          uv run python scripts/seed_provider_cafes.py
+          --cache "$PROVIDER_CACHE"
           --apply
 
       - if: ${{ inputs.apply == true }}
@@ -114,5 +151,7 @@ jobs:
           path: |
             backend/${{ env.PERMIT_MANIFEST }}
             backend/${{ env.CURATED_MANIFEST }}
+            backend/${{ env.KAKAO_MANIFEST }}
+            backend/${{ env.PROVIDER_MANIFEST }}
           if-no-files-found: warn
           retention-days: 30

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from math import inf, nextafter
 from pathlib import Path
 
@@ -12,13 +13,14 @@ from app.ingest.overture_places import (
     OvertureCafeRecord,
     OvertureIngestError,
     build_confidence_report,
+    direct_website_provider_reference,
     format_confidence_report,
     overture_seed_value_equal,
     parse_overture_row,
     seed_overture_cafes,
     summarize_numeric_deltas,
 )
-from app.models import Base, Cafe
+from app.models import Base, Cafe, CafeProviderPlace
 
 
 def record(identifier: str = "overture:test-1", **overrides: object) -> OvertureCafeRecord:
@@ -66,6 +68,47 @@ def test_parse_overture_row_preserves_source_and_normalizes_optional_text() -> N
     assert parsed.name == "카페"
     assert parsed.road_address is None
     assert parsed.sources == [{"dataset": "meta"}]
+
+
+@pytest.mark.parametrize(
+    ("website", "expected"),
+    [
+        (
+            "https://map.naver.com/p/entry/place/37237287?placePath=%2Fmenu",
+            (
+                "naver",
+                "37237287",
+                "https://map.naver.com/p/entry/place/37237287",
+            ),
+        ),
+        (
+            "https://m.place.naver.com/restaurant/1412635525/home?entry=pll",
+            (
+                "naver",
+                "1412635525",
+                "https://m.place.naver.com/restaurant/1412635525",
+            ),
+        ),
+        (
+            "http://place.map.kakao.com/24725284",
+            (
+                "kakao",
+                "24725284",
+                "https://place.map.kakao.com/24725284",
+            ),
+        ),
+        (
+            "https://map.naver.com/p/search/cafe/place/1847575540",
+            None,
+        ),
+        ("https://naver.me/GGUnSHuz", None),
+        ("https://place.map.kakao.com/not-numeric", None),
+    ],
+)
+def test_direct_website_provider_reference_is_strict(
+    website: str, expected: tuple[str, str, str] | None
+) -> None:
+    assert direct_website_provider_reference(website) == expected
 
 
 @pytest.mark.parametrize(
@@ -124,6 +167,250 @@ def test_seed_is_idempotent_and_deactivates_missing_records(engine) -> None:
         assert session.scalar(select(func.count()).select_from(Cafe)) == 2
         assert session.scalar(select(Cafe).where(Cafe.overture_id == "overture:1")).name == "바뀐 이름"
         assert session.scalar(select(Cafe).where(Cafe.overture_id == "overture:2")).active is False
+
+
+def test_seed_materializes_overture_and_direct_website_provider_refs(engine) -> None:
+    with Session(engine) as session:
+        report = seed_overture_cafes(
+            session,
+            [
+                record(
+                    "overture:1",
+                    website=(
+                        "https://m.place.naver.com/place/123456/home?entry=pll"
+                    ),
+                )
+            ],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+
+        assert report.inserted_count == 1
+        cafe_row = session.scalar(
+            select(Cafe).where(Cafe.overture_id == "overture:1")
+        )
+        assert cafe_row is not None
+        assert cafe_row.origin_provider == "overture"
+        assert cafe_row.origin_source_id == "overture:1"
+        refs = session.scalars(
+            select(CafeProviderPlace)
+            .where(CafeProviderPlace.cafe_id == cafe_row.id)
+            .order_by(CafeProviderPlace.provider)
+        ).all()
+        assert [(ref.provider, ref.provider_place_id) for ref in refs] == [
+            ("naver", "123456"),
+            ("overture", "overture:1"),
+        ]
+        assert refs[0].detail_url == "https://m.place.naver.com/place/123456"
+
+
+def test_seed_retires_removed_source_direct_ref_dry_run_then_apply(engine) -> None:
+    direct = "https://m.place.naver.com/place/123456/home"
+    without_direct = record("overture:1", website="https://example.test")
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [record("overture:1", website=direct)],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        provider = session.scalar(
+            select(CafeProviderPlace).where(CafeProviderPlace.provider == "naver")
+        )
+        assert provider is not None
+
+        dry = seed_overture_cafes(
+            session,
+            [without_direct],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+            dry_run=True,
+        )
+        assert dry.provider_deactivated_count == 1
+        assert provider.active is True
+
+        applied = seed_overture_cafes(
+            session,
+            [without_direct],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        assert applied.provider_deactivated_count == 1
+        assert provider.active is False
+
+        repeated = seed_overture_cafes(
+            session,
+            [without_direct],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        assert repeated.provider_deactivated_count == 0
+
+
+def test_overture_seed_does_not_retire_provider_catalog_ref(engine) -> None:
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [record("overture:1", website="https://example.test")],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        cafe = session.scalar(
+            select(Cafe).where(Cafe.overture_id == "overture:1")
+        )
+        assert cafe is not None
+        provider = CafeProviderPlace(
+            cafe_id=cafe.id,
+            provider="kakao",
+            provider_place_id="100",
+            detail_url="https://place.map.kakao.com/100",
+            active=True,
+            match_method="exact_name",
+            match_distance_m=3.0,
+            verified_at=datetime(2026, 7, 13, tzinfo=UTC),
+            last_seen_at=datetime(2026, 7, 13, tzinfo=UTC),
+        )
+        session.add(provider)
+        session.commit()
+
+        report = seed_overture_cafes(
+            session,
+            [record("overture:1", website="https://example.test")],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+
+        assert report.provider_deactivated_count == 0
+        assert provider.active is True
+
+
+def test_overture_seed_replaces_changed_source_direct_identity(engine) -> None:
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [
+                record(
+                    "overture:1",
+                    website="https://m.place.naver.com/place/123/home",
+                )
+            ],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        changed = record(
+            "overture:1",
+            website="https://m.place.naver.com/place/456/home",
+        )
+
+        dry = seed_overture_cafes(
+            session,
+            [changed],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+            dry_run=True,
+        )
+        assert dry.provider_deactivated_count == 0
+
+        applied = seed_overture_cafes(
+            session,
+            [changed],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        provider = session.scalar(
+            select(CafeProviderPlace).where(CafeProviderPlace.provider == "naver")
+        )
+        assert applied.provider_deactivated_count == 0
+        assert provider is not None
+        assert provider.provider_place_id == "456"
+        assert provider.detail_url == "https://m.place.naver.com/place/456"
+
+
+def test_missing_overture_cafe_retires_direct_but_keeps_catalog_ref(engine) -> None:
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [
+                record(
+                    "overture:removed",
+                    website="https://m.place.naver.com/place/123/home",
+                ),
+                record("overture:kept"),
+            ],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        removed = session.scalar(
+            select(Cafe).where(Cafe.overture_id == "overture:removed")
+        )
+        assert removed is not None
+        catalog_ref = CafeProviderPlace(
+            cafe_id=removed.id,
+            provider="kakao",
+            provider_place_id="100",
+            detail_url="https://place.map.kakao.com/100",
+            active=True,
+            match_method="exact_phone",
+            match_distance_m=2.0,
+            verified_at=datetime(2026, 7, 13, tzinfo=UTC),
+            last_seen_at=datetime(2026, 7, 13, tzinfo=UTC),
+        )
+        session.add(catalog_ref)
+        session.commit()
+
+        report = seed_overture_cafes(
+            session,
+            [record("overture:kept")],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        direct_ref = session.scalar(
+            select(CafeProviderPlace).where(
+                CafeProviderPlace.cafe_id == removed.id,
+                CafeProviderPlace.provider == "naver",
+            )
+        )
+
+        assert report.deactivated_count == 1
+        assert report.provider_deactivated_count == 1
+        assert removed.active is False
+        assert direct_ref is not None and direct_ref.active is False
+        assert catalog_ref.active is True
+
+
+def test_seed_never_deactivates_non_overture_owned_cafes(engine) -> None:
+    with Session(engine) as session:
+        permit_cafe = Cafe(
+            overture_id=None,
+            origin_provider="seoul_refreshment_permits",
+            origin_source_id="permit:1",
+            source_release="OA-16095",
+            source_confidence=1.0,
+            primary_category="coffee_shop",
+            name="인허가 카페",
+            lat=37.551,
+            lng=126.981,
+            active=True,
+        )
+        session.add(permit_cafe)
+        session.commit()
+
+        seed_overture_cafes(
+            session,
+            [record("overture:1")],
+            release="2026-06-17.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+        report = seed_overture_cafes(
+            session,
+            [record("overture:2")],
+            release="2026-07-01.0",
+            scope_bbox=SEOUL_BBOX,
+        )
+
+        session.refresh(permit_cafe)
+        assert permit_cafe.active is True
+        assert report.deactivated_count == 1
 
 
 def test_dry_run_has_no_database_effect_and_duplicate_ids_fail(engine) -> None:

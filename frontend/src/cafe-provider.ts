@@ -79,6 +79,9 @@ interface CafeApiItem {
   } | null;
 }
 
+const VIEWPORT_TRUNCATED_HEADER = "X-BusyCafe-Viewport-Truncated";
+const MAX_VIEWPORT_SPLIT_DEPTH = 6;
+
 export class CachedApiCafeProvider implements CafeProvider {
   constructor(private readonly apiBaseUrl = "") {}
 
@@ -86,6 +89,20 @@ export class CachedApiCafeProvider implements CafeProvider {
     viewport: CafeViewport,
     signal: AbortSignal,
   ): Promise<CafeFeatureCollection> {
+    const featureGroups = await this.getViewportFeatures(viewport, signal, 0);
+    const deduplicated = new Map<string, CafeFeature>();
+    for (const feature of featureGroups.flat()) {
+      deduplicated.set(feature.properties.id, feature);
+    }
+    return { type: "FeatureCollection", features: [...deduplicated.values()] };
+  }
+
+  private async getViewportFeatures(
+    viewport: CafeViewport,
+    signal: AbortSignal,
+    depth: number,
+  ): Promise<CafeFeature[][]> {
+    signal.throwIfAborted();
     const bbox = [viewport.minLng, viewport.minLat, viewport.maxLng, viewport.maxLat].join(",");
     const url = new URL("/api/cafes", this.apiBaseUrl || window.location.origin);
     url.searchParams.set("bbox", bbox);
@@ -97,6 +114,29 @@ export class CachedApiCafeProvider implements CafeProvider {
     }
     const items = (await response.json()) as CafeApiItem[];
     if (!Array.isArray(items)) throw new Error("카페 데이터 응답 형식이 올바르지 않습니다");
+    const truncatedHeader = response.headers.get(VIEWPORT_TRUNCATED_HEADER);
+    if (truncatedHeader !== "true" && truncatedHeader !== "false") {
+      throw new Error("카페 데이터 완전성 상태를 확인할 수 없습니다");
+    }
+    if (truncatedHeader === "true") {
+      if (depth >= MAX_VIEWPORT_SPLIT_DEPTH) {
+        throw new Error("표시 영역에 카페가 너무 많아 전체 목록을 불러오지 못했습니다");
+      }
+      signal.throwIfAborted();
+      const midLng = (viewport.minLng + viewport.maxLng) / 2;
+      const midLat = (viewport.minLat + viewport.maxLat) / 2;
+      const quarters: CafeViewport[] = [
+        { ...viewport, maxLng: midLng, maxLat: midLat },
+        { ...viewport, minLng: midLng, maxLat: midLat },
+        { ...viewport, maxLng: midLng, minLat: midLat },
+        { ...viewport, minLng: midLng, minLat: midLat },
+      ];
+      const nested = await Promise.all(
+        quarters.map((quarter) => this.getViewportFeatures(quarter, signal, depth + 1)),
+      );
+      return nested.flat();
+    }
+
     const observationAgeMeasuredAtMs = Date.now();
 
     const features = items.flatMap((item): CafeFeature[] => {
@@ -144,6 +184,6 @@ export class CachedApiCafeProvider implements CafeProvider {
       }];
     });
 
-    return { type: "FeatureCollection", features };
+    return [features];
   }
 }

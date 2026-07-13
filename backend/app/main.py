@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 
-from app.api.routes import router
+from app.api.routes import VIEWPORT_TRUNCATED_HEADER, router
 from app.config import FRONTEND_CORS_ORIGINS, TAILNET_CORS_ORIGIN_REGEX
 
 
@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
         allow_credentials=False,
         allow_methods=["GET"],
         allow_headers=["*"],
+        expose_headers=[VIEWPORT_TRUNCATED_HEADER],
     )
     app.include_router(router)
     return app

@@ -113,7 +113,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"source/active: {report.source_count}/{report.active_count}\n"
             f"inserted/updated/unchanged/deactivated: "
             f"{report.inserted_count}/{report.updated_count}/"
-            f"{report.unchanged_count}/{report.deactivated_count}"
+            f"{report.unchanged_count}/{report.deactivated_count}\n"
+            f"provider links deactivated: "
+            f"{report.provider_deactivated_count}"
         )
     finally:
         engine.dispose()

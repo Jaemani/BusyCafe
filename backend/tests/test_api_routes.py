@@ -17,7 +17,15 @@ from app.config import (
 )
 from app.database import get_db
 from app.main import create_app
-from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
+from app.models import (
+    Base,
+    Cafe,
+    CafeProviderPlace,
+    CafeScore,
+    Hotspot,
+    HotspotSnapshot,
+    IngestCycle,
+)
 
 
 @pytest.fixture
@@ -149,6 +157,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
 
     assert response.status_code == 200
     assert "max-age=30" in response.headers["cache-control"]
+    assert response.headers["x-busycafe-viewport-truncated"] == "false"
     payload = response.json()
     assert [item["name"] for item in payload] == ["정확한 카페"]
     assert payload[0]["coverage"] == "covered"
@@ -162,6 +171,49 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert payload[0]["phone"] == "02-123-4567"
     assert payload[0]["website"] == "https://example.test"
     assert payload[0]["external_links"]["kakao"].endswith("/456")
+
+
+def test_bbox_api_fails_closed_and_signals_when_viewport_exceeds_cap(
+    api_client, monkeypatch
+) -> None:
+    from app.api import routes
+
+    monkeypatch.setattr(routes, "MAX_CAFES_PER_VIEWPORT", 1)
+
+    exact_cap = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    )
+    assert len(exact_cap.json()) == 1
+    assert exact_cap.headers["x-busycafe-viewport-truncated"] == "false"
+
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add(
+            Cafe(
+                overture_id="overture:test-over-cap",
+                source_release="2026-06-17.0",
+                source_confidence=0.9,
+                primary_category="cafe",
+                name="두 번째 카페",
+                lat=37.553,
+                lng=126.983,
+            )
+        )
+        session.commit()
+
+    truncated = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+        headers={"Origin": "http://localhost:5188"},
+    )
+    assert truncated.status_code == 200
+    assert truncated.json() == []
+    assert truncated.headers["x-busycafe-viewport-truncated"] == "true"
+    assert (
+        truncated.headers["access-control-expose-headers"]
+        == "X-BusyCafe-Viewport-Truncated"
+    )
 
 
 def test_detail_api_returns_scoring_model_version(api_client) -> None:
@@ -340,6 +392,148 @@ def test_search_or_untrusted_external_links_are_not_exposed(api_client) -> None:
     assert links.google is None
 
 
+def test_provider_table_links_override_json_and_mobile_naver_is_direct(
+    api_client,
+) -> None:
+    now = datetime.now(UTC)
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        session.add(
+            CafeProviderPlace(
+                cafe_id=cafe.id,
+                provider="naver",
+                provider_place_id="999",
+                detail_url="https://m.place.naver.com/restaurant/999/home?entry=pll",
+                match_method="source_direct_url",
+                verified_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
+    ).json()[0]
+
+    assert item["external_links"]["naver"].startswith(
+        "https://m.place.naver.com/restaurant/999/"
+    )
+    assert item["external_links"]["kakao"].endswith("/456")
+
+
+def test_inactive_provider_row_suppresses_legacy_fallback(api_client) -> None:
+    now = datetime.now(UTC)
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        session.add(
+            CafeProviderPlace(
+                cafe_id=cafe.id,
+                provider="naver",
+                provider_place_id="123",
+                detail_url="https://map.naver.com/p/entry/place/123",
+                active=False,
+                match_method="source_direct_url",
+                verified_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
+    ).json()[0]
+
+    assert item["external_links"]["naver"] is None
+    assert item["external_links"]["kakao"].endswith("/456")
+
+
+@pytest.mark.parametrize(
+    ("provider", "provider_place_id", "detail_url"),
+    [
+        (
+            "naver",
+            "999",
+            "https://m.place.naver.com/restaurant/998/home",
+        ),
+        ("kakao", "999", "https://place.map.kakao.com/998"),
+        (
+            "google",
+            "ChIJ-provider-999",
+            (
+                "https://www.google.com/maps/search/?api=1&"
+                "query_place_id=ChIJ-provider-998"
+            ),
+        ),
+    ],
+)
+def test_provider_row_url_must_embed_matching_place_id(
+    api_client,
+    provider: str,
+    provider_place_id: str,
+    detail_url: str,
+) -> None:
+    now = datetime.now(UTC)
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        session.add(
+            CafeProviderPlace(
+                cafe_id=cafe.id,
+                provider=provider,
+                provider_place_id=provider_place_id,
+                detail_url=detail_url,
+                match_method="source_direct_url",
+                verified_at=now,
+                last_seen_at=now,
+            )
+        )
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
+    ).json()[0]
+
+    assert item["external_links"][provider] is None
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        "https://map.naver.com/p/search/cafe/place/1847575540",
+        "https://naver.me/GGUnSHuz",
+        "https://m.place.naver.com/restaurant/not-numeric",
+        "https://m.place.naver.com/restaurant/１２３",
+        "https://place.map.kakao.com/not-numeric",
+        "https://place.map.kakao.com/１２３",
+        "http://place.map.kakao.com/24725284",
+    ],
+)
+def test_noncanonical_provider_links_are_rejected(candidate: str) -> None:
+    from app.api.routes import _safe_external_links
+
+    provider = "kakao" if "kakao" in candidate else "naver"
+    links = _safe_external_links({provider: candidate})
+
+    assert getattr(links, provider) is None
+
+
+def test_source_label_uses_canonical_origin(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        cafe.origin_provider = "kakao"
+        cafe.origin_source_id = "456"
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
+    ).json()[0]
+
+    assert item["source_label"].startswith("카카오맵 등록 장소 ·")
+
+
 def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
     monkeypatch.delenv("CAFE_CROWD_SNAPSHOT", raising=False)
 
@@ -379,6 +573,7 @@ def test_sources_returns_static_license_manifest(api_client) -> None:
         "seoul-citydata",
         "seoul-refreshment-permits",
         "overture-places",
+        "kakao-local",
         "openfreemap",
     }
     assert sources["overture-places"]["release"] == OVERTURE_RELEASE
@@ -389,6 +584,15 @@ def test_sources_returns_static_license_manifest(api_client) -> None:
         }
     ]
     assert sources["seoul-refreshment-permits"]["role"] == "place_verification"
+    assert sources["kakao-local"]["role"] == "place_catalog_and_identity"
+    assert sources["kakao-local"]["licenses"] == [
+        {
+            "name": "Kakao API 운영정책",
+            "url": (
+                "https://developers.kakao.com/terms/latest/ko/site-policies"
+            ),
+        }
+    ]
     assert any(
         license_link["name"] == "OpenStreetMap ODbL"
         for license_link in sources["openfreemap"]["licenses"]
