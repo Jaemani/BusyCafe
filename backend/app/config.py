@@ -237,6 +237,11 @@ OVERTURE_S3_URI_TEMPLATE: Final = (
     "s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*"
 )
 OVERTURE_MIN_CONFIDENCE: Final = 0.80
+# Ignore storage float round-trip jitter only.  The coordinate tolerance is
+# about 0.0000001 m in Seoul; direct comparison across 4,933 cached rows found
+# a maximum round-trip coordinate delta of 0.0000000443 m.
+OVERTURE_COORDINATE_ABS_TOL_DEG: Final = 1e-12
+OVERTURE_CONFIDENCE_ABS_TOL: Final = 1e-12
 OVERTURE_CAFE_CATEGORIES: Final = (
     "cafe",
     "coffee_shop",

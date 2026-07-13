@@ -11,7 +11,7 @@ import json
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from math import floor, isfinite
+from math import floor, isclose, isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -19,10 +19,12 @@ from sqlalchemy.orm import Session
 
 from app.config import (
     OVERTURE_CAFE_CATEGORIES,
+    OVERTURE_CONFIDENCE_ABS_TOL,
     OVERTURE_CONFIDENCE_REPORT_MAX,
     OVERTURE_CONFIDENCE_REPORT_MIN,
     OVERTURE_CONFIDENCE_REPORT_STEP,
     OVERTURE_MIN_CONFIDENCE,
+    OVERTURE_COORDINATE_ABS_TOL_DEG,
     OVERTURE_S3_URI_TEMPLATE,
     SEOUL_BBOX,
 )
@@ -239,6 +241,33 @@ def _values(record: OvertureCafeRecord, *, release: str) -> dict[str, object]:
     }
 
 
+def overture_seed_value_equal(
+    field: str,
+    existing: object,
+    incoming: object,
+    *,
+    coordinate_abs_tol_deg: float = OVERTURE_COORDINATE_ABS_TOL_DEG,
+    confidence_abs_tol: float = OVERTURE_CONFIDENCE_ABS_TOL,
+) -> bool:
+    """Compare seed fields, tolerating only bounded storage float jitter."""
+
+    if field in {"lat", "lng"}:
+        return isclose(
+            float(existing),
+            float(incoming),
+            rel_tol=0.0,
+            abs_tol=coordinate_abs_tol_deg,
+        )
+    if field == "source_confidence":
+        return isclose(
+            float(existing),
+            float(incoming),
+            rel_tol=0.0,
+            abs_tol=confidence_abs_tol,
+        )
+    return existing == incoming
+
+
 def _validate_scope_bbox(
     scope_bbox: tuple[float, float, float, float],
 ) -> tuple[float, float, float, float]:
@@ -318,7 +347,9 @@ def seed_overture_cafes(
                 session.add(Cafe(overture_id=overture_id, **values))
             continue
         changed_fields = tuple(
-            key for key, value in values.items() if getattr(existing, key) != value
+            key
+            for key, value in values.items()
+            if not overture_seed_value_equal(key, getattr(existing, key), value)
         )
         if not changed_fields:
             unchanged_count += 1

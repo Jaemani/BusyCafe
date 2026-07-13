@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from math import inf, nextafter
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from app.ingest.overture_places import (
     OvertureIngestError,
     build_confidence_report,
     format_confidence_report,
+    overture_seed_value_equal,
     parse_overture_row,
     seed_overture_cafes,
     summarize_numeric_deltas,
@@ -180,6 +182,57 @@ def test_summarize_numeric_deltas_is_deterministic_and_linear() -> None:
     assert summary.p50 == 2.0
     assert summary.p95 == pytest.approx(3.8)
     assert summary.maximum == 4.0
+
+
+def test_seed_float_comparison_uses_absolute_tolerance_only_for_numeric_fields() -> None:
+    tolerance = 1e-12
+
+    assert overture_seed_value_equal(
+        "lat", 0.0, tolerance, coordinate_abs_tol_deg=tolerance
+    )
+    assert not overture_seed_value_equal(
+        "lng", 0.0, nextafter(tolerance, inf), coordinate_abs_tol_deg=tolerance
+    )
+    assert overture_seed_value_equal(
+        "source_confidence", 0.0, tolerance, confidence_abs_tol=tolerance
+    )
+    assert not overture_seed_value_equal(
+        "source_confidence",
+        0.0,
+        nextafter(tolerance, inf),
+        confidence_abs_tol=tolerance,
+    )
+    assert not overture_seed_value_equal("name", "Cafe", "cafe")
+
+
+def test_seed_ignores_float_round_trip_jitter(engine) -> None:
+    original = record("overture:1")
+    jittered = record(
+        "overture:1",
+        lat=nextafter(original.lat, inf),
+        lng=nextafter(original.lng, inf),
+        confidence=nextafter(original.confidence, inf),
+    )
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [original],
+            release="same-release",
+            scope_bbox=SEOUL_BBOX,
+        )
+        report = seed_overture_cafes(
+            session,
+            [jittered],
+            release="same-release",
+            scope_bbox=SEOUL_BBOX,
+            dry_run=True,
+        )
+
+        assert report.unchanged_count == 1
+        assert report.updated_count == 0
+        assert report.changed_field_counts == ()
+        assert report.coordinate_delta_m is None
+        assert report.confidence_abs_delta is None
 
 
 def test_seed_dry_run_summarizes_coordinate_and_confidence_deltas(engine) -> None:
