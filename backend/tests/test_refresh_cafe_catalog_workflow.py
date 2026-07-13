@@ -108,7 +108,7 @@ def test_catalog_refresh_changes_schema_only_with_explicit_apply() -> None:
 def test_catalog_refresh_uploads_only_aggregate_manifests() -> None:
     upload = _step(_workflow(), "Upload aggregate refresh manifests")
 
-    assert "actions/upload-artifact@v4" in upload
+    assert "actions/upload-artifact@v6" in upload
     assert "backend/${{ env.PERMIT_MANIFEST }}" in upload
     assert "backend/${{ env.CURATED_MANIFEST }}" in upload
     assert "backend/${{ env.KAKAO_MANIFEST }}" in upload
