@@ -362,9 +362,10 @@ export async function initializeCafeMap(
   let displayedCafeCollection = EMPTY_COLLECTION;
   let hasLoadedCafeData = false;
 
-  const refreshRuntimeHealth = (): void => {
-    void fetchRuntimeHealth()
+  const refreshRuntimeHealth = async (): Promise<void> => {
+    await fetchRuntimeHealth()
       .then((health) => {
+        cafeProvider.setCacheVersion?.(health.lastCompleteCycleAt);
         runtimeHealth = evaluateRuntimeHealth(health);
         freshnessLimits = {
           freshMaxAgeMinutes: health.staleWarnMin,
@@ -484,6 +485,8 @@ export async function initializeCafeMap(
   };
 
   map.on("movestart", () => {
+    requestController?.abort();
+    requestSequence += 1;
     hideCafePanel();
     displayedCafeCount = null;
     displayedDelayedCount = 0;
@@ -506,7 +509,9 @@ export async function initializeCafeMap(
       window.clearTimeout(timeoutId);
       addCafeLayers(map);
       bindInteractions(map, selectCafe);
-      void refresh().then(resolve, reject);
+      void refreshRuntimeHealth()
+        .then(() => refresh())
+        .then(resolve, reject);
     });
     map.on("error", () => {
       if (map.loaded()) return;
@@ -515,12 +520,9 @@ export async function initializeCafeMap(
     });
   });
 
-  refreshRuntimeHealth();
-
   const refreshInBackground = (): void => {
     if (requestController !== null) return;
-    void refresh(true);
-    refreshRuntimeHealth();
+    void refreshRuntimeHealth().then(() => refresh(true));
   };
 
   const delayTimerId = window.setInterval(() => {

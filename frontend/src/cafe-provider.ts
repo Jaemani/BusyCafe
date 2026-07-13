@@ -41,6 +41,7 @@ export interface CafeViewport {
  */
 export interface CafeProvider {
   getCafes(viewport: CafeViewport, signal: AbortSignal): Promise<CafeFeatureCollection>;
+  setCacheVersion?(version: string | null): void;
 }
 
 export class EmptyCafeProvider implements CafeProvider {
@@ -81,58 +82,217 @@ interface CafeApiItem {
 
 const VIEWPORT_TRUNCATED_HEADER = "X-BusyCafe-Viewport-Truncated";
 const MAX_VIEWPORT_SPLIT_DEPTH = 6;
+const MERCATOR_MAX_LAT = 85.05112878;
+const MIN_QUERY_TILE_ZOOM = 10;
+const MAX_QUERY_TILE_ZOOM = 15;
+const MAX_ROOT_TILE_REQUESTS = 16;
+const MAX_CONCURRENT_REQUESTS = 6;
+const TILE_CACHE_TTL_MS = 60_000;
+const MAX_CACHED_TILES = 160;
+
+interface CafeTile {
+  z: number;
+  x: number;
+  y: number;
+}
+
+interface CachedCafeTile {
+  expiresAtMs: number;
+  features: CafeFeature[];
+}
+
+interface TileRange {
+  z: number;
+  firstX: number;
+  lastX: number;
+  firstY: number;
+  lastY: number;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function longitudeToTileX(longitude: number, tileCount: number): number {
+  return ((longitude + 180) / 360) * tileCount;
+}
+
+function latitudeToTileY(latitude: number, tileCount: number): number {
+  const clampedLatitude = clamp(latitude, -MERCATOR_MAX_LAT, MERCATOR_MAX_LAT);
+  const latitudeRadians = clampedLatitude * Math.PI / 180;
+  return (
+    1 - Math.asinh(Math.tan(latitudeRadians)) / Math.PI
+  ) / 2 * tileCount;
+}
+
+function tileRangeForViewport(viewport: CafeViewport, z: number): TileRange {
+  const tileCount = 2 ** z;
+  const west = viewport.minLng;
+  let east = viewport.maxLng;
+  if (east < west) east += 360;
+  if (east - west >= 360) {
+    return {
+      z,
+      firstX: 0,
+      lastX: tileCount - 1,
+      firstY: clamp(Math.floor(latitudeToTileY(viewport.maxLat, tileCount)), 0, tileCount - 1),
+      lastY: clamp(Math.ceil(latitudeToTileY(viewport.minLat, tileCount)) - 1, 0, tileCount - 1),
+    };
+  }
+
+  return {
+    z,
+    firstX: Math.floor(longitudeToTileX(west, tileCount)),
+    lastX: Math.ceil(longitudeToTileX(east, tileCount)) - 1,
+    firstY: clamp(Math.floor(latitudeToTileY(viewport.maxLat, tileCount)), 0, tileCount - 1),
+    lastY: clamp(Math.ceil(latitudeToTileY(viewport.minLat, tileCount)) - 1, 0, tileCount - 1),
+  };
+}
+
+function tileRangeSize(range: TileRange): number {
+  return Math.max(0, range.lastX - range.firstX + 1) *
+    Math.max(0, range.lastY - range.firstY + 1);
+}
+
+function tilesForViewport(viewport: CafeViewport): CafeTile[] {
+  let z = clamp(
+    Math.floor(viewport.zoom),
+    MIN_QUERY_TILE_ZOOM,
+    MAX_QUERY_TILE_ZOOM,
+  );
+  let range = tileRangeForViewport(viewport, z);
+  while (z > MIN_QUERY_TILE_ZOOM && tileRangeSize(range) > MAX_ROOT_TILE_REQUESTS) {
+    z -= 1;
+    range = tileRangeForViewport(viewport, z);
+  }
+
+  const tileCount = 2 ** z;
+  const uniqueTiles = new Map<string, CafeTile>();
+  for (let x = range.firstX; x <= range.lastX; x += 1) {
+    const canonicalX = ((x % tileCount) + tileCount) % tileCount;
+    for (let y = range.firstY; y <= range.lastY; y += 1) {
+      const tile = { z, x: canonicalX, y };
+      uniqueTiles.set(`${z}/${canonicalX}/${y}`, tile);
+    }
+  }
+  return [...uniqueTiles.values()];
+}
+
+function tileBounds(tile: CafeTile): CafeViewport {
+  const tileCount = 2 ** tile.z;
+  const longitude = (x: number): number => x / tileCount * 360 - 180;
+  const latitude = (y: number): number => {
+    const mercatorY = Math.PI * (1 - 2 * y / tileCount);
+    return Math.atan(Math.sinh(mercatorY)) * 180 / Math.PI;
+  };
+  return {
+    minLng: longitude(tile.x),
+    minLat: latitude(tile.y + 1),
+    maxLng: longitude(tile.x + 1),
+    maxLat: latitude(tile.y),
+    zoom: tile.z,
+  };
+}
+
+function tileChildren(tile: CafeTile): CafeTile[] {
+  const z = tile.z + 1;
+  const x = tile.x * 2;
+  const y = tile.y * 2;
+  return [
+    { z, x, y },
+    { z, x: x + 1, y },
+    { z, x, y: y + 1 },
+    { z, x: x + 1, y: y + 1 },
+  ];
+}
+
+function featureIsInsideViewport(feature: CafeFeature, viewport: CafeViewport): boolean {
+  const [longitude, latitude] = feature.geometry.coordinates;
+  const insideLongitude = viewport.maxLng >= viewport.minLng
+    ? longitude >= viewport.minLng && longitude <= viewport.maxLng
+    : longitude >= viewport.minLng || longitude <= viewport.maxLng;
+  return insideLongitude && latitude >= viewport.minLat && latitude <= viewport.maxLat;
+}
 
 export class CachedApiCafeProvider implements CafeProvider {
+  private readonly tileCache = new Map<string, CachedCafeTile>();
+  private readonly splitTiles = new Set<string>();
+  private activeRequestCount = 0;
+  private readonly requestWaiters: Array<() => void> = [];
+  private cacheVersion: string | null = null;
+
   constructor(private readonly apiBaseUrl = "") {}
+
+  setCacheVersion(version: string | null): void {
+    this.cacheVersion = version;
+  }
 
   async getCafes(
     viewport: CafeViewport,
     signal: AbortSignal,
   ): Promise<CafeFeatureCollection> {
-    const featureGroups = await this.getViewportFeatures(viewport, signal, 0);
+    signal.throwIfAborted();
+    const featureGroups = await Promise.all(
+      tilesForViewport(viewport).map((tile) => this.getTileFeatures(tile, signal, 0)),
+    );
     const deduplicated = new Map<string, CafeFeature>();
-    for (const feature of featureGroups.flat()) {
+    for (const feature of featureGroups.flat().filter(
+      (candidate) => featureIsInsideViewport(candidate, viewport),
+    )) {
       deduplicated.set(feature.properties.id, feature);
     }
     return { type: "FeatureCollection", features: [...deduplicated.values()] };
   }
 
-  private async getViewportFeatures(
-    viewport: CafeViewport,
+  private async getTileFeatures(
+    tile: CafeTile,
     signal: AbortSignal,
     depth: number,
-  ): Promise<CafeFeature[][]> {
+  ): Promise<CafeFeature[]> {
     signal.throwIfAborted();
+    const tileKey = `${tile.z}/${tile.x}/${tile.y}`;
+    const cacheKey = `${this.cacheVersion ?? "unknown"}:${tileKey}`;
+    const cached = this.readCachedTile(cacheKey);
+    if (cached !== null) return cached;
+
+    if (this.splitTiles.has(tileKey)) {
+      const childGroups = await Promise.all(
+        tileChildren(tile).map((child) => this.getTileFeatures(child, signal, depth + 1)),
+      );
+      return childGroups.flat();
+    }
+
+    const viewport = tileBounds(tile);
     const bbox = [viewport.minLng, viewport.minLat, viewport.maxLng, viewport.maxLat].join(",");
     const url = new URL("/api/cafes", this.apiBaseUrl || window.location.origin);
     url.searchParams.set("bbox", bbox);
     url.searchParams.set("min_conf", "0");
+    if (this.cacheVersion !== null) url.searchParams.set("cycle", this.cacheVersion);
 
-    const response = await fetch(url, { signal });
-    if (!response.ok) {
-      throw new Error("검증된 카페 데이터 서버에 연결할 수 없습니다");
-    }
-    const items = (await response.json()) as CafeApiItem[];
-    if (!Array.isArray(items)) throw new Error("카페 데이터 응답 형식이 올바르지 않습니다");
-    const truncatedHeader = response.headers.get(VIEWPORT_TRUNCATED_HEADER);
-    if (truncatedHeader !== "true" && truncatedHeader !== "false") {
-      throw new Error("카페 데이터 완전성 상태를 확인할 수 없습니다");
-    }
-    if (truncatedHeader === "true") {
+    const { items, truncated } = await this.withRequestSlot(signal, async () => {
+      const response = await fetch(url, { signal, cache: "default" });
+      if (!response.ok) {
+        throw new Error("검증된 카페 데이터 서버에 연결할 수 없습니다");
+      }
+      const responseItems = (await response.json()) as CafeApiItem[];
+      if (!Array.isArray(responseItems)) {
+        throw new Error("카페 데이터 응답 형식이 올바르지 않습니다");
+      }
+      const truncatedHeader = response.headers.get(VIEWPORT_TRUNCATED_HEADER);
+      if (truncatedHeader !== "true" && truncatedHeader !== "false") {
+        throw new Error("카페 데이터 완전성 상태를 확인할 수 없습니다");
+      }
+      return { items: responseItems, truncated: truncatedHeader === "true" };
+    });
+
+    if (truncated) {
       if (depth >= MAX_VIEWPORT_SPLIT_DEPTH) {
         throw new Error("표시 영역에 카페가 너무 많아 전체 목록을 불러오지 못했습니다");
       }
       signal.throwIfAborted();
-      const midLng = (viewport.minLng + viewport.maxLng) / 2;
-      const midLat = (viewport.minLat + viewport.maxLat) / 2;
-      const quarters: CafeViewport[] = [
-        { ...viewport, maxLng: midLng, maxLat: midLat },
-        { ...viewport, minLng: midLng, maxLat: midLat },
-        { ...viewport, maxLng: midLng, minLat: midLat },
-        { ...viewport, minLng: midLng, minLat: midLat },
-      ];
+      this.splitTiles.add(tileKey);
       const nested = await Promise.all(
-        quarters.map((quarter) => this.getViewportFeatures(quarter, signal, depth + 1)),
+        tileChildren(tile).map((child) => this.getTileFeatures(child, signal, depth + 1)),
       );
       return nested.flat();
     }
@@ -184,6 +344,74 @@ export class CachedApiCafeProvider implements CafeProvider {
       }];
     });
 
-    return [features];
+    this.cacheTile(cacheKey, features);
+    return features;
+  }
+
+  private readCachedTile(cacheKey: string): CafeFeature[] | null {
+    const cached = this.tileCache.get(cacheKey);
+    if (!cached) return null;
+    if (cached.expiresAtMs <= Date.now()) {
+      this.tileCache.delete(cacheKey);
+      return null;
+    }
+    this.tileCache.delete(cacheKey);
+    this.tileCache.set(cacheKey, cached);
+    return cached.features;
+  }
+
+  private cacheTile(cacheKey: string, features: CafeFeature[]): void {
+    this.tileCache.delete(cacheKey);
+    this.tileCache.set(cacheKey, {
+      expiresAtMs: Date.now() + TILE_CACHE_TTL_MS,
+      features,
+    });
+    while (this.tileCache.size > MAX_CACHED_TILES) {
+      const oldestKey = this.tileCache.keys().next().value as string | undefined;
+      if (oldestKey === undefined) break;
+      this.tileCache.delete(oldestKey);
+    }
+  }
+
+  private async withRequestSlot<T>(
+    signal: AbortSignal,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    await this.acquireRequestSlot(signal);
+    try {
+      signal.throwIfAborted();
+      return await operation();
+    } finally {
+      this.activeRequestCount -= 1;
+      this.requestWaiters.shift()?.();
+    }
+  }
+
+  private acquireRequestSlot(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.activeRequestCount < MAX_CONCURRENT_REQUESTS) {
+      this.activeRequestCount += 1;
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const start = (): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", abort);
+        this.activeRequestCount += 1;
+        resolve();
+      };
+      const abort = (): void => {
+        if (settled) return;
+        settled = true;
+        const waiterIndex = this.requestWaiters.indexOf(start);
+        if (waiterIndex >= 0) this.requestWaiters.splice(waiterIndex, 1);
+        reject(signal.reason);
+      };
+      this.requestWaiters.push(start);
+      signal.addEventListener("abort", abort, { once: true });
+    });
   }
 }
