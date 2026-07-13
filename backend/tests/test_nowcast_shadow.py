@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine
@@ -204,6 +205,17 @@ def test_default_gate_blocks_small_or_short_backtest_even_when_perfect() -> None
     assert report.sample_sufficient is False
     assert report.quality_passed is True
     assert report.promotion_eligible is False
+    assert [bucket.label for bucket in report.lag_buckets] == [
+        "<=15",
+        "15-30",
+        "30-60",
+        "60-120",
+        ">120",
+    ]
+    assert [bucket.samples for bucket in report.lag_buckets] == [0, 1, 0, 0, 0]
+    thirty_minute = report.lag_buckets[1]
+    assert thirty_minute.population_mae_delta == pytest.approx(-100)
+    assert thirty_minute.level_exact_accuracy_delta == pytest.approx(1)
     assert report.promotion_blockers[:3] == (
         "insufficient_samples",
         "insufficient_hotspots",
@@ -228,6 +240,55 @@ def test_backtest_never_uses_actual_outside_target_tolerance() -> None:
     assert report.samples_evaluated == 0
     assert dict(report.skip_counts)["actual_outside_tolerance"] == 1
     assert report.promotion_eligible is False
+
+
+def test_lag_bucket_boundaries_are_inclusive_and_input_order_independent() -> None:
+    observed = datetime(2026, 7, 11, 7, 0, tzinfo=UTC)
+    snapshots: list[NowcastSnapshot] = []
+    for hotspot_id, lag_min in enumerate((15, 16, 30, 31, 60, 61, 120, 121), 1):
+        target = observed + timedelta(minutes=lag_min)
+        snapshots.extend(
+            (
+                snapshot(
+                    hotspot_id=hotspot_id,
+                    observed_at=observed,
+                    fetched_at=target,
+                    level=1,
+                    population_min=100,
+                    population_max=100,
+                    forecasts=(
+                        forecast(
+                            target.astimezone(ZoneInfo("Asia/Seoul")).strftime(
+                                "%Y-%m-%d %H:%M"
+                            ),
+                            label="보통",
+                            population_min=200,
+                            population_max=200,
+                        ),
+                    ),
+                ),
+                snapshot(
+                    hotspot_id=hotspot_id,
+                    observed_at=target,
+                    fetched_at=target + timedelta(minutes=30),
+                    level=2,
+                    population_min=200,
+                    population_max=200,
+                ),
+            )
+        )
+
+    forward = backtest_nowcasts(snapshots)
+    reverse = backtest_nowcasts(tuple(reversed(snapshots)))
+
+    assert forward.lag_buckets == reverse.lag_buckets
+    assert [bucket.samples for bucket in forward.lag_buckets] == [1, 2, 2, 2, 1]
+    for bucket in forward.lag_buckets:
+        assert bucket.nowcast_population_mae == pytest.approx(0)
+        assert bucket.baseline_population_mae == pytest.approx(100)
+        assert bucket.population_mae_delta == pytest.approx(-100)
+        assert bucket.nowcast_level_exact_accuracy == pytest.approx(1)
+        assert bucket.baseline_level_exact_accuracy == pytest.approx(0)
 
 
 def test_database_loader_bounds_append_only_history() -> None:

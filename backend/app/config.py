@@ -223,6 +223,7 @@ NOWCAST_SHADOW_MAX_HORIZON_MIN: Final = 12 * 60
 NOWCAST_SHADOW_MAX_INTERPOLATION_GAP_MIN: Final = 90
 NOWCAST_SHADOW_NEAREST_TOLERANCE_MIN: Final = 20
 NOWCAST_SHADOW_ACTUAL_TOLERANCE_MIN: Final = 10
+NOWCAST_SHADOW_LAG_BUCKET_EDGES_MIN: Final = (15.0, 30.0, 60.0, 120.0)
 # Bound production evaluation cost as append-only snapshots grow.  Fourteen
 # days preserve twice the minimum gate span while preventing an unbounded JSON
 # forecast transfer from PostgreSQL on every manual backtest.

@@ -13,13 +13,14 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from math import floor
+from math import floor, isfinite
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.config import (
     CONGESTION_LEVELS,
     NOWCAST_SHADOW_ACTUAL_TOLERANCE_MIN,
+    NOWCAST_SHADOW_LAG_BUCKET_EDGES_MIN,
     NOWCAST_SHADOW_MAX_HORIZON_MIN,
     NOWCAST_SHADOW_MAX_INTERPOLATION_GAP_MIN,
     NOWCAST_SHADOW_MAX_POPULATION_WAPE,
@@ -70,6 +71,26 @@ class NowcastEstimate:
 
 
 @dataclass(frozen=True, slots=True)
+class LagBucketDiagnostics:
+    label: str
+    lower_bound_exclusive_min: float | None
+    upper_bound_inclusive_min: float | None
+    samples: int
+    mean_lag_min: float | None
+    nowcast_population_mae: float | None
+    baseline_population_mae: float | None
+    population_mae_delta: float | None
+    nowcast_population_wape: float | None
+    baseline_population_wape: float | None
+    nowcast_level_exact_accuracy: float | None
+    baseline_level_exact_accuracy: float | None
+    level_exact_accuracy_delta: float | None
+    nowcast_level_adjacent_accuracy: float | None
+    baseline_level_adjacent_accuracy: float | None
+    level_adjacent_accuracy_delta: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class NowcastBacktestReport:
     model_version: str
     origins_total: int
@@ -78,6 +99,7 @@ class NowcastBacktestReport:
     span_days: float
     skip_counts: tuple[tuple[str, int], ...]
     mean_observation_lag_min: float | None
+    lag_buckets: tuple[LagBucketDiagnostics, ...]
     nowcast_population_mae: float | None
     baseline_population_mae: float | None
     nowcast_population_wape: float | None
@@ -91,6 +113,36 @@ class NowcastBacktestReport:
     quality_passed: bool
     promotion_eligible: bool
     promotion_blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _MetricSample:
+    hotspot_id: int
+    target_at: datetime
+    lag_min: float
+    actual_midpoint: float
+    nowcast_population_error: float
+    baseline_population_error: float
+    nowcast_population_bias: float
+    nowcast_level_exact: float
+    baseline_level_exact: float
+    nowcast_level_adjacent: float
+    baseline_level_adjacent: float
+
+
+@dataclass(frozen=True, slots=True)
+class _MetricSummary:
+    samples: int
+    mean_lag_min: float | None
+    nowcast_population_mae: float | None
+    baseline_population_mae: float | None
+    nowcast_population_wape: float | None
+    baseline_population_wape: float | None
+    nowcast_population_bias: float | None
+    nowcast_level_exact_accuracy: float | None
+    baseline_level_exact_accuracy: float | None
+    nowcast_level_adjacent_accuracy: float | None
+    baseline_level_adjacent_accuracy: float | None
 
 
 def _utc(value: datetime, *, field: str) -> datetime:
@@ -256,6 +308,123 @@ def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
+def _summarize_metrics(samples: Sequence[_MetricSample]) -> _MetricSummary:
+    actual_population = sum(item.actual_midpoint for item in samples)
+    nowcast_errors = [item.nowcast_population_error for item in samples]
+    baseline_errors = [item.baseline_population_error for item in samples]
+    return _MetricSummary(
+        samples=len(samples),
+        mean_lag_min=_mean([item.lag_min for item in samples]),
+        nowcast_population_mae=_mean(nowcast_errors),
+        baseline_population_mae=_mean(baseline_errors),
+        nowcast_population_wape=(
+            sum(nowcast_errors) / actual_population
+            if actual_population > 0
+            else None
+        ),
+        baseline_population_wape=(
+            sum(baseline_errors) / actual_population
+            if actual_population > 0
+            else None
+        ),
+        nowcast_population_bias=_mean(
+            [item.nowcast_population_bias for item in samples]
+        ),
+        nowcast_level_exact_accuracy=_mean(
+            [item.nowcast_level_exact for item in samples]
+        ),
+        baseline_level_exact_accuracy=_mean(
+            [item.baseline_level_exact for item in samples]
+        ),
+        nowcast_level_adjacent_accuracy=_mean(
+            [item.nowcast_level_adjacent for item in samples]
+        ),
+        baseline_level_adjacent_accuracy=_mean(
+            [item.baseline_level_adjacent for item in samples]
+        ),
+    )
+
+
+def _delta(challenger: float | None, baseline: float | None) -> float | None:
+    if challenger is None or baseline is None:
+        return None
+    return challenger - baseline
+
+
+def _format_lag_edge(value: float) -> str:
+    return f"{value:g}"
+
+
+def _build_lag_bucket_diagnostics(
+    samples: Sequence[_MetricSample],
+    edges_min: Sequence[float],
+) -> tuple[LagBucketDiagnostics, ...]:
+    edges = tuple(float(value) for value in edges_min)
+    if not edges or not all(isfinite(value) for value in edges) or edges[0] <= 0 or any(
+        current <= previous for previous, current in zip(edges, edges[1:])
+    ):
+        raise ValueError("lag bucket edges must be positive and strictly increasing")
+    bucket_samples: list[list[_MetricSample]] = [list() for _ in range(len(edges) + 1)]
+    for sample in samples:
+        bucket_index = next(
+            (index for index, edge in enumerate(edges) if sample.lag_min <= edge),
+            len(edges),
+        )
+        bucket_samples[bucket_index].append(sample)
+
+    diagnostics: list[LagBucketDiagnostics] = []
+    for index, items in enumerate(bucket_samples):
+        lower = edges[index - 1] if index > 0 else None
+        upper = edges[index] if index < len(edges) else None
+        if lower is None and upper is not None:
+            label = f"<={_format_lag_edge(upper)}"
+        elif upper is None and lower is not None:
+            label = f">{_format_lag_edge(lower)}"
+        else:
+            if lower is None or upper is None:  # impossible with non-empty edges
+                raise AssertionError("lag bucket bounds are inconsistent")
+            label = f"{_format_lag_edge(lower)}-{_format_lag_edge(upper)}"
+        summary = _summarize_metrics(items)
+        diagnostics.append(
+            LagBucketDiagnostics(
+                label=label,
+                lower_bound_exclusive_min=lower,
+                upper_bound_inclusive_min=upper,
+                samples=summary.samples,
+                mean_lag_min=summary.mean_lag_min,
+                nowcast_population_mae=summary.nowcast_population_mae,
+                baseline_population_mae=summary.baseline_population_mae,
+                population_mae_delta=_delta(
+                    summary.nowcast_population_mae,
+                    summary.baseline_population_mae,
+                ),
+                nowcast_population_wape=summary.nowcast_population_wape,
+                baseline_population_wape=summary.baseline_population_wape,
+                nowcast_level_exact_accuracy=(
+                    summary.nowcast_level_exact_accuracy
+                ),
+                baseline_level_exact_accuracy=(
+                    summary.baseline_level_exact_accuracy
+                ),
+                level_exact_accuracy_delta=_delta(
+                    summary.nowcast_level_exact_accuracy,
+                    summary.baseline_level_exact_accuracy,
+                ),
+                nowcast_level_adjacent_accuracy=(
+                    summary.nowcast_level_adjacent_accuracy
+                ),
+                baseline_level_adjacent_accuracy=(
+                    summary.baseline_level_adjacent_accuracy
+                ),
+                level_adjacent_accuracy_delta=_delta(
+                    summary.nowcast_level_adjacent_accuracy,
+                    summary.baseline_level_adjacent_accuracy,
+                ),
+            )
+        )
+    return tuple(diagnostics)
+
+
 def backtest_nowcasts(
     snapshots: Sequence[NowcastSnapshot],
     *,
@@ -268,6 +437,7 @@ def backtest_nowcasts(
     min_level_adjacent_accuracy: float = (
         NOWCAST_SHADOW_MIN_LEVEL_ADJACENT_ACCURACY
     ),
+    lag_bucket_edges_min: Sequence[float] = NOWCAST_SHADOW_LAG_BUCKET_EDGES_MIN,
 ) -> NowcastBacktestReport:
     """Compare historical fetch-time nowcasts with later-arriving actuals."""
 
@@ -307,17 +477,7 @@ def backtest_nowcasts(
     }
 
     skip_counts: dict[str, int] = defaultdict(int)
-    target_times: list[datetime] = []
-    evaluated_hotspots: set[int] = set()
-    lags: list[float] = []
-    nowcast_errors: list[float] = []
-    baseline_errors: list[float] = []
-    nowcast_biases: list[float] = []
-    actual_midpoints: list[float] = []
-    nowcast_exact: list[float] = []
-    baseline_exact: list[float] = []
-    nowcast_adjacent: list[float] = []
-    baseline_adjacent: list[float] = []
+    metric_samples: list[_MetricSample] = []
 
     for origin in normalized:
         if not origin.forecast_json:
@@ -367,33 +527,39 @@ def backtest_nowcasts(
         baseline_midpoint = _midpoint(origin.population_min, origin.population_max)
         nowcast_error = abs(nowcast_midpoint - actual_midpoint)
         baseline_error = abs(baseline_midpoint - actual_midpoint)
-        target_times.append(estimate.target_at)
-        evaluated_hotspots.add(origin.hotspot_id)
-        lags.append(
-            (origin.fetched_at - origin.observed_at).total_seconds() / 60.0
+        metric_samples.append(
+            _MetricSample(
+                hotspot_id=origin.hotspot_id,
+                target_at=estimate.target_at,
+                lag_min=(
+                    (origin.fetched_at - origin.observed_at).total_seconds()
+                    / 60.0
+                ),
+                actual_midpoint=actual_midpoint,
+                nowcast_population_error=nowcast_error,
+                baseline_population_error=baseline_error,
+                nowcast_population_bias=nowcast_midpoint - actual_midpoint,
+                nowcast_level_exact=float(estimate.level == actual.level),
+                baseline_level_exact=float(origin.level == actual.level),
+                nowcast_level_adjacent=float(
+                    abs(estimate.level - actual.level) <= 1
+                ),
+                baseline_level_adjacent=float(abs(origin.level - actual.level) <= 1),
+            )
         )
-        actual_midpoints.append(actual_midpoint)
-        nowcast_errors.append(nowcast_error)
-        baseline_errors.append(baseline_error)
-        nowcast_biases.append(nowcast_midpoint - actual_midpoint)
-        nowcast_exact.append(float(estimate.level == actual.level))
-        baseline_exact.append(float(origin.level == actual.level))
-        nowcast_adjacent.append(float(abs(estimate.level - actual.level) <= 1))
-        baseline_adjacent.append(float(abs(origin.level - actual.level) <= 1))
 
-    samples = len(target_times)
+    samples = len(metric_samples)
+    target_times = [item.target_at for item in metric_samples]
+    evaluated_hotspots = {item.hotspot_id for item in metric_samples}
     span_days = (
         (max(target_times) - min(target_times)).total_seconds() / 86_400.0
         if len(target_times) >= 2
         else 0.0
     )
-    denominator = sum(actual_midpoints)
-    nowcast_wape = sum(nowcast_errors) / denominator if denominator > 0 else None
-    baseline_wape = sum(baseline_errors) / denominator if denominator > 0 else None
-    nowcast_exact_accuracy = _mean(nowcast_exact)
-    baseline_exact_accuracy = _mean(baseline_exact)
-    nowcast_adjacent_accuracy = _mean(nowcast_adjacent)
-    baseline_adjacent_accuracy = _mean(baseline_adjacent)
+    summary = _summarize_metrics(metric_samples)
+    lag_buckets = _build_lag_bucket_diagnostics(
+        metric_samples, lag_bucket_edges_min
+    )
 
     blockers: list[str] = []
     if samples < min_samples:
@@ -404,30 +570,39 @@ def backtest_nowcasts(
         blockers.append("insufficient_span")
     sample_sufficient = not blockers
 
-    if nowcast_wape is None or nowcast_wape > max_population_wape:
+    if (
+        summary.nowcast_population_wape is None
+        or summary.nowcast_population_wape > max_population_wape
+    ):
         blockers.append("population_wape_failed")
-    if baseline_wape is None or nowcast_wape is None or nowcast_wape > baseline_wape:
+    if (
+        summary.baseline_population_wape is None
+        or summary.nowcast_population_wape is None
+        or summary.nowcast_population_wape > summary.baseline_population_wape
+    ):
         blockers.append("population_regressed")
     if (
-        nowcast_exact_accuracy is None
-        or nowcast_exact_accuracy < min_level_exact_accuracy
+        summary.nowcast_level_exact_accuracy is None
+        or summary.nowcast_level_exact_accuracy < min_level_exact_accuracy
     ):
         blockers.append("level_exact_failed")
     if (
-        baseline_exact_accuracy is None
-        or nowcast_exact_accuracy is None
-        or nowcast_exact_accuracy < baseline_exact_accuracy
+        summary.baseline_level_exact_accuracy is None
+        or summary.nowcast_level_exact_accuracy is None
+        or summary.nowcast_level_exact_accuracy
+        < summary.baseline_level_exact_accuracy
     ):
         blockers.append("level_exact_regressed")
     if (
-        nowcast_adjacent_accuracy is None
-        or nowcast_adjacent_accuracy < min_level_adjacent_accuracy
+        summary.nowcast_level_adjacent_accuracy is None
+        or summary.nowcast_level_adjacent_accuracy < min_level_adjacent_accuracy
     ):
         blockers.append("level_adjacent_failed")
     if (
-        baseline_adjacent_accuracy is None
-        or nowcast_adjacent_accuracy is None
-        or nowcast_adjacent_accuracy < baseline_adjacent_accuracy
+        summary.baseline_level_adjacent_accuracy is None
+        or summary.nowcast_level_adjacent_accuracy is None
+        or summary.nowcast_level_adjacent_accuracy
+        < summary.baseline_level_adjacent_accuracy
     ):
         blockers.append("level_adjacent_regressed")
     quality_passed = not any(
@@ -444,16 +619,19 @@ def backtest_nowcasts(
         hotspots_evaluated=len(evaluated_hotspots),
         span_days=span_days,
         skip_counts=tuple(sorted(skip_counts.items())),
-        mean_observation_lag_min=_mean(lags),
-        nowcast_population_mae=_mean(nowcast_errors),
-        baseline_population_mae=_mean(baseline_errors),
-        nowcast_population_wape=nowcast_wape,
-        baseline_population_wape=baseline_wape,
-        nowcast_population_bias=_mean(nowcast_biases),
-        nowcast_level_exact_accuracy=nowcast_exact_accuracy,
-        baseline_level_exact_accuracy=baseline_exact_accuracy,
-        nowcast_level_adjacent_accuracy=nowcast_adjacent_accuracy,
-        baseline_level_adjacent_accuracy=baseline_adjacent_accuracy,
+        mean_observation_lag_min=summary.mean_lag_min,
+        lag_buckets=lag_buckets,
+        nowcast_population_mae=summary.nowcast_population_mae,
+        baseline_population_mae=summary.baseline_population_mae,
+        nowcast_population_wape=summary.nowcast_population_wape,
+        baseline_population_wape=summary.baseline_population_wape,
+        nowcast_population_bias=summary.nowcast_population_bias,
+        nowcast_level_exact_accuracy=summary.nowcast_level_exact_accuracy,
+        baseline_level_exact_accuracy=summary.baseline_level_exact_accuracy,
+        nowcast_level_adjacent_accuracy=summary.nowcast_level_adjacent_accuracy,
+        baseline_level_adjacent_accuracy=(
+            summary.baseline_level_adjacent_accuracy
+        ),
         sample_sufficient=sample_sufficient,
         quality_passed=quality_passed,
         promotion_eligible=promotion_eligible,

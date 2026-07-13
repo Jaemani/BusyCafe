@@ -1,0 +1,68 @@
+name: Probe production Naver place links
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_cafes:
+        description: "Dry-run cafe count (1-100; no database writes)"
+        required: true
+        default: 20
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-naver-place-link-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Check secrets and dry-run bound
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          MAX_CAFES: ${{ inputs.max_cafes }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$NAVER_CLIENT_ID" ] || [ -z "$NAVER_CLIENT_SECRET" ]; then
+            echo "DATABASE_URL, NAVER_CLIENT_ID, and NAVER_CLIENT_SECRET are required" >&2
+            exit 1
+          fi
+          case "$MAX_CAFES" in
+            ''|*[!0-9]*)
+              echo "max_cafes must be an integer from 1 through 100" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$MAX_CAFES" -lt 1 ] || [ "$MAX_CAFES" -gt 100 ]; then
+            echo "max_cafes must be an integer from 1 through 100" >&2
+            exit 1
+          fi
+      - name: Probe official Naver local-search contract
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: uv run python scripts/probe_naver_local.py
+      - name: Dry-run bounded exact link enrichment
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          MAX_CAFES: ${{ inputs.max_cafes }}
+        run: uv run python scripts/seed_naver_place_links.py --max-cafes "$MAX_CAFES"
