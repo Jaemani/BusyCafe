@@ -1013,3 +1013,15 @@
   `saved=120, failed=1`인 partial이었다. 별도 수집 안정성 후속 조치가 필요하다
 - 판정: PASS(두 단계 표시 계약과 회귀 테스트). 이는 데이터 사용 가능성을 높이는
   표시 정책 변경일 뿐 시간대별 추정 정확도 개선이나 2시간 정확도 보장을 의미하지 않는다
+
+### Production 배포 후 확인
+
+- 배포: Vercel production과 정확한 `busy-cafe.vercel.app` alias에 반영
+- 수집 canary: GitHub Actions run `29221794487`, 총 37.898초,
+  `saved=121, failed=0`
+- 수집 시각: 원본 `PPLTN_TIME=2026-07-13T03:00Z`, 최신 fetch 약 `03:30Z`로
+  약 30분 지연
+- 동일 viewport 결과: 카페 522곳 모두 `freshness=delayed`; level 1은 455곳,
+  level 2는 67곳이며 confidence와 confidence tier는 전부 `NULL`
+- health: `current_display_max_age_min=120`, 최신 cycle `complete`, 121/121 저장 확인
+- 판정: production에서 delayed 표시 계약 PASS. 원본의 시간대별 정확도는 별도 미검증
