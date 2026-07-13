@@ -47,6 +47,7 @@ def dispatch_command(workflow: str) -> str:
   headers := jsonb_build_object(
     'Authorization', 'Bearer ' || secret.value,
     'Accept', 'application/vnd.github+json',
+    'Content-Type', 'application/json',
     'X-GitHub-Api-Version', '2022-11-28',
     'User-Agent', 'BusyCafe-Supabase-Scheduler'
   ),

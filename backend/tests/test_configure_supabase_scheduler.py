@@ -15,6 +15,7 @@ def test_dispatch_commands_use_vault_without_embedding_secret() -> None:
         assert "vault.decrypted_secrets" in command
         assert "HAVING count(*) = 1" in command
         assert f"/{job.workflow}/dispatches" in command
+        assert "'Content-Type', 'application/json'" in command
         assert "body := jsonb_build_object('ref', 'main')" in command
 
 
