@@ -89,7 +89,10 @@ HTTP_MAX_KEEPALIVE_CONNECTIONS: Final = 4
 POLL_INTERVAL_MIN: Final = 10
 POLL_MAX_CONSECUTIVE_FAILURES: Final = 5
 # Bounds upstream pressure while reducing the 121-place cycle latency.
-POLL_FETCH_CONCURRENCY: Final = HTTP_MAX_CONNECTIONS
+# Seoul endpoint accepted the same five targets sequentially while the
+# four-way production batch timed out on every target. Keep ingestion serial
+# until provider-side parallel request tolerance is measured independently.
+POLL_FETCH_CONCURRENCY: Final = 1
 SCORING_MODEL_VERSION: Final = "v1-idw-point"
 R_MAX_M: Final = 1_500
 COVERED_M: Final = 600
