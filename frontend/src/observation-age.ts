@@ -1,4 +1,4 @@
-import type { CafeFeatureCollection, CafeProperties } from "./cafe-provider";
+import type { CafeFeatureCollection, CafeMapProperties } from "./cafe-provider";
 
 export interface FreshnessLimits {
   freshMaxAgeMinutes: number;
@@ -7,7 +7,7 @@ export interface FreshnessLimits {
 
 export function currentObservationAgeMinutes(
   cafe: Pick<
-    CafeProperties,
+    CafeMapProperties,
     "observedAt" | "observationAgeMinutes" | "observationAgeMeasuredAtMs"
   >,
   nowMs = Date.now(),
@@ -33,10 +33,10 @@ export function currentObservationAgeMinutes(
 }
 
 function ageCafe(
-  cafe: CafeProperties,
+  cafe: CafeMapProperties,
   nowMs: number,
   limits: FreshnessLimits | null,
-): CafeProperties {
+): CafeMapProperties {
   const ageMinutes = currentObservationAgeMinutes(cafe, nowMs);
   if (
     limits === null ||
@@ -53,7 +53,6 @@ function ageCafe(
       freshness: "stale",
       level: null,
       confidence: null,
-      confidenceTier: null,
       observationAgeMinutes: ageMinutes,
     };
   }
@@ -63,7 +62,6 @@ function ageCafe(
       ...cafe,
       freshness: "delayed",
       confidence: null,
-      confidenceTier: null,
       observationAgeMinutes: ageMinutes,
     };
   }

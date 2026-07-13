@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, load_only, raiseload, selectinload
 
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
@@ -323,7 +323,7 @@ def _observation_age_minutes(
     return max(0, ceil(age_min))
 
 
-def _cafe_response(
+def _cafe_map_response(
     cafe: Cafe,
     score: CafeScore | None,
     hotspot: Hotspot | None,
@@ -350,15 +350,8 @@ def _cafe_response(
         name=cafe.name,
         lat=cafe.lat,
         lng=cafe.lng,
-        road_address=cafe.road_address,
-        phone=cafe.phone,
-        website=_safe_website(cafe.website),
-        source_label=_cafe_source_label(cafe),
-        model_version=score.model_version if score else None,
         level=score.level if expose_level else None,
-        score=score.score if expose_level else None,
         confidence=score.confidence if expose_confidence else None,
-        confidence_tier=score.confidence_tier if expose_confidence else None,
         freshness=freshness,
         coverage=(score.coverage if score else "uncovered"),
         evidence=EvidenceResponse(
@@ -371,7 +364,6 @@ def _cafe_response(
                 else None
             ),
         ),
-        external_links=_cafe_external_links(cafe),
     )
 
 
@@ -396,7 +388,10 @@ def list_cafes(
     )
     statement = (
         select(Cafe, CafeScore, Hotspot, latest_observed_at)
-        .options(selectinload(Cafe.provider_places))
+        .options(
+            load_only(Cafe.id, Cafe.name, Cafe.lat, Cafe.lng, raiseload=True),
+            raiseload(Cafe.provider_places),
+        )
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
         .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
         .where(
@@ -416,7 +411,7 @@ def list_cafes(
         return []
     request_time = datetime.now(UTC)
     items = [
-        _cafe_response(cafe, score, hotspot, observed_at, now=request_time)
+        _cafe_map_response(cafe, score, hotspot, observed_at, now=request_time)
         for cafe, score, hotspot, observed_at in rows
     ]
     return [
@@ -448,7 +443,7 @@ def get_cafe(
     if row is None:
         raise HTTPException(status_code=404, detail="cafe not found")
     cafe, score, hotspot, observed_at = row
-    base = _cafe_response(
+    base = _cafe_map_response(
         cafe,
         score,
         hotspot,
@@ -499,6 +494,16 @@ def get_cafe(
         )
     return CafeDetailResponse(
         **base.model_dump(),
+        road_address=cafe.road_address,
+        phone=cafe.phone,
+        website=_safe_website(cafe.website),
+        source_label=_cafe_source_label(cafe),
+        model_version=score.model_version if score else None,
+        score=(score.score if score and base.level is not None else None),
+        confidence_tier=(
+            score.confidence_tier if score and base.confidence is not None else None
+        ),
+        external_links=_cafe_external_links(cafe),
         primary_hotspot_id=score.primary_hotspot_id if score else None,
         contributors=contributors,
         trend_12h=trend,

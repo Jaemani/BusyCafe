@@ -110,6 +110,22 @@ KAKAO_VERIFY_LNG: Final = 126.9769
 KAKAO_VERIFY_LAT: Final = 37.5759
 KAKAO_VERIFY_RADIUS_M: Final = 1_000
 
+# Naver Search Local API is an offline provider-link enrichment source.  Its
+# official contract returns at most five results per query and has a 25,000
+# request daily quota.  A result is useful only when ``link`` itself contains
+# a canonical numeric Naver Place ID; search URLs are never synthesized.
+NAVER_SEARCH_BASE_URL: Final = "https://openapi.naver.com"
+NAVER_LOCAL_SEARCH_PATH: Final = "/v1/search/local.json"
+NAVER_LOCAL_MAX_DISPLAY: Final = 5
+NAVER_LOCAL_DAILY_CALL_LIMIT: Final = 25_000
+# Naver calls its relevance ordering "random"; this is the official API token,
+# not stochastic sampling.  Keeping it centralized prevents accidental switch
+# to review-count ordering ("comment").
+NAVER_LOCAL_SORT: Final = "random"
+NAVER_LOCAL_RETRYABLE_STATUS_CODES: Final = frozenset({429, 500, 502, 503, 504})
+NAVER_LOCAL_RETRY_AFTER_MAX_SECONDS: Final = 30.0
+NAVER_VERIFY_QUERY: Final = "스타벅스 더종로R점 서울 종로구 종로 51"
+
 HTTP_TIMEOUT_SECONDS: Final = 10.0
 HTTP_CONNECT_TIMEOUT_SECONDS: Final = 5.0
 HTTP_MAX_RETRIES: Final = 3
@@ -197,6 +213,29 @@ ACTIVITY_SHADOW_MODEL_VERSION: Final = "v1-city-activity-shadow"
 ACTIVITY_SHADOW_MIN_LOG_DISPERSION: Final = 1e-6
 ACTIVITY_SHADOW_STANDARDIZED_ANOMALY_CAP: Final = 5.0
 SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
+# Offline-only observation-lag nowcast challenger.  It interpolates the saved
+# Seoul forecast curve to the original fetch time, then backtests that estimate
+# against an actual snapshot which arrived later.  None of these values affect
+# public v1 materialization or API responses.
+NOWCAST_SHADOW_MODEL_VERSION: Final = "v1-forecast-lag-shadow"
+NOWCAST_SHADOW_TIME_FORMAT: Final = "%Y-%m-%d %H:%M"
+NOWCAST_SHADOW_MAX_HORIZON_MIN: Final = 12 * 60
+NOWCAST_SHADOW_MAX_INTERPOLATION_GAP_MIN: Final = 90
+NOWCAST_SHADOW_NEAREST_TOLERANCE_MIN: Final = 20
+NOWCAST_SHADOW_ACTUAL_TOLERANCE_MIN: Final = 10
+# Bound production evaluation cost as append-only snapshots grow.  Fourteen
+# days preserve twice the minimum gate span while preventing an unbounded JSON
+# forecast transfer from PostgreSQL on every manual backtest.
+NOWCAST_SHADOW_BACKTEST_WINDOW_DAYS: Final = 14
+# Promotion requires both broad historical support and no regression against
+# the uncorrected delayed observation.  Thresholds are deliberately strict;
+# this hotspot-forecast gate cannot replace Phase 6 cafe ground truth.
+NOWCAST_SHADOW_MIN_SAMPLES: Final = 1_000
+NOWCAST_SHADOW_MIN_HOTSPOTS: Final = 80
+NOWCAST_SHADOW_MIN_SPAN_DAYS: Final = 7.0
+NOWCAST_SHADOW_MAX_POPULATION_WAPE: Final = 0.20
+NOWCAST_SHADOW_MIN_LEVEL_EXACT_ACCURACY: Final = 0.70
+NOWCAST_SHADOW_MIN_LEVEL_ADJACENT_ACCURACY: Final = 0.95
 # Confidence V2 remains a shadow input-quality score until empirical
 # calibration passes Track 1 Gate D. These weights intentionally exclude the
 # validation-sufficiency placeholder: sample quantity is not runtime input
@@ -308,6 +347,8 @@ class Settings(BaseSettings):
 
     seoul_api_key: SecretStr | None = None
     kakao_rest_key: SecretStr | None = None
+    naver_client_id: SecretStr | None = None
+    naver_client_secret: SecretStr | None = None
     database_url: str = (
         "postgresql+psycopg://cafe_crowd:cafe_crowd_dev@localhost:5432/cafe_crowd"
     )

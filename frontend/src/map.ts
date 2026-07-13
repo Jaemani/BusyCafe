@@ -4,7 +4,7 @@ import maplibregl, {
 } from "maplibre-gl";
 import type {
   CafeFeatureCollection,
-  CafeProperties,
+  CafeMapProperties,
   CafeProvider,
   CafeViewport,
 } from "./cafe-provider";
@@ -13,6 +13,8 @@ import {
   getOpenCafeId,
   hideCafePanel,
   showCafePanel,
+  showCafePanelError,
+  showCafePanelLoading,
   updateOpenCafePanel,
 } from "./panel";
 import {
@@ -44,8 +46,8 @@ const EMPTY_COLLECTION: CafeFeatureCollection = {
   features: [],
 };
 
-function readCafeProperties(feature: MapGeoJSONFeature): CafeProperties | null {
-  const properties = feature.properties as Partial<CafeProperties> | null;
+function readCafeProperties(feature: MapGeoJSONFeature): CafeMapProperties | null {
+  const properties = feature.properties as Partial<CafeMapProperties> | null;
   if (
     !properties ||
     typeof properties.id !== "string" ||
@@ -61,19 +63,11 @@ function readCafeProperties(feature: MapGeoJSONFeature): CafeProperties | null {
   return {
     id: properties.id,
     name: properties.name,
-    address: properties.address ?? "주소 정보 없음",
-    phone: properties.phone ?? null,
-    website: properties.website ?? null,
     lat,
     lng,
-    sourceLabel: properties.sourceLabel ?? "장소 데이터 출처 미상",
-    naverUrl: properties.naverUrl ?? null,
-    kakaoUrl: properties.kakaoUrl ?? null,
-    googleUrl: properties.googleUrl ?? null,
     coverage: properties.coverage ?? "uncovered",
     level: properties.level ?? null,
     confidence: properties.confidence ?? null,
-    confidenceTier: properties.confidenceTier ?? null,
     freshness: properties.freshness ?? "n/a",
     hotspotName: properties.hotspotName ?? null,
     distanceM: properties.distanceM ?? null,
@@ -429,11 +423,36 @@ export async function initializeCafeMap(
     renderCafeStatus();
   };
 
-  const selectCafe = (cafeId: string): void => {
+  let detailController: AbortController | null = null;
+  let detailRequestSequence = 0;
+  const selectCafe = async (cafeId: string): Promise<void> => {
     const cafe = displayedCafeCollection.features.find(
       (feature) => feature.properties.id === cafeId,
     );
-    if (cafe) showCafePanel(cafe.properties);
+    if (!cafe) return;
+
+    detailController?.abort();
+    const controller = new AbortController();
+    detailController = controller;
+    const sequence = ++detailRequestSequence;
+    showCafePanelLoading(cafe.properties);
+    try {
+      const detail = await cafeProvider.getCafeDetail(cafeId, controller.signal);
+      if (
+        controller.signal.aborted ||
+        sequence !== detailRequestSequence ||
+        getOpenCafeId() !== cafeId
+      ) return;
+      showCafePanel(detail);
+    } catch (error) {
+      if (controller.signal.aborted || sequence !== detailRequestSequence) return;
+      showCafePanelError(
+        cafe.properties,
+        error instanceof Error ? error.message : "카페 상세 정보를 불러오지 못했습니다",
+      );
+    } finally {
+      if (detailController === controller) detailController = null;
+    }
   };
 
   let lastCafeFetchStartedAt = 0;
@@ -487,6 +506,8 @@ export async function initializeCafeMap(
   map.on("movestart", () => {
     requestController?.abort();
     requestSequence += 1;
+    detailController?.abort();
+    detailRequestSequence += 1;
     hideCafePanel();
     displayedCafeCount = null;
     displayedDelayedCount = 0;
@@ -548,6 +569,7 @@ export async function initializeCafeMap(
   map.once("remove", () => {
     window.clearInterval(delayTimerId);
     requestController?.abort();
+    detailController?.abort();
     document.removeEventListener("visibilitychange", refreshAfterResume);
     window.removeEventListener("focus", refreshAfterResume);
   });

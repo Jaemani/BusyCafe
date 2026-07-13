@@ -167,15 +167,25 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert [item["name"] for item in payload] == ["정확한 카페"]
     assert payload[0]["coverage"] == "covered"
     assert payload[0]["freshness"] == "fresh"
-    assert payload[0]["model_version"] == SCORING_MODEL_VERSION
-    assert payload[0]["license_manifest_url"] == "/api/sources"
+    assert set(payload[0]) == {
+        "id",
+        "name",
+        "lat",
+        "lng",
+        "level",
+        "confidence",
+        "freshness",
+        "coverage",
+        "evidence",
+    }
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert payload[0]["evidence"]["observed_at"] is not None
     assert payload[0]["evidence"]["observed_at"].endswith("Z")
     assert payload[0]["evidence"]["age_minutes"] in (0, 1)
-    assert payload[0]["phone"] == "02-123-4567"
-    assert payload[0]["website"] == "https://example.test"
-    assert payload[0]["external_links"]["kakao"].endswith("/456")
+    detail = api_client.get(f"/api/cafes/{payload[0]['id']}").json()
+    assert detail["phone"] == "02-123-4567"
+    assert detail["website"] == "https://example.test"
+    assert detail["external_links"]["kakao"].endswith("/456")
 
 
 def test_bbox_api_fails_closed_and_signals_when_viewport_exceeds_cap(
@@ -278,10 +288,11 @@ def test_cafe_source_label_exposes_permit_verification(api_client) -> None:
         ]
         session.commit()
 
-    item = api_client.get(
+    listing_item = api_client.get(
         "/api/cafes",
         params={"bbox": "126.9,37.5,127.1,37.7"},
     ).json()[0]
+    item = api_client.get(f"/api/cafes/{listing_item['id']}").json()
 
     assert "서울시 영업 인허가 대조" in item["source_label"]
 
@@ -304,11 +315,11 @@ def test_delayed_snapshot_shows_level_without_confidence(api_client) -> None:
     item = listing[0]
     assert item["freshness"] == "delayed"
     assert item["level"] == 2
-    assert item["score"] == 2.0
+    assert "score" not in item
     assert item["confidence"] is None
-    assert item["confidence_tier"] is None
+    assert "confidence_tier" not in item
     assert item["coverage"] == "covered"
-    assert item["model_version"] == SCORING_MODEL_VERSION
+    assert "model_version" not in item
     assert item["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert item["evidence"]["observed_at"] is not None
     assert item["evidence"]["age_minutes"] in (26, 27)
@@ -347,9 +358,9 @@ def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -
 
     assert item["freshness"] == "stale"
     assert item["level"] is None
-    assert item["score"] is None
+    assert "score" not in item
     assert item["confidence"] is None
-    assert item["confidence_tier"] is None
+    assert "confidence_tier" not in item
     assert item["coverage"] == "covered"
     assert item["evidence"]["observed_at"] is not None
 
@@ -449,9 +460,10 @@ def test_provider_table_links_override_json_and_mobile_naver_is_direct(
         )
         session.commit()
 
-    item = api_client.get(
+    listing_item = api_client.get(
         "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
     ).json()[0]
+    item = api_client.get(f"/api/cafes/{listing_item['id']}").json()
 
     assert item["external_links"]["naver"].startswith(
         "https://m.place.naver.com/restaurant/999/"
@@ -478,9 +490,10 @@ def test_inactive_provider_row_suppresses_legacy_fallback(api_client) -> None:
         )
         session.commit()
 
-    item = api_client.get(
+    listing_item = api_client.get(
         "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
     ).json()[0]
+    item = api_client.get(f"/api/cafes/{listing_item['id']}").json()
 
     assert item["external_links"]["naver"] is None
     assert item["external_links"]["kakao"].endswith("/456")
@@ -528,9 +541,10 @@ def test_provider_row_url_must_embed_matching_place_id(
         )
         session.commit()
 
-    item = api_client.get(
+    listing_item = api_client.get(
         "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
     ).json()[0]
+    item = api_client.get(f"/api/cafes/{listing_item['id']}").json()
 
     assert item["external_links"][provider] is None
 
@@ -564,9 +578,10 @@ def test_source_label_uses_canonical_origin(api_client) -> None:
         cafe.origin_source_id = "456"
         session.commit()
 
-    item = api_client.get(
+    listing_item = api_client.get(
         "/api/cafes", params={"bbox": "126.9,37.5,127.1,37.7"}
     ).json()[0]
+    item = api_client.get(f"/api/cafes/{listing_item['id']}").json()
 
     assert item["source_label"].startswith("카카오맵 등록 장소 ·")
 

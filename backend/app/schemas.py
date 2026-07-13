@@ -88,6 +88,39 @@ class KakaoCategoryResponse(ExternalModel):
     documents: list[KakaoPlace]
 
 
+class NaverLocalItem(ExternalModel):
+    """One official Naver local-search result.
+
+    ``link`` is not assumed to be a Naver Place URL.  Provider-ID extraction
+    remains a separate fail-closed step.
+    """
+
+    title: str = ""
+    link: str = ""
+    category: str = ""
+    description: str = ""
+    telephone: str = ""
+    address: str = ""
+    road_address: str = Field(default="", alias="roadAddress")
+    map_x: str = Field(default="", alias="mapx")
+    map_y: str = Field(default="", alias="mapy")
+
+    @field_validator("map_x", "map_y", mode="before")
+    @classmethod
+    def coordinate_as_text(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+
+class NaverLocalResponse(ExternalModel):
+    last_build_date: str = Field(default="", alias="lastBuildDate")
+    total: int = Field(ge=0)
+    start: int = Field(ge=1)
+    display: int = Field(ge=0)
+    items: list[NaverLocalItem]
+
+
 class SeoulRefreshmentPermit(ExternalModel):
     """One OA-16095 permit row, preserving source status and category."""
 
@@ -211,24 +244,17 @@ class SourceManifestResponse(BaseModel):
 
 
 class CafeMapResponse(BaseModel):
+    """Compact viewport payload; place metadata belongs to detail reads."""
+
     id: int
     name: str
     lat: float
     lng: float
-    road_address: str | None = None
-    phone: str | None = None
-    website: str | None = None
-    source_label: str
-    license_manifest_url: str = "/api/sources"
-    model_version: str | None = None
     level: int | None = None
-    score: float | None = None
     confidence: float | None = None
-    confidence_tier: str | None = None
     freshness: Literal["fresh", "delayed", "stale", "n/a"]
     coverage: Literal["covered", "fringe", "uncovered"]
     evidence: EvidenceResponse
-    external_links: ExternalLinksResponse
 
 
 class ContributorResponse(BaseModel):
@@ -244,6 +270,15 @@ class TrendPointResponse(BaseModel):
 
 
 class CafeDetailResponse(CafeMapResponse):
+    road_address: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    source_label: str
+    license_manifest_url: str = "/api/sources"
+    model_version: str | None = None
+    score: float | None = None
+    confidence_tier: str | None = None
+    external_links: ExternalLinksResponse
     primary_hotspot_id: int | None = None
     contributors: list[ContributorResponse] = Field(default_factory=list)
     trend_12h: list[TrendPointResponse] = Field(default_factory=list)
