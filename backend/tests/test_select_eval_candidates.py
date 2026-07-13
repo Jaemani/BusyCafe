@@ -46,6 +46,7 @@ def _add_candidate(
             cafe_id=cafe.id,
             model_version=SCORING_MODEL_VERSION,
             computed_at=NOW,
+            source_observed_at=NOW,
             score=2.0,
             level=2,
             confidence=0.5,

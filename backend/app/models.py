@@ -106,6 +106,12 @@ class Hotspot(Base):
     primary_scores: Mapped[list[CafeScore]] = relationship(
         back_populates="primary_hotspot"
     )
+    serving_state: Mapped[HotspotServingState | None] = relationship(
+        back_populates="hotspot",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
 
 
 class HotspotSnapshot(Base):
@@ -152,6 +158,30 @@ class HotspotSnapshot(Base):
     raw_json: Mapped[dict[str, Any] | None] = mapped_column(JSON_VALUE)
 
     hotspot: Mapped[Hotspot] = relationship(back_populates="snapshots")
+
+
+class HotspotServingState(Base):
+    """Precomputed detail evidence; API reads never scan raw snapshots."""
+
+    __tablename__ = "hotspot_serving_states"
+
+    hotspot_id: Mapped[int] = mapped_column(
+        ForeignKey("hotspots.id", ondelete="CASCADE"), primary_key=True
+    )
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    trend_12h_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON_VALUE, nullable=False
+    )
+    forecast_1h_json: Mapped[dict[str, Any] | None] = mapped_column(
+        NULLABLE_JSON_VALUE
+    )
+
+    hotspot: Mapped[Hotspot] = relationship(back_populates="serving_state")
 
 
 class HotspotParseFailure(Base):
@@ -314,6 +344,12 @@ class CafeScore(Base):
             name="confidence_range",
         ),
         CheckConstraint(
+            "(coverage = 'uncovered' AND source_observed_at IS NULL) OR "
+            "(coverage IN ('covered', 'fringe') "
+            "AND source_observed_at IS NOT NULL)",
+            name="source_observed_matches_coverage",
+        ),
+        CheckConstraint(
             "primary_distance_m IS NULL OR primary_distance_m >= 0",
             name="primary_distance_nonnegative",
         ),
@@ -337,6 +373,9 @@ class CafeScore(Base):
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+    source_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
     )
     score: Mapped[float | None] = mapped_column(Float)
     level: Mapped[int | None] = mapped_column(Integer)

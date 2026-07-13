@@ -279,7 +279,9 @@ export class CachedApiCafeProvider implements CafeProvider {
       `/api/cafes/${encodeURIComponent(cafeId)}`,
       this.apiBaseUrl || window.location.origin,
     );
-    if (this.cacheVersion !== null) url.searchParams.set("cycle", this.cacheVersion);
+    if (this.cacheVersion !== null) {
+      url.searchParams.set("data_version", this.cacheVersion);
+    }
     const response = await fetch(url, { signal, cache: "default" });
     if (!response.ok) throw new Error("카페 상세 정보를 불러오지 못했습니다");
     const item = (await response.json()) as CafeDetailApiItem;
@@ -351,7 +353,9 @@ export class CachedApiCafeProvider implements CafeProvider {
     const url = new URL("/api/cafes", this.apiBaseUrl || window.location.origin);
     url.searchParams.set("bbox", bbox);
     url.searchParams.set("min_conf", "0");
-    if (this.cacheVersion !== null) url.searchParams.set("cycle", this.cacheVersion);
+    if (this.cacheVersion !== null) {
+      url.searchParams.set("data_version", this.cacheVersion);
+    }
 
     const { items, truncated } = await this.withRequestSlot(signal, async () => {
       const response = await fetch(url, { signal, cache: "default" });

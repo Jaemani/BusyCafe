@@ -5,6 +5,7 @@ export interface RuntimeHealth {
   dataMode: DataMode;
   staleWarnMin: number;
   currentDisplayMaxAgeMin: number;
+  lastIngestAt: string | null;
   lastCompleteCycleAt: string | null;
   lastCycleStatus: CycleStatus | null;
 }
@@ -53,6 +54,7 @@ export async function fetchRuntimeHealth(): Promise<RuntimeHealth> {
     dataMode: payload.data_mode,
     staleWarnMin: payload.stale_warn_min,
     currentDisplayMaxAgeMin: payload.current_display_max_age_min,
+    lastIngestAt: readNullableString(payload.last_ingest_at),
     lastCompleteCycleAt: readNullableString(payload.last_complete_cycle_at),
     lastCycleStatus: status,
   };

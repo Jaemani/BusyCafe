@@ -7,7 +7,14 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session
 
 from app.config import SCORING_MODEL_VERSION
-from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot
+from app.models import (
+    Base,
+    Cafe,
+    CafeScore,
+    Hotspot,
+    HotspotServingState,
+    HotspotSnapshot,
+)
 from app.scoring.engine import HotspotObservation, materialize_all, score_cafe
 
 
@@ -209,6 +216,12 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
                 fetched_at=NOW,
                 congest_level=3,
                 congest_label="약간 붐빔",
+                forecast_json=[
+                    {
+                        "FCST_TIME": "2026-07-11 19:00",
+                        "FCST_CONGEST_LVL": "보통",
+                    }
+                ],
             )
         )
         session.commit()
@@ -237,12 +250,23 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         assert stored.level == 3
         assert stored.coverage == "covered"
         assert stored.computed_at.replace(tzinfo=UTC) == NOW + timedelta(minutes=15)
+        assert stored.source_observed_at.replace(tzinfo=UTC) == NOW
+        serving_state = session.get(HotspotServingState, hotspot.id)
+        assert serving_state is not None
+        assert serving_state.observed_at.replace(tzinfo=UTC) == NOW
+        assert serving_state.trend_12h_json == [
+            {"observed_at": NOW.isoformat(), "level": 3}
+        ]
+        assert serving_state.forecast_1h_json == {
+            "FCST_TIME": "2026-07-11 19:00",
+            "FCST_CONGEST_LVL": "보통",
+        }
         assert len(session.scalars(select(CafeScore)).all()) == 2
         materialize_selects = "\n".join(selected_statements)
         assert "cafes.source_json" not in materialize_selects
         assert "cafe_scores.contributors_json" not in materialize_selects
         assert "hotspot_snapshots.raw_json" not in materialize_selects
-        assert "hotspot_snapshots.forecast_json" not in materialize_selects
+        assert "hotspot_snapshots.forecast_json" in materialize_selects
         assert score_update_batches == [True]
     engine.dispose()
 

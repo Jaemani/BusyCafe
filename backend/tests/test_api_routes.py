@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,6 +30,7 @@ from app.models import (
     CafeProviderPlace,
     CafeScore,
     Hotspot,
+    HotspotServingState,
     HotspotSnapshot,
     IngestCycle,
 )
@@ -103,6 +106,7 @@ def api_client():
                 cafe_id=cafe.id,
                 model_version=SCORING_MODEL_VERSION,
                 computed_at=now,
+                source_observed_at=now,
                 score=2.0,
                 level=2,
                 confidence=0.7,
@@ -118,6 +122,20 @@ def api_client():
                         "weight": 1.0,
                     }
                 ],
+            )
+        )
+        session.add(
+            HotspotServingState(
+                hotspot_id=hotspot.id,
+                computed_at=now,
+                observed_at=now,
+                trend_12h_json=[
+                    {"observed_at": now.isoformat(), "level": 2}
+                ],
+                forecast_1h_json={
+                    "FCST_TIME": "precomputed",
+                    "FCST_CONGEST_LVL": "보통",
+                },
             )
         )
         session.add(
@@ -186,6 +204,28 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert detail["phone"] == "02-123-4567"
     assert detail["website"] == "https://example.test"
     assert detail["external_links"]["kakao"].endswith("/456")
+    assert detail["trend_12h"][0]["level"] == 2
+    assert detail["forecast_1h"] == {
+        "FCST_TIME": "precomputed",
+        "FCST_CONGEST_LVL": "보통",
+    }
+
+
+def test_api_request_modules_never_import_scoring_code() -> None:
+    api_dir = Path(__file__).resolve().parents[1] / "app" / "api"
+    violations: list[str] = []
+    for path in sorted(api_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (
+                node.module or ""
+            ).startswith("app.scoring"):
+                violations.append(f"{path.name}:{node.lineno}")
+            elif isinstance(node, ast.Import) and any(
+                alias.name.startswith("app.scoring") for alias in node.names
+            ):
+                violations.append(f"{path.name}:{node.lineno}")
+    assert violations == []
 
 
 def test_bbox_api_fails_closed_and_signals_when_viewport_exceeds_cap(
@@ -243,6 +283,33 @@ def test_detail_api_returns_scoring_model_version(api_client) -> None:
     assert response.json()["model_version"] == SCORING_MODEL_VERSION
     assert response.json()["freshness"] == "fresh"
     assert response.headers["cache-control"] == MAP_CACHE_CONTROL
+
+
+def test_cafe_reads_never_scan_raw_snapshots(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    engine = factory.kw["bind"]
+    selected_statements: list[str] = []
+
+    def capture_selects(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            selected_statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", capture_selects)
+    try:
+        listing = api_client.get(
+            "/api/cafes",
+            params={"bbox": "126.9,37.5,127.1,37.7"},
+        ).json()
+        response = api_client.get(f"/api/cafes/{listing[0]['id']}")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+    assert response.status_code == 200
+    cafe_reads = "\n".join(selected_statements)
+    assert "hotspot_snapshots" not in cafe_reads
+    assert "hotspot_serving_states" in cafe_reads
 
 
 def test_public_read_cache_policies_match_mutability(api_client) -> None:
@@ -304,6 +371,12 @@ def test_delayed_snapshot_shows_level_without_confidence(api_client) -> None:
         snapshot = session.query(HotspotSnapshot).one()
         snapshot.observed_at = stale_time
         snapshot.fetched_at = stale_time
+        session.query(CafeScore).one().source_observed_at = stale_time
+        serving_state = session.query(HotspotServingState).one()
+        serving_state.observed_at = stale_time
+        serving_state.trend_12h_json = [
+            {"observed_at": stale_time.isoformat(), "level": 2}
+        ]
         session.commit()
 
     listing = api_client.get(
@@ -349,6 +422,12 @@ def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -
         snapshot = session.query(HotspotSnapshot).one()
         snapshot.observed_at = stale_time
         snapshot.fetched_at = stale_time
+        session.query(CafeScore).one().source_observed_at = stale_time
+        serving_state = session.query(HotspotServingState).one()
+        serving_state.observed_at = stale_time
+        serving_state.trend_12h_json = [
+            {"observed_at": stale_time.isoformat(), "level": 2}
+        ]
         session.commit()
 
     item = api_client.get(
@@ -596,6 +675,7 @@ def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
     assert response.json()["current_display_max_age_min"] == 120
     assert response.json()["cafes_count"] == 1
     assert response.json()["snapshots_last_hour"] == 1
+    assert response.json()["last_ingest_at"].endswith("Z")
     assert response.json()["last_complete_cycle_at"].endswith("Z")
     assert response.json()["last_cycle_status"] == "running"
     assert response.json()["last_cycle_targets"] == 1

@@ -6,9 +6,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from math import ceil, isfinite
-from typing import Any
 from urllib.parse import parse_qs, urlparse
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
@@ -22,7 +20,14 @@ from app.config import (
     STALE_WARN_MIN,
 )
 from app.database import get_db
-from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
+from app.models import (
+    Cafe,
+    CafeScore,
+    Hotspot,
+    HotspotServingState,
+    HotspotSnapshot,
+    IngestCycle,
+)
 from app.schemas import (
     CafeDetailResponse,
     CafeMapResponse,
@@ -40,7 +45,6 @@ from app.schemas import (
 
 router = APIRouter(prefix="/api", tags=["map"])
 VIEWPORT_TRUNCATED_HEADER = "X-BusyCafe-Viewport-Truncated"
-SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 _DIRECT_LINK_HOSTS = {
     "naver": {"map.naver.com", "m.map.naver.com", "m.place.naver.com"},
     "kakao": {"place.map.kakao.com"},
@@ -327,14 +331,13 @@ def _cafe_map_response(
     cafe: Cafe,
     score: CafeScore | None,
     hotspot: Hotspot | None,
-    observed_at: datetime | None = None,
     *,
     now: datetime | None = None,
 ) -> CafeMapResponse:
     current_time = now or datetime.now(UTC)
     if current_time.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    normalized_observed_at = _utc(observed_at)
+    normalized_observed_at = _utc(score.source_observed_at) if score else None
     freshness = (
         "n/a"
         if score is None
@@ -380,14 +383,8 @@ def list_cafes(
     db: Session = Depends(get_db),
 ) -> list[CafeMapResponse]:
     min_lng, min_lat, max_lng, max_lat = _parse_bbox(bbox)
-    latest_observed_at = (
-        select(func.max(HotspotSnapshot.observed_at))
-        .where(HotspotSnapshot.hotspot_id == CafeScore.primary_hotspot_id)
-        .correlate(CafeScore)
-        .scalar_subquery()
-    )
     statement = (
-        select(Cafe, CafeScore, Hotspot, latest_observed_at)
+        select(Cafe, CafeScore, Hotspot)
         .options(
             load_only(Cafe.id, Cafe.name, Cafe.lat, Cafe.lng, raiseload=True),
             raiseload(Cafe.provider_places),
@@ -411,8 +408,8 @@ def list_cafes(
         return []
     request_time = datetime.now(UTC)
     items = [
-        _cafe_map_response(cafe, score, hotspot, observed_at, now=request_time)
-        for cafe, score, hotspot, observed_at in rows
+        _cafe_map_response(cafe, score, hotspot, now=request_time)
+        for cafe, score, hotspot in rows
     ]
     return [
         item
@@ -427,71 +424,47 @@ def get_cafe(
     cafe_id: int,
     db: Session = Depends(get_db),
 ) -> CafeDetailResponse:
-    latest_observed_at = (
-        select(func.max(HotspotSnapshot.observed_at))
-        .where(HotspotSnapshot.hotspot_id == CafeScore.primary_hotspot_id)
-        .correlate(CafeScore)
-        .scalar_subquery()
-    )
     row = db.execute(
-        select(Cafe, CafeScore, Hotspot, latest_observed_at)
+        select(Cafe, CafeScore, Hotspot, HotspotServingState)
         .options(selectinload(Cafe.provider_places))
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
         .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
+        .outerjoin(
+            HotspotServingState,
+            HotspotServingState.hotspot_id == CafeScore.primary_hotspot_id,
+        )
         .where(Cafe.id == cafe_id, Cafe.active.is_(True))
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="cafe not found")
-    cafe, score, hotspot, observed_at = row
+    cafe, score, hotspot, serving_state = row
     base = _cafe_map_response(
         cafe,
         score,
         hotspot,
-        observed_at,
         now=datetime.now(UTC),
     )
-    latest_snapshot: HotspotSnapshot | None = None
     trend: list[TrendPointResponse] = []
-    if score and score.primary_hotspot_id:
-        since = datetime.now(UTC) - timedelta(hours=12)
-        snapshots = db.scalars(
-            select(HotspotSnapshot)
-            .where(
-                HotspotSnapshot.hotspot_id == score.primary_hotspot_id,
-                HotspotSnapshot.observed_at >= since,
-            )
-            .order_by(HotspotSnapshot.observed_at)
-        ).all()
+    state_matches_score = (
+        score is not None
+        and serving_state is not None
+        and _utc(serving_state.observed_at) == _utc(score.source_observed_at)
+    )
+    if state_matches_score and serving_state.trend_12h_json:
         trend = [
-            TrendPointResponse(observed_at=_utc(item.observed_at), level=item.congest_level)
-            for item in snapshots
+            TrendPointResponse.model_validate(item)
+            for item in serving_state.trend_12h_json
         ]
-        if snapshots:
-            latest_snapshot = snapshots[-1]
-            base.evidence.observed_at = _utc(latest_snapshot.observed_at)
     contributors = []
     if score and score.contributors_json:
         contributors = [ContributorResponse.model_validate(item) for item in score.contributors_json]
     forecast_1h = None
     if (
         base.freshness == "fresh"
-        and latest_snapshot
-        and latest_snapshot.forecast_json
+        and state_matches_score
+        and serving_state.forecast_1h_json
     ):
-        target = latest_snapshot.observed_at + timedelta(hours=1)
-        def forecast_distance(item: dict[str, Any]) -> float:
-            try:
-                candidate = datetime.strptime(
-                    item["FCST_TIME"], "%Y-%m-%d %H:%M"
-                ).replace(tzinfo=SEOUL_TIMEZONE).astimezone(UTC)
-                return abs((candidate - target).total_seconds())
-            except (KeyError, TypeError, ValueError):
-                return float("inf")
-        forecast_1h = min(
-            latest_snapshot.forecast_json,
-            key=forecast_distance,
-            default=None,
-        )
+        forecast_1h = serving_state.forecast_1h_json
     return CafeDetailResponse(
         **base.model_dump(),
         road_address=cafe.road_address,

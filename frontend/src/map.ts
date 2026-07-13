@@ -359,7 +359,11 @@ export async function initializeCafeMap(
   const refreshRuntimeHealth = async (): Promise<void> => {
     await fetchRuntimeHealth()
       .then((health) => {
-        cafeProvider.setCacheVersion?.(health.lastCompleteCycleAt);
+        // Completed no-op polls advance operational health but not map data.
+        // The latest durable snapshot fetch changes only when ingest inserts
+        // a new natural-key observation, so duplicate polls reuse tile/detail
+        // caches instead of forcing a full viewport reload.
+        cafeProvider.setCacheVersion?.(health.lastIngestAt);
         runtimeHealth = evaluateRuntimeHealth(health);
         freshnessLimits = {
           freshMaxAgeMinutes: health.staleWarnMin,

@@ -8,9 +8,10 @@ module so fixed inputs always produce fixed outputs.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import exp, floor
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, load_only
@@ -26,11 +27,18 @@ from app.config import (
     TAU_MIN,
 )
 from app.geo import haversine_m
-from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot
+from app.models import (
+    Cafe,
+    CafeScore,
+    Hotspot,
+    HotspotServingState,
+    HotspotSnapshot,
+)
 
 
 Coverage = Literal["covered", "fringe", "uncovered"]
 ConfidenceTier = Literal["high", "mid", "low"]
+SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,6 +228,32 @@ def _database_datetime(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
+def _forecast_one_hour(
+    forecast: list[dict[str, Any]] | None,
+    *,
+    observed_at: datetime,
+) -> dict[str, Any] | None:
+    """Select one-hour forecast once during materialization, never on reads."""
+
+    if not forecast:
+        return None
+    target = _database_datetime(observed_at) + timedelta(hours=1)
+
+    def distance(item: dict[str, Any]) -> float:
+        try:
+            candidate = datetime.strptime(
+                item["FCST_TIME"], "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=SEOUL_TIMEZONE).astimezone(UTC)
+            return abs((candidate - target).total_seconds())
+        except (KeyError, TypeError, ValueError):
+            return float("inf")
+
+    selected = min(forecast, key=distance, default=None)
+    if selected is None or distance(selected) == float("inf"):
+        return None
+    return selected
+
+
 def materialize_all(
     session: Session,
     *,
@@ -267,6 +301,58 @@ def materialize_all(
         )
         for hotspot_id, name, lat, lng, congest_level, observed_at in rows
     )
+    observed_at_by_hotspot_id = {
+        observation.hotspot_id: observation.observed_at
+        for observation in observations
+    }
+    history_rows = session.execute(
+        select(
+            HotspotSnapshot.hotspot_id,
+            HotspotSnapshot.observed_at,
+            HotspotSnapshot.congest_level,
+            HotspotSnapshot.forecast_json,
+        )
+        .join(Hotspot, Hotspot.id == HotspotSnapshot.hotspot_id)
+        .where(
+            Hotspot.is_polled.is_(True),
+            HotspotSnapshot.observed_at >= computed_at - timedelta(hours=12),
+        )
+        .order_by(HotspotSnapshot.hotspot_id, HotspotSnapshot.observed_at)
+    ).all()
+    history_by_hotspot_id: dict[
+        int, list[tuple[datetime, int, list[dict[str, Any]] | None]]
+    ] = {}
+    for hotspot_id, observed_at, level, forecast_json in history_rows:
+        history_by_hotspot_id.setdefault(hotspot_id, []).append(
+            (_database_datetime(observed_at), level, forecast_json)
+        )
+    existing_states = {
+        state.hotspot_id: state
+        for state in session.scalars(select(HotspotServingState))
+    }
+    for hotspot_id, history in history_by_hotspot_id.items():
+        latest_observed_at, _latest_level, latest_forecast = history[-1]
+        values = {
+            "computed_at": computed_at,
+            "observed_at": latest_observed_at,
+            "trend_12h_json": [
+                {
+                    "observed_at": observed_at.isoformat(),
+                    "level": level,
+                }
+                for observed_at, level, _forecast in history
+            ],
+            "forecast_1h_json": _forecast_one_hour(
+                latest_forecast,
+                observed_at=latest_observed_at,
+            ),
+        }
+        existing_state = existing_states.get(hotspot_id)
+        if existing_state is None:
+            session.add(HotspotServingState(hotspot_id=hotspot_id, **values))
+        else:
+            for key, value in values.items():
+                setattr(existing_state, key, value)
     # Materialization only needs score identities and cafe coordinates. Avoid
     # transferring cached POI/source JSON and previous contributor JSON from a
     # remote PostgreSQL database on every ingest cycle.
@@ -293,6 +379,11 @@ def materialize_all(
         values = {
             "model_version": SCORING_MODEL_VERSION,
             "computed_at": computed_at,
+            "source_observed_at": (
+                observed_at_by_hotspot_id[estimate.primary_hotspot_id]
+                if estimate.primary_hotspot_id is not None
+                else None
+            ),
             "score": estimate.score,
             "level": estimate.level,
             "confidence": estimate.confidence,

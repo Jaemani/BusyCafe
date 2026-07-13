@@ -175,6 +175,7 @@ def test_valid_uncovered_and_covered_scores_round_trip(engine):
                     cafe_id=covered_cafe.id,
                     model_version=SCORING_MODEL_VERSION,
                     computed_at=now,
+                    source_observed_at=now,
                     coverage="covered",
                     score=2.25,
                     level=2,
@@ -199,6 +200,46 @@ def test_valid_uncovered_and_covered_scores_round_trip(engine):
         assert stored[0].coverage == "uncovered"
         assert stored[0].score is None
         assert stored[1].contributors_json[0]["level"] == 2
+
+
+@pytest.mark.parametrize(
+    ("coverage", "source_observed_at"),
+    [("uncovered", datetime(2026, 7, 11, 12, tzinfo=UTC)), ("covered", None)],
+)
+def test_score_source_observation_matches_coverage(
+    engine, coverage: str, source_observed_at: datetime | None
+):
+    now = datetime(2026, 7, 11, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        place = hotspot()
+        shop = cafe()
+        session.add_all([place, shop])
+        session.flush()
+        estimate_fields = (
+            {
+                "score": 2.0,
+                "level": 2,
+                "confidence": 0.5,
+                "confidence_tier": "mid",
+                "primary_hotspot_id": place.id,
+                "primary_distance_m": 100.0,
+                "contributors_json": [],
+            }
+            if coverage == "covered"
+            else {}
+        )
+        session.add(
+            CafeScore(
+                cafe_id=shop.id,
+                model_version=SCORING_MODEL_VERSION,
+                computed_at=now,
+                source_observed_at=source_observed_at,
+                coverage=coverage,
+                **estimate_fields,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
 
 
 def test_cafe_delete_cascades_materialized_score(engine):
