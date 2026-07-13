@@ -46,6 +46,10 @@ SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES: Final = (
     "전통찻집",
     "떡카페",
 )
+# Read-only cross-source reconciliation gates. These create review evidence;
+# they do not authorize automatic catalog publication.
+PERMIT_RECONCILE_EXACT_NAME_MAX_M: Final = 50.0
+PERMIT_RECONCILE_EXACT_PHONE_MAX_M: Final = 150.0
 # Official Seoul major-place master attachments (dataset OA-21285).
 SEOUL_DATAFILE_DOWNLOAD_URL: Final = (
     "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do"
