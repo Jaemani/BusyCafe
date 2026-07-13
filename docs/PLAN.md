@@ -71,8 +71,9 @@
 4. **카페는 overlay다.** 지역 활동도는 카페 내부 좌석·대기 상태가 아니며, venue 효용은
    별도 관측과 지표로 평가한다.
 5. **관측·예측·평소와 신선도를 분리한다.** signal mode(`observed`, `forecast`,
-   `baseline_only`, `unsupported`)와 freshness(`fresh`, `stale`, `n/a`)를 같은 “실시간”
-   값으로 포장하지 않는다.
+   `baseline_only`, `unsupported`)와 freshness(`fresh`, `delayed`, `stale`, `n/a`)를
+   같은 “실시간” 값으로 포장하지 않는다. `delayed`는 fresh가 아니며 참고용으로만
+   표시한다.
 
 ### 1.2 Non-goals (하지 않는 것)
 
@@ -329,7 +330,8 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 | `D_FLOOR_M` | 50 | 거리 하한 (0-나눗셈 방지) |
 | `TAU_MIN` | 15 | 신선도 감쇠 시상수(분) |
 | `CONF_HIGH` / `CONF_MID` | 0.55 / 0.30 | 신뢰도 등급 경계 |
-| `STALE_WARN_MIN` | 25 | 이 이상 갱신 없으면 UI에 stale 배지 |
+| `STALE_WARN_MIN` | 25 | 운영상 fresh 경계. 초과 시 `delayed`로 명시 |
+| `CURRENT_DISPLAY_MAX_AGE_MIN` | 120 | 지연 관측의 참고용 표시 상한. 초과 시 현재값 숨김 |
 
 ### 4.7 내부 API 스펙
 
@@ -340,8 +342,14 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 - `GET /api/hotspots` → 폴링 대상 핫스팟 현재 상태 (디버그 오버레이용)
 - `GET /api/health` → `{data_mode, last_ingest_at, last_complete_cycle_at,
   last_cycle_status, last_cycle_targets, last_cycle_saved, last_cycle_failed,
-  snapshots_last_hour, cafes_count}`. freshness 승격 판정은 개별 snapshot 시각이 아니라
-  `last_complete_cycle_at`을 사용한다.
+  stale_warn_min, current_display_max_age_min, snapshots_last_hour, cafes_count}`.
+  freshness 승격 판정은 개별 snapshot 시각이 아니라 `last_complete_cycle_at`을 사용한다.
+
+개별 관측은 요청 시점 기준 25분 이하는 `fresh`, 25분 초과 120분 이하는 `delayed`,
+120분 초과는 `stale`로 판정한다. `delayed`는 level·score만 낮은 시각적 비중으로
+노출하고 `지연 데이터 · 참고용`으로 표시하며 confidence·confidence tier·forecast는
+숨긴다. `stale`은 현재 level·score까지 숨기되 원본 관측 시각과 provenance는 보존한다.
+이 구분은 표시 가용성과 오인 방지를 위한 계약이며 시간대별 정확도 향상을 의미하지 않는다.
 
 ---
 

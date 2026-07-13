@@ -982,3 +982,34 @@
   연속성은 미검증이며, source 제공 지연이 현재 25분 제품 약속을 초과하는 문제도
   해결되지 않았다. 제공 지연 분포를 별도로 측정한 뒤 freshness 약속 또는 제품 상태
   모델을 근거 있게 결정한다
+
+## 2026-07-13 — 2시간 참고용 표시 경계 검증
+
+- 배경: 서울 API의 약 30분 source 지연이 25분 운영 경계를 일상적으로 넘겨, 기존
+  fail-closed 정책에서는 정상 수집 직후에도 모든 현재값이 숨겨졌다. 사용자가 2시간
+  기준에서 실제 표시 결과를 확인하도록 요청했다
+- production 관측:
+  - 121개 핫스팟의 원본 관측 시각은 `2026-07-13T00:15Z`~`00:35Z` 범위였다
+  - 마스킹 전 배포의 동일 viewport 조회에서는 카페 522곳이 모두 level 1(한산)이고
+    근거 강도는 모두 낮았다. 이는 시간대별 정확도가 확보됐다는 증거가 아니라 현재
+    모델과 당시 원본의 출력 상태다
+  - 120분 상한을 적용하면 522곳 모두 표시 대상이지만 `delayed`이며, confidence와
+    forecast는 노출 대상이 아니다
+- 표시 계약:
+  - 관측 나이 25분 이하는 `fresh`
+  - 25분 초과 120분 이하는 `delayed`: level·score 표시, 지도와 패널 비중 축소,
+    `지연 데이터 · 참고용` 표시, confidence·confidence tier·forecast는 `NULL`
+  - 120분 초과는 `stale`: level·score를 포함한 현재 필드 숨김, provenance만 보존
+  - 25분은 운영/fresh 경계로 유지하며 `delayed`를 fresh로 부르지 않는다
+- health 계약: `stale_warn_min=25`와 `current_display_max_age_min=120`을 함께 반환한다
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+- 실제 결과: backend **432 passed**, compileall PASS. frontend typecheck와 production
+  build PASS. Vite의 기존 500kB 초과 bundle 경고 외 신규 오류 없음
+- 운영 참고: 마지막 scheduled cycle은 대림역의 no-record 응답 파싱으로
+  `saved=120, failed=1`인 partial이었다. 별도 수집 안정성 후속 조치가 필요하다
+- 판정: PASS(두 단계 표시 계약과 회귀 테스트). 이는 데이터 사용 가능성을 높이는
+  표시 정책 변경일 뿐 시간대별 추정 정확도 개선이나 2시간 정확도 보장을 의미하지 않는다

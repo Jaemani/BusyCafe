@@ -73,6 +73,10 @@
 
 ### Changed
 
+- 관측 신선도를 `fresh`/`delayed`/`stale`로 분리했다. 운영상 fresh 경계는 25분으로
+  유지하고, 25분 초과 120분 이하는 level·score만 낮은 시각적 비중으로 표시하면서
+  `지연 데이터 · 참고용`으로 명시한다. 이 구간의 confidence·등급·forecast는 숨기며,
+  120분을 초과하면 현재 level·score도 숨긴다. `/api/health`는 두 임계값을 함께 반환한다
 - 마지막 production 동시 fetch가 첫 5개 대상 실패 후 circuit-open된 운영 증거와 로컬
   순차 5곳 probe 성공을 근거로 `POLL_FETCH_CONCURRENCY`를 1로 낮춤. production canary
   run `29215956791`은 44.715초에 121개 저장·실패 0건으로 완료돼 poll을 다시 활성화했다.
@@ -96,9 +100,10 @@
 ### Fixed
 
 - production 수집 중단 뒤 전날 오후 혼잡값이 다음 날 새벽에도 현재값처럼 보이던 문제.
-  API 요청 시점에 개별 관측 freshness를 판정해 25분 초과, 관측 시각 누락 또는 과도한
-  미래 시각이면 level·score·confidence를 숨긴다. coverage, model version, 기준 장소와
-  원본 관측 시각은 보존하며 stale 상세 예측과 핫스팟 level도 노출하지 않는다
+  API 요청 시점에 개별 관측 freshness를 판정해 120분 초과, 관측 시각 누락 또는 과도한
+  미래 시각이면 level·score·confidence를 숨긴다. 25~120분 구간도 confidence와 예측은
+  숨기고 지연 상태를 명시한다. coverage, model version, 기준 장소와 원본 관측 시각은
+  보존하며 stale 상세 예측과 핫스팟 level은 노출하지 않는다
 - 전역 갱신 지연 배너와 별개로 오래된 카페 마커 색상이 현재 혼잡도를 암시하던 문제.
   상세 패널에서 오래된 근거이며 현재값을 표시하지 않는다는 상태를 명시한다. 공개
   Vercel/API에서 stale 현재값 마스킹을 확인했으며, source 지연 때문에 색상이 보이지
