@@ -1,0 +1,118 @@
+name: Refresh production cafe catalog
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply the curated catalog to production"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cafe-catalog-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+      CATALOG_DATA_DIR: data/catalog-refresh
+      OVERTURE_CACHE: data/catalog-refresh/overture-seoul-cafes-min050.parquet
+      PERMIT_CACHE: data/catalog-refresh/seoul-refreshment-candidates.jsonl
+      PERMIT_MANIFEST: data/catalog-refresh/seoul-refreshment-candidates.manifest.json
+      CURATED_CACHE: data/catalog-refresh/curated-seoul-cafes.jsonl
+      CURATED_MANIFEST: data/catalog-refresh/curated-seoul-cafes.manifest.json
+    steps:
+      - name: Check production secrets
+        working-directory: .
+        run: |
+          if [ -z "${DATABASE_URL:-}" ] || [ -z "${SEOUL_API_KEY:-}" ]; then
+            echo "Production DATABASE_URL and SEOUL_API_KEY are required." >&2
+            exit 1
+          fi
+          case "$DATABASE_URL" in
+            postgresql://*|postgres://*|postgresql+psycopg://*) ;;
+            *)
+              echo "DATABASE_URL must be a PostgreSQL connection string." >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Prepare ephemeral catalog workspace
+        run: mkdir -p "$CATALOG_DATA_DIR"
+
+      - name: Download immutable Overture candidate cache
+        run: >-
+          uv run python scripts/seed_cafes.py
+          --download
+          --download-only
+          --min-confidence 0.50
+          --cache "$OVERTURE_CACHE"
+
+      - name: Build official permit candidate cache
+        run: >-
+          uv run python scripts/cache_refreshment_candidates.py
+          --output "$PERMIT_CACHE"
+          --manifest "$PERMIT_MANIFEST"
+
+      - name: Build curated cafe catalog
+        run: >-
+          uv run python scripts/build_curated_cafe_catalog.py
+          --overture-cache "$OVERTURE_CACHE"
+          --permit-cache "$PERMIT_CACHE"
+          --output "$CURATED_CACHE"
+          --manifest "$CURATED_MANIFEST"
+
+      - name: Verify production database schema
+        run: uv run alembic -c alembic.ini current --check-heads
+
+      - name: Dry-run curated cafe seed
+        run: >-
+          uv run python scripts/seed_curated_cafes.py
+          --cache "$CURATED_CACHE"
+
+      - if: ${{ inputs.apply == true }}
+        name: Apply curated cafe seed
+        run: >-
+          uv run python scripts/seed_curated_cafes.py
+          --cache "$CURATED_CACHE"
+          --apply
+
+      - if: ${{ inputs.apply == true }}
+        name: Materialize cafe scores
+        run: uv run python scripts/materialize_scores.py
+
+      - if: ${{ always() }}
+        name: Upload aggregate refresh manifests
+        uses: actions/upload-artifact@v4
+        with:
+          name: cafe-catalog-refresh-manifests-${{ github.run_id }}
+          path: |
+            backend/${{ env.PERMIT_MANIFEST }}
+            backend/${{ env.CURATED_MANIFEST }}
+          if-no-files-found: warn
+          retention-days: 30
