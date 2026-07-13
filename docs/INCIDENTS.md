@@ -465,3 +465,100 @@ monitor gate만 유지했으며, 운영 scheduler를 별도 상시 Docker worker
 - [x] mid-cycle interrupt에서 미커밋 target을 saved로 계산하지 않는 회귀 테스트
 - [ ] hard kill·runner 장애처럼 cleanup 불가능한 경우의 오래된 `running` 회수 정책 추가
 - [ ] 상시 Docker worker 배포 후 1시간 연속 6 cycle의 `121/121/0` 확인
+
+## INC-2026-014 — 오래된 혼잡 스냅샷을 현재값처럼 표시
+
+- 상태: Monitoring (코드 대응 완료, production 배포 확인 대기)
+- 심각도: SEV-2
+- 시작 시각: 2026-07-12T05:10Z 이후
+- 감지 시각: 2026-07-13
+- 작성자: Codex
+- 관련 인시던트: INC-2026-013
+
+### 요약
+
+production 수집이 중단된 상태에서 2026-07-12T05:10Z 전후에 관측된 오후 혼잡 레벨이
+7월 13일 새벽에도 현재 혼잡도처럼 카페 마커 색상과 상세 패널에 표시됐다. 사용자는
+시간대와 맞지 않는 오래된 값을 현재 추정으로 오인할 수 있었다. 이 사건은 시간대별
+추정 정확도의 문제가 아니라, 현재성이 상실된 관측을 제품이 계속 현재값으로 노출한
+표시 안전성 결함이다.
+
+### 타임라인
+
+- 2026-07-12 — GitHub hosted runner의 서울 API 요청 실패와 실행 주기 불안정 때문에
+  production poll을 `PRODUCTION_POLL_ENABLED=false`로 중단했다. 활성화했던 후속 cycle은
+  timeout 또는 실패로 끝났다. 마지막 활성 production cycle은 fetch concurrency 4에서
+  첫 5개 대상이 실패해 circuit이 열렸고 나머지 116개는 호출하지 않았다. 같은 경로의
+  단일 고정 probe는 성공했다.
+- 2026-07-13 새벽 — 전날 오후 스냅샷에서 materialize된 혼잡 레벨이 지도 전역에서
+  현재값처럼 보이는 현상을 사용자가 발견했다.
+- 2026-07-13 — DB write 없는 로컬 bounded sequential probe로 명동·강남 MICE 관광특구·
+  동대문 관광특구·이태원 관광특구·잠실 관광특구 5곳을 확인했고 모두
+  `PPLTN_TIME=2026-07-13 09:10` 응답에 성공했다. 이를 근거로 production fetch
+  concurrency 기본값을 1로 낮췄다.
+- 2026-07-13 — API 응답 시점의 관측 신선도를 판정하고 오래된 현재값을 숨기는
+  fail-closed 경로와 회귀 테스트를 추가했다.
+
+### 탐지
+
+사용자가 새벽 시간의 지도 색상이 실제 상황과 맞지 않는다고 지적해 발견했다.
+`/api/health`에는 수집 지연 정보가 있었지만, 개별 카페·핫스팟 응답이 오래된 현재값을
+계속 반환하는지 감시하거나 차단하는 검사가 없었다. 따라서 상단 지연 배너는 표시돼도
+마커의 강한 색상은 그대로 남았다.
+
+### 근본 원인
+
+직접 원인은 `/api/cafes`, `/api/cafes/{id}`, `/api/hotspots`가 관측 시각의 나이를
+검사하지 않고 저장된 level·score·confidence를 그대로 반환한 것이다. 운영 측에서는
+전용 상시 worker 없이 GitHub Actions poll에 의존했고, 실패가 반복된 뒤 poll을 끈 상태라
+새 스냅샷이 들어오지 않았다. 프론트의 전역 지연 배너는 운영 상태만 설명했으며 개별
+마커의 현재값을 무효화하지 않았다. 즉 수집 실패, API의 freshness 비강제, UI의 시각적
+비중립화가 함께 사용자 오해를 허용했다.
+
+마지막 production 실패는 fetch concurrency 4에서 연속 5개 대상 실패로 circuit이 열린
+것이지만, 단일 production probe와 로컬 순차 5곳 probe는 성공했다. 따라서 서울 API 전체
+장애나 키 오류로 단정하지 않으며, 동시 요청 또는 실행 환경 경로의 영향을 분리 검증해야
+한다.
+
+### 대응과 복구
+
+API가 요청 시각을 기준으로 개별 관측의 freshness를 계산하도록 변경했다.
+`STALE_WARN_MIN`을 초과했거나 관측 시각이 없거나 허용 범위를 넘는 미래 시각이면
+`freshness=stale`로 판정한다. 이때 level·score·confidence·confidence_tier는 `NULL`로
+숨기되 coverage, model version, 기준 핫스팟과 거리, 원본 관측 시각은 감사 가능한
+근거로 보존한다. 오래된 상세 응답의 1시간 예측은 `NULL`로 만들고, 핫스팟 응답도
+오래된 level을 숨긴다. 프론트 패널은 이를 “갱신 지연 · 현재 혼잡도 숨김”과
+“오래된 근거 · 현재값 미표시”로 설명한다.
+
+수집 경로는 보수적인 production canary를 위해 `POLL_FETCH_CONCURRENCY=1`로 낮췄다.
+이는 로컬 read-only probe 근거의 위험 축소 조치이며 production 연속 수집이 복구됐다는
+증거가 아니다. poll gate는 canary와 연속 cycle 검증 전까지 다시 활성화하지 않는다.
+
+이 조치는 오래된 값의 현재값 오인을 막는 안전장치다. 요일·시간·공휴일 기준선과
+현장 관측을 이용한 시간대별 정확도가 검증됐다는 의미는 아니며, 현재 모델의 시간대별
+정확도를 주장하지 않는다.
+
+### 잘된 점 / 어려웠던 점
+
+- 잘된 점: 관측 시각과 근거 provenance가 보존돼 원인을 즉시 분리할 수 있었고,
+  저장 점수를 재작성하지 않고 요청 경계에서 fail-closed 처리가 가능했다.
+- 어려웠던 점: 전역 health 상태와 개별 관측 freshness가 분리돼 있었고, 색상 마커가
+  지연 배너보다 강한 현재성 신호를 전달했다.
+
+### 재발 방지 조치
+
+- [x] 카페 목록·상세 응답에 요청 시점 freshness 판정과 stale 현재값 마스킹 추가
+- [x] 관측 시각 누락과 과도한 미래 시각도 stale로 처리
+- [x] stale 상세 예측과 핫스팟 level을 숨기고 원본 근거 시각은 보존
+- [x] stale 경계, 미래 시각, `min_conf` 필터의 회귀 테스트 추가
+- [x] 프론트 패널에서 오래된 근거와 현재값 미표시를 명시
+- [x] DB write 없는 로컬 순차 5곳 probe 성공 확인 후 fetch concurrency를 1로 축소
+- [ ] production 배포 후 오래된 마커가 중립화되고 API 현재값이 `NULL`인지 확인
+- [ ] production concurrency 1 canary에서 121개 대상 cycle 결과 확인
+- [ ] 상시 worker 배포 후 1시간 연속 6 cycle과 25분 freshness 약속 검증
+
+### 교훈
+
+stale 경고는 설명만으로 충분하지 않다. 현재성을 잃은 관측은 현재값을 생성하는 모든
+API와 시각 표현에서 기계적으로 무효화해야 한다. 수집 가용성과 시간대별 모델 정확도는
+별도 문제이므로, 이 안전 수정으로 정확도가 개선됐다고 주장하지 않는다.

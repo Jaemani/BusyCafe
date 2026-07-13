@@ -914,3 +914,46 @@
   shadow 산출물이며 heatmap이나 공개 preview를 추가하지 않았다
 - 판정: PASS(shadow 계약과 offline artifact 자동 검증). 공식 격자 전수 대조와 empirical
   평가 전까지 공개 `/api/activity`, heatmap과 기본 레이어 승격은 계속 차단한다
+
+## 2026-07-13 — stale 현재 혼잡도 fail-closed 처리
+
+- 관련 인시던트: [INC-2026-014](INCIDENTS.md#inc-2026-014--오래된-혼잡-스냅샷을-현재값처럼-표시)
+- 재현 상태: production poll이 `PRODUCTION_POLL_ENABLED=false`로 중단돼 있었고,
+  활성화한 직전 실행들은 timeout 또는 `saved=0, failed=121`로 종료됐다. 후자의 실제
+  요청은 첫 5개 실패 뒤 circuit-open된 116개를 실패 집계에 포함한다. 7월 13일 새벽
+  API는 2026-07-12T05:10Z 전후의 오후 관측에서 만든 level을 현재값처럼 반환했다
+- 실행 명령:
+  - `cd backend && uv run pytest`
+  - `cd backend && uv run python -m compileall -q app scripts tests`
+  - `cd frontend && npm run typecheck`
+  - `cd frontend && npm run build`
+- 실제 결과: backend **431 passed**, compileall PASS. frontend typecheck와 production
+  build PASS. Vite의 500kB 초과 bundle 경고는 기존과 동일하며 신규 오류는 없음
+- 회귀 계약:
+  - 요청 시각 기준 관측 나이가 `STALE_WARN_MIN`을 초과하면 `freshness=stale`이고,
+    경계값 자체는 fresh다
+  - 관측 시각이 없거나 `FRESHNESS_MAX_FUTURE_SKEW_MIN`을 초과해 미래이면 stale다
+  - stale 카페 응답은 level·score·confidence·confidence_tier를 `NULL`로 반환하지만
+    coverage, model version, 기준 핫스팟·거리와 원본 observed_at은 보존한다
+  - stale 항목은 양수 `min_conf` 조회에서 제외하며, 상세 `forecast_1h`와 핫스팟 level도
+    `NULL`로 반환한다
+  - 프론트 상세 패널은 “갱신 지연 · 현재 혼잡도 숨김”, “오래된 근거 · 현재값 미표시”로
+    현재값이 아님을 설명한다
+- 판정: PASS(자동 회귀 기준). 오래된 값을 현재값처럼 표시하는 경로는 fail-closed로
+  차단됐다. 이 결과는 요일·시간대별 모델 정확도를 검증하지 않으며, production 수집
+  연속성도 복구하지 않는다. 시간대별 정확도는 historical baseline과 Phase 6 현장 관측
+  gate를 통과하기 전까지 주장하지 않는다
+
+## 2026-07-13 — 서울 API 순차 probe와 production concurrency 축소
+
+- 선행 production 증거: fetch concurrency 4로 실행한 마지막 활성 cycle은 첫 5개
+  target이 실패해 circuit이 열렸고 나머지 116개는 호출하지 않았다. 별도의 단일 고정
+  probe는 성공했으므로 서울 API 전체 장애나 키 오류로 판정하지 않았다
+- 실행 환경: 로컬 macOS, read-only 서울 API probe. DB write와 materialize 없음
+- 대상: 명동 관광특구, 강남 MICE 관광특구, 동대문 관광특구, 이태원 관광특구,
+  잠실 관광특구를 bounded sequential 방식으로 호출
+- 실제 결과: 5/5 PASS, 각 응답의 `PPLTN_TIME`은 2026-07-13 09:10
+- 조치: 보수적인 다음 production canary를 위해 `POLL_FETCH_CONCURRENCY=1`로 축소
+- 판정: 로컬 순차 호출 경로 PASS. GitHub hosted runner의 121개 production cycle과
+  1시간 연속 수집은 아직 검증하지 않았으므로 production 복구를 주장하지 않는다.
+  `PRODUCTION_POLL_ENABLED`는 canary 승인과 실행 전까지 false로 유지한다
