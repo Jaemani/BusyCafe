@@ -956,4 +956,29 @@
 - 조치: 보수적인 다음 production canary를 위해 `POLL_FETCH_CONCURRENCY=1`로 축소
 - 판정: 로컬 순차 호출 경로 PASS. GitHub hosted runner의 121개 production cycle과
   1시간 연속 수집은 아직 검증하지 않았으므로 production 복구를 주장하지 않는다.
-  `PRODUCTION_POLL_ENABLED`는 canary 승인과 실행 전까지 false로 유지한다
+  이 판정 시점에는 `PRODUCTION_POLL_ENABLED=false`를 유지했으며, 이후 canary 결과는
+  아래 별도 기록으로 남긴다
+
+## 2026-07-13 — stale 마스킹 production 배포와 concurrency 1 canary
+
+- 관련 인시던트: [INC-2026-014](INCIDENTS.md#inc-2026-014--오래된-혼잡-스냅샷을-현재값처럼-표시)
+- 배포 검증: Vercel 공개 화면과 API에서 stale 카페의 level·score·confidence가 숨겨지고,
+  오래된 관측 시각은 근거로 보존되는 것을 확인했다. 오래된 마커는 현재 혼잡 색상으로
+  표시되지 않는다
+- production 실행: GitHub Actions run `29215956791`,
+  `POLL_FETCH_CONCURRENCY=1`
+- 실제 결과:
+  - 총 44.715초, poll phase 31.815초
+  - `saved=121, failed=0`
+  - 121개 source `PPLTN_TIME`은 모두 `2026-07-13T00:15Z`
+  - fetch는 약 `2026-07-13T00:45Z`에 이뤄져 source 관측 지연은 약 30분
+- freshness 판정: 약 30분의 source 지연이 `STALE_WARN_MIN=25`를 초과하므로, 새로
+  저장된 121개 현재값도 API에서 모두 stale로 마스킹됐다. 이는 gate가 의도대로 작동한
+  결과이며 색상을 표시하기 위해 임계값을 완화하지 않았다
+- 운영 상태: canary 성공 뒤 `PRODUCTION_POLL_ENABLED=true`로 활성화했다. 단일 cycle
+  성공만 확인했으므로 1시간 연속 6 cycle 검증은 남아 있다. 최근 GitHub schedule 실행도
+  `*/10` 선언과 달리 약 1시간 간격으로 관측돼 10분 SLA의 근거로 사용하지 않는다
+- 판정: stale 오정보 차단과 단일 production 수집은 PASS. 시간대별 정확도와 운영
+  연속성은 미검증이며, source 제공 지연이 현재 25분 제품 약속을 초과하는 문제도
+  해결되지 않았다. 제공 지연 분포를 별도로 측정한 뒤 freshness 약속 또는 제품 상태
+  모델을 근거 있게 결정한다

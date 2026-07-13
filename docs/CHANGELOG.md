@@ -74,8 +74,9 @@
 ### Changed
 
 - 마지막 production 동시 fetch가 첫 5개 대상 실패 후 circuit-open된 운영 증거와 로컬
-  순차 5곳 probe 성공을 근거로 `POLL_FETCH_CONCURRENCY`를 1로 낮춤. production canary와
-  연속 cycle 검증 전에는 수집 복구로 간주하지 않음
+  순차 5곳 probe 성공을 근거로 `POLL_FETCH_CONCURRENCY`를 1로 낮춤. production canary
+  run `29215956791`은 44.715초에 121개 저장·실패 0건으로 완료돼 poll을 다시 활성화했다.
+  다만 1시간 연속 cycle 검증 전에는 운영 연속성이 복구된 것으로 간주하지 않음
 - UI의 퍼센트형 `신뢰도` 표현을 정확도 확률로 오인되지 않는 `근거 강도` 등급으로
   변경하고, Overture confidence는 `장소 원장 품질`로 구분
 - `activity-shadow`는 여러 셀의 raw 관측값과 raw 기준선을 집계하지 않고 source-local
@@ -99,7 +100,9 @@
   미래 시각이면 level·score·confidence를 숨긴다. coverage, model version, 기준 장소와
   원본 관측 시각은 보존하며 stale 상세 예측과 핫스팟 level도 노출하지 않는다
 - 전역 갱신 지연 배너와 별개로 오래된 카페 마커 색상이 현재 혼잡도를 암시하던 문제.
-  상세 패널에서 오래된 근거이며 현재값을 표시하지 않는다는 상태를 명시한다
+  상세 패널에서 오래된 근거이며 현재값을 표시하지 않는다는 상태를 명시한다. 공개
+  Vercel/API에서 stale 현재값 마스킹을 확인했으며, source 지연 때문에 색상이 보이지
+  않더라도 freshness 임계값을 임의로 완화하지 않는다
 - Overture 지역 seed가 DB 전체 카페를 조회해 다른 지역 카페까지 비활성화할 수 있던
   범위를 명시적 edge-inclusive bbox로 제한. 범위 밖 입력은 DB mutation 전에 전체 거부
 - 외부 API가 연속 실패할 때 최악 85분까지 retry할 수 있던 poll을 5-target circuit으로 제한
