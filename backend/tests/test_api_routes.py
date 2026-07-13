@@ -177,6 +177,26 @@ def test_detail_api_returns_scoring_model_version(api_client) -> None:
     assert response.json()["freshness"] == "fresh"
 
 
+def test_cafe_source_label_exposes_permit_verification(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        cafe.source_json = [
+            {
+                "dataset_id": "OA-16095",
+                "management_number": "verified-test",
+            }
+        ]
+        session.commit()
+
+    item = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    ).json()[0]
+
+    assert "서울시 영업 인허가 대조" in item["source_label"]
+
+
 def test_delayed_snapshot_shows_level_without_confidence(api_client) -> None:
     stale_time = datetime.now(UTC) - timedelta(minutes=26)
     factory = api_client.app.state.test_session_factory
@@ -355,7 +375,12 @@ def test_sources_returns_static_license_manifest(api_client) -> None:
     assert "s-maxage=60" in response.headers["cache-control"]
     payload = response.json()
     sources = {item["id"]: item for item in payload["sources"]}
-    assert set(sources) == {"seoul-citydata", "overture-places", "openfreemap"}
+    assert set(sources) == {
+        "seoul-citydata",
+        "seoul-refreshment-permits",
+        "overture-places",
+        "openfreemap",
+    }
     assert sources["overture-places"]["release"] == OVERTURE_RELEASE
     assert sources["seoul-citydata"]["licenses"] == [
         {
@@ -363,6 +388,7 @@ def test_sources_returns_static_license_manifest(api_client) -> None:
             "url": "https://www.kogl.or.kr/info/licenseType1.do",
         }
     ]
+    assert sources["seoul-refreshment-permits"]["role"] == "place_verification"
     assert any(
         license_link["name"] == "OpenStreetMap ODbL"
         for license_link in sources["openfreemap"]["licenses"]

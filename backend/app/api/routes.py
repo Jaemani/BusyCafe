@@ -83,6 +83,24 @@ _SOURCE_MANIFEST = SourceManifestResponse(
             ],
         ),
         DataSourceManifestItem(
+            id="seoul-refreshment-permits",
+            role="place_verification",
+            name="서울시 휴게음식점 인허가 정보",
+            attribution=(
+                "서울특별시 서울시 휴게음식점 인허가 정보(OA-16095), "
+                "공공누리 제1유형"
+            ),
+            source_url=(
+                "https://data.seoul.go.kr/dataList/OA-16095/S/1/datasetView.do"
+            ),
+            licenses=[
+                LicenseLink(
+                    name="공공누리 제1유형",
+                    url="https://www.kogl.or.kr/info/licenseType1.do",
+                )
+            ],
+        ),
+        DataSourceManifestItem(
             id="openfreemap",
             role="basemap",
             name="OpenFreeMap",
@@ -165,6 +183,22 @@ def _safe_website(value: str | None) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.hostname else None
 
 
+def _cafe_source_label(cafe: Cafe) -> str:
+    permit_verified = isinstance(cafe.source_json, list) and any(
+        isinstance(source, dict) and source.get("dataset_id") == "OA-16095"
+        for source in cafe.source_json
+    )
+    label = (
+        f"Overture Places · {cafe.source_release} · "
+        f"장소 원장 품질 {cafe.source_confidence:.2f}"
+    )
+    if permit_verified:
+        label += " · 서울시 영업 인허가 대조"
+    if os.getenv("CAFE_CROWD_SNAPSHOT") == "1":
+        label += " · 배포 스냅샷"
+    return label
+
+
 def _observation_freshness(
     observed_at: datetime | None,
     *,
@@ -231,10 +265,7 @@ def _cafe_response(
         road_address=cafe.road_address,
         phone=cafe.phone,
         website=_safe_website(cafe.website),
-        source_label=(
-            f"Overture Places · {cafe.source_release} · 장소 원장 품질 {cafe.source_confidence:.2f}"
-            + (" · 배포 스냅샷" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "")
-        ),
+        source_label=_cafe_source_label(cafe),
         model_version=score.model_version if score else None,
         level=score.level if expose_level else None,
         score=score.score if expose_level else None,
