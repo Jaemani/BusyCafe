@@ -50,11 +50,19 @@ export function showCafePanel(cafe: CafeProperties): void {
     website.removeAttribute("href");
   }
   requiredElement<HTMLElement>("#cafe-level").textContent =
-    cafe.level === null ? LEVEL_LABELS[0] : LEVEL_LABELS[cafe.level];
-  requiredElement<HTMLElement>("#cafe-coverage").textContent = COVERAGE_LABELS[cafe.coverage];
-  requiredElement<HTMLElement>("#cafe-confidence").textContent = cafe.confidenceTier === null
-    ? "근거 강도 산정 전"
-    : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[cafe.confidenceTier]}`;
+    cafe.freshness === "stale"
+      ? "갱신 지연 · 현재 혼잡도 숨김"
+      : cafe.level === null
+        ? LEVEL_LABELS[0]
+        : LEVEL_LABELS[cafe.level];
+  requiredElement<HTMLElement>("#cafe-coverage").textContent =
+    COVERAGE_LABELS[cafe.coverage];
+  requiredElement<HTMLElement>("#cafe-confidence").textContent =
+    cafe.freshness === "stale"
+      ? "오래된 근거 · 현재값 미표시"
+      : cafe.confidenceTier === null
+        ? "근거 강도 산정 전"
+        : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[cafe.confidenceTier]}`;
   requiredElement<HTMLElement>("#estimate-dot").dataset.level = String(cafe.level ?? 0);
   requiredElement<HTMLElement>("#cafe-evidence").textContent = formatEvidence(cafe);
   requiredElement<HTMLElement>("#cafe-source").textContent =

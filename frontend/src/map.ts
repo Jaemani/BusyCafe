@@ -61,6 +61,7 @@ function readCafeProperties(feature: MapGeoJSONFeature): CafeProperties | null {
     level: properties.level ?? null,
     confidence: properties.confidence ?? null,
     confidenceTier: properties.confidenceTier ?? null,
+    freshness: properties.freshness ?? "n/a",
     hotspotName: properties.hotspotName ?? null,
     distanceM: properties.distanceM ?? null,
     observedAt: properties.observedAt ?? null,

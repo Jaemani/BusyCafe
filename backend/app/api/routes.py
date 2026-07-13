@@ -13,7 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
-from app.config import MAX_CAFES_PER_VIEWPORT, OVERTURE_RELEASE, STALE_WARN_MIN
+from app.config import (
+    FRESHNESS_MAX_FUTURE_SKEW_MIN,
+    MAX_CAFES_PER_VIEWPORT,
+    OVERTURE_RELEASE,
+    STALE_WARN_MIN,
+)
 from app.database import get_db
 from app.models import Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
 from app.schemas import (
@@ -159,12 +164,46 @@ def _safe_website(value: str | None) -> str | None:
     return value if parsed.scheme in {"http", "https"} and parsed.hostname else None
 
 
+def _observation_freshness(
+    observed_at: datetime | None,
+    *,
+    now: datetime,
+) -> str:
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    normalized = _utc(observed_at)
+    if normalized is None:
+        return "stale"
+    age_min = (now - normalized).total_seconds() / 60.0
+    if (
+        age_min > STALE_WARN_MIN
+        or age_min < -FRESHNESS_MAX_FUTURE_SKEW_MIN
+    ):
+        return "stale"
+    return "fresh"
+
+
 def _cafe_response(
     cafe: Cafe,
     score: CafeScore | None,
     hotspot: Hotspot | None,
     observed_at: datetime | None = None,
+    *,
+    now: datetime | None = None,
 ) -> CafeMapResponse:
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    normalized_observed_at = _utc(observed_at)
+    freshness = (
+        "n/a"
+        if score is None
+        else _observation_freshness(
+            normalized_observed_at,
+            now=current_time,
+        )
+    )
+    expose_current = score is not None and freshness == "fresh"
     return CafeMapResponse(
         id=cafe.id,
         name=cafe.name,
@@ -178,15 +217,16 @@ def _cafe_response(
             + (" · 배포 스냅샷" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "")
         ),
         model_version=score.model_version if score else None,
-        level=score.level if score else None,
-        score=score.score if score else None,
-        confidence=score.confidence if score else None,
-        confidence_tier=score.confidence_tier if score else None,
+        level=score.level if expose_current else None,
+        score=score.score if expose_current else None,
+        confidence=score.confidence if expose_current else None,
+        confidence_tier=score.confidence_tier if expose_current else None,
+        freshness=freshness,
         coverage=(score.coverage if score else "uncovered"),
         evidence=EvidenceResponse(
             hotspot_name=hotspot.name if hotspot else None,
             distance_m=score.primary_distance_m if score else None,
-            observed_at=_utc(observed_at),
+            observed_at=normalized_observed_at,
         ),
         external_links=_safe_external_links(cafe.external_links_json),
     )
@@ -231,24 +271,47 @@ def list_cafes(
         statement = statement.where(CafeScore.confidence >= min_conf)
     rows = db.execute(statement).all()
     _set_cache_headers(response)
-    return [
-        _cafe_response(cafe, score, hotspot, observed_at)
+    request_time = datetime.now(UTC)
+    items = [
+        _cafe_response(cafe, score, hotspot, observed_at, now=request_time)
         for cafe, score, hotspot, observed_at in rows
+    ]
+    return [
+        item
+        for item in items
+        if min_conf == 0
+        or (item.confidence is not None and item.confidence >= min_conf)
     ]
 
 
 @router.get("/cafes/{cafe_id}", response_model=CafeDetailResponse)
-def get_cafe(cafe_id: int, response: Response, db: Session = Depends(get_db)) -> CafeDetailResponse:
+def get_cafe(
+    cafe_id: int,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> CafeDetailResponse:
+    latest_observed_at = (
+        select(func.max(HotspotSnapshot.observed_at))
+        .where(HotspotSnapshot.hotspot_id == CafeScore.primary_hotspot_id)
+        .correlate(CafeScore)
+        .scalar_subquery()
+    )
     row = db.execute(
-        select(Cafe, CafeScore, Hotspot)
+        select(Cafe, CafeScore, Hotspot, latest_observed_at)
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
         .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
         .where(Cafe.id == cafe_id, Cafe.active.is_(True))
     ).one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="cafe not found")
-    cafe, score, hotspot = row
-    base = _cafe_response(cafe, score, hotspot)
+    cafe, score, hotspot, observed_at = row
+    base = _cafe_response(
+        cafe,
+        score,
+        hotspot,
+        observed_at,
+        now=datetime.now(UTC),
+    )
     latest_snapshot: HotspotSnapshot | None = None
     trend: list[TrendPointResponse] = []
     if score and score.primary_hotspot_id:
@@ -272,7 +335,11 @@ def get_cafe(cafe_id: int, response: Response, db: Session = Depends(get_db)) ->
     if score and score.contributors_json:
         contributors = [ContributorResponse.model_validate(item) for item in score.contributors_json]
     forecast_1h = None
-    if latest_snapshot and latest_snapshot.forecast_json:
+    if (
+        base.freshness == "fresh"
+        and latest_snapshot
+        and latest_snapshot.forecast_json
+    ):
         target = latest_snapshot.observed_at + timedelta(hours=1)
         def forecast_distance(item: dict[str, Any]) -> float:
             try:
@@ -282,7 +349,11 @@ def get_cafe(cafe_id: int, response: Response, db: Session = Depends(get_db)) ->
                 return abs((candidate - target).total_seconds())
             except (KeyError, TypeError, ValueError):
                 return float("inf")
-        forecast_1h = min(latest_snapshot.forecast_json, key=forecast_distance, default=None)
+        forecast_1h = min(
+            latest_snapshot.forecast_json,
+            key=forecast_distance,
+            default=None,
+        )
     _set_cache_headers(response)
     return CafeDetailResponse(
         **base.model_dump(),
@@ -316,18 +387,32 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
         .where(Hotspot.is_polled.is_(True))
         .order_by(Hotspot.area_cd)
     ).all()
-    return [
-        HotspotStatusResponse(
-            id=hotspot.id,
-            area_cd=hotspot.area_cd,
-            name=hotspot.name,
-            lat=hotspot.lat,
-            lng=hotspot.lng,
-            observed_at=_utc(snapshot.observed_at) if snapshot else None,
-            level=snapshot.congest_level if snapshot else None,
+    now = datetime.now(UTC)
+    responses: list[HotspotStatusResponse] = []
+    for hotspot, snapshot in rows:
+        observed_at = _utc(snapshot.observed_at) if snapshot else None
+        freshness = (
+            _observation_freshness(observed_at, now=now)
+            if snapshot
+            else "n/a"
         )
-        for hotspot, snapshot in rows
-    ]
+        responses.append(
+            HotspotStatusResponse(
+                id=hotspot.id,
+                area_cd=hotspot.area_cd,
+                name=hotspot.name,
+                lat=hotspot.lat,
+                lng=hotspot.lng,
+                observed_at=observed_at,
+                level=(
+                    snapshot.congest_level
+                    if snapshot and freshness == "fresh"
+                    else None
+                ),
+                freshness=freshness,
+            )
+        )
+    return responses
 
 
 @router.get("/health", response_model=HealthResponse)

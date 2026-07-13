@@ -16,6 +16,7 @@ export interface CafeProperties {
   level: 1 | 2 | 3 | 4 | null;
   confidence: number | null;
   confidenceTier: "high" | "mid" | "low" | null;
+  freshness: "fresh" | "stale" | "n/a";
   hotspotName: string | null;
   distanceM: number | null;
   observedAt: string | null;
@@ -61,6 +62,7 @@ interface CafeApiItem {
   level?: 1 | 2 | 3 | 4 | null;
   confidence?: number | null;
   confidence_tier?: "high" | "mid" | "low" | null;
+  freshness?: "fresh" | "stale" | "n/a";
   coverage?: "covered" | "fringe" | "uncovered";
   evidence?: {
     hotspot_name?: string | null;
@@ -123,6 +125,7 @@ export class CachedApiCafeProvider implements CafeProvider {
           level: item.level ?? null,
           confidence: item.confidence ?? null,
           confidenceTier: item.confidence_tier ?? null,
+          freshness: item.freshness ?? "n/a",
           hotspotName: item.evidence?.hotspot_name ?? null,
           distanceM: item.evidence?.distance_m ?? null,
           observedAt: item.evidence?.observed_at ?? null,

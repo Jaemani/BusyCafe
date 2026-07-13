@@ -148,6 +148,7 @@ class CafeMapResponse(BaseModel):
     score: float | None = None
     confidence: float | None = None
     confidence_tier: str | None = None
+    freshness: Literal["fresh", "stale", "n/a"]
     coverage: Literal["covered", "fringe", "uncovered"]
     evidence: EvidenceResponse
     external_links: ExternalLinksResponse
@@ -180,6 +181,7 @@ class HotspotStatusResponse(BaseModel):
     lng: float
     observed_at: datetime | None = None
     level: int | None = None
+    freshness: Literal["fresh", "stale", "n/a"]
 
 
 class HealthResponse(BaseModel):

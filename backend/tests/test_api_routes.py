@@ -8,7 +8,12 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.config import OVERTURE_RELEASE, SCORING_MODEL_VERSION
+from app.api.routes import _observation_freshness
+from app.config import (
+    FRESHNESS_MAX_FUTURE_SKEW_MIN,
+    OVERTURE_RELEASE,
+    SCORING_MODEL_VERSION,
+)
 from app.database import get_db
 from app.main import create_app
 from app.models import Base, Cafe, CafeScore, Hotspot, HotspotSnapshot, IngestCycle
@@ -123,6 +128,7 @@ def api_client():
         session.commit()
 
     app = create_app()
+    app.state.test_session_factory = factory
 
     def override_db():
         with factory() as session:
@@ -145,6 +151,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     payload = response.json()
     assert [item["name"] for item in payload] == ["정확한 카페"]
     assert payload[0]["coverage"] == "covered"
+    assert payload[0]["freshness"] == "fresh"
     assert payload[0]["model_version"] == SCORING_MODEL_VERSION
     assert payload[0]["license_manifest_url"] == "/api/sources"
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
@@ -165,6 +172,72 @@ def test_detail_api_returns_scoring_model_version(api_client) -> None:
 
     assert response.status_code == 200
     assert response.json()["model_version"] == SCORING_MODEL_VERSION
+    assert response.json()["freshness"] == "fresh"
+
+
+def test_stale_snapshot_preserves_evidence_but_hides_current_score(api_client) -> None:
+    stale_time = datetime.now(UTC) - timedelta(minutes=26)
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        snapshot = session.query(HotspotSnapshot).one()
+        snapshot.observed_at = stale_time
+        snapshot.fetched_at = stale_time
+        session.commit()
+
+    listing = api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    ).json()
+
+    assert len(listing) == 1
+    item = listing[0]
+    assert item["freshness"] == "stale"
+    assert item["level"] is None
+    assert item["score"] is None
+    assert item["confidence"] is None
+    assert item["confidence_tier"] is None
+    assert item["coverage"] == "covered"
+    assert item["model_version"] == SCORING_MODEL_VERSION
+    assert item["evidence"]["hotspot_name"] == "테스트 핫스팟"
+    assert item["evidence"]["observed_at"] is not None
+    assert api_client.get(
+        "/api/cafes",
+        params={"bbox": "126.9,37.5,127.1,37.7", "min_conf": 0.1},
+    ).json() == []
+
+    detail = api_client.get(f"/api/cafes/{item['id']}").json()
+    assert detail["freshness"] == "stale"
+    assert detail["level"] is None
+    assert detail["score"] is None
+    assert detail["forecast_1h"] is None
+
+    hotspot = api_client.get("/api/hotspots").json()[0]
+    assert hotspot["freshness"] == "stale"
+    assert hotspot["level"] is None
+    assert hotspot["observed_at"] is not None
+
+
+def test_observation_freshness_boundary_and_future_skew() -> None:
+    now = datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
+
+    assert _observation_freshness(
+        now - timedelta(minutes=25), now=now
+    ) == "fresh"
+    assert _observation_freshness(
+        now - timedelta(minutes=25, microseconds=1), now=now
+    ) == "stale"
+    assert _observation_freshness(None, now=now) == "stale"
+    assert _observation_freshness(
+        now + timedelta(minutes=FRESHNESS_MAX_FUTURE_SKEW_MIN), now=now
+    ) == "fresh"
+    assert _observation_freshness(
+        now
+        + timedelta(
+            minutes=FRESHNESS_MAX_FUTURE_SKEW_MIN,
+            microseconds=1,
+        ),
+        now=now,
+    ) == "stale"
 
 
 @pytest.mark.parametrize(
