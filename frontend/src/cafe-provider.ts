@@ -20,6 +20,7 @@ export interface CafeProperties {
   hotspotName: string | null;
   distanceM: number | null;
   observedAt: string | null;
+  observationAgeMinutes: number | null;
 }
 
 export type CafeFeature = Feature<Point, CafeProperties>;
@@ -68,6 +69,7 @@ interface CafeApiItem {
     hotspot_name?: string | null;
     distance_m?: number | null;
     observed_at?: string | null;
+    age_minutes?: number | null;
   } | null;
   external_links?: {
     naver?: string | null;
@@ -129,6 +131,12 @@ export class CachedApiCafeProvider implements CafeProvider {
           hotspotName: item.evidence?.hotspot_name ?? null,
           distanceM: item.evidence?.distance_m ?? null,
           observedAt: item.evidence?.observed_at ?? null,
+          observationAgeMinutes:
+            typeof item.evidence?.age_minutes === "number" &&
+            Number.isFinite(item.evidence.age_minutes) &&
+            item.evidence.age_minutes >= 0
+              ? item.evidence.age_minutes
+              : null,
         },
       }];
     });

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.routes import _observation_freshness
+from app.api.routes import _observation_age_minutes, _observation_freshness
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
@@ -158,6 +158,7 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert payload[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert payload[0]["evidence"]["observed_at"] is not None
     assert payload[0]["evidence"]["observed_at"].endswith("Z")
+    assert payload[0]["evidence"]["age_minutes"] in (0, 1)
     assert payload[0]["phone"] == "02-123-4567"
     assert payload[0]["website"] == "https://example.test"
     assert payload[0]["external_links"]["kakao"].endswith("/456")
@@ -201,6 +202,7 @@ def test_delayed_snapshot_shows_level_without_confidence(api_client) -> None:
     assert item["model_version"] == SCORING_MODEL_VERSION
     assert item["evidence"]["hotspot_name"] == "테스트 핫스팟"
     assert item["evidence"]["observed_at"] is not None
+    assert item["evidence"]["age_minutes"] in (26, 27)
     assert api_client.get(
         "/api/cafes",
         params={"bbox": "126.9,37.5,127.1,37.7", "min_conf": 0.1},
@@ -275,6 +277,23 @@ def test_observation_freshness_boundary_and_future_skew() -> None:
         ),
         now=now,
     ) == "stale"
+
+
+def test_observation_age_rounds_up_and_rejects_invalid_future_time() -> None:
+    now = datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
+
+    assert _observation_age_minutes(now, now=now) == 0
+    assert _observation_age_minutes(
+        now - timedelta(minutes=25, seconds=1), now=now
+    ) == 26
+    assert _observation_age_minutes(
+        now + timedelta(minutes=FRESHNESS_MAX_FUTURE_SKEW_MIN), now=now
+    ) == 0
+    assert _observation_age_minutes(
+        now + timedelta(minutes=FRESHNESS_MAX_FUTURE_SKEW_MIN, seconds=1),
+        now=now,
+    ) is None
+    assert _observation_age_minutes(None, now=now) is None
 
 
 @pytest.mark.parametrize(

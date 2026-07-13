@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
-from math import isfinite
+from math import ceil, isfinite
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
@@ -184,6 +184,23 @@ def _observation_freshness(
     return "delayed" if age_min > STALE_WARN_MIN else "fresh"
 
 
+def _observation_age_minutes(
+    observed_at: datetime | None,
+    *,
+    now: datetime,
+) -> int | None:
+    """Return whole observation age without understating a partial minute."""
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    normalized = _utc(observed_at)
+    if normalized is None:
+        return None
+    age_min = (now - normalized).total_seconds() / 60.0
+    if age_min < -FRESHNESS_MAX_FUTURE_SKEW_MIN:
+        return None
+    return max(0, ceil(age_min))
+
+
 def _cafe_response(
     cafe: Cafe,
     score: CafeScore | None,
@@ -229,6 +246,11 @@ def _cafe_response(
             hotspot_name=hotspot.name if hotspot else None,
             distance_m=score.primary_distance_m if score else None,
             observed_at=normalized_observed_at,
+            age_minutes=(
+                _observation_age_minutes(normalized_observed_at, now=current_time)
+                if score is not None
+                else None
+            ),
         ),
         external_links=_safe_external_links(cafe.external_links_json),
     )

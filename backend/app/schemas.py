@@ -104,6 +104,7 @@ class EvidenceResponse(BaseModel):
     hotspot_name: str | None = None
     distance_m: float | None = None
     observed_at: datetime | None = None
+    age_minutes: int | None = Field(default=None, ge=0)
 
 
 class ExternalLinksResponse(BaseModel):

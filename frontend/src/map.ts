@@ -65,6 +65,7 @@ function readCafeProperties(feature: MapGeoJSONFeature): CafeProperties | null {
     hotspotName: properties.hotspotName ?? null,
     distanceM: properties.distanceM ?? null,
     observedAt: properties.observedAt ?? null,
+    observationAgeMinutes: properties.observationAgeMinutes ?? null,
   };
 }
 
@@ -291,6 +292,8 @@ export async function initializeCafeMap(
   let requestSequence = 0;
   let runtimeHealth: RuntimeHealthState | "unknown" | null = null;
   let displayedCafeCount: number | null = null;
+  let displayedDelayedCount = 0;
+  let displayedDelayRange: { min: number; max: number } | null = null;
 
   const renderCafeStatus = (): void => {
     if (displayedCafeCount === null) return;
@@ -302,11 +305,19 @@ export async function initializeCafeMap(
       : runtimeHealth === "unknown"
         ? " · 데이터 모드 확인 불가"
         : "";
-    if (runtimeKind === "delayed") {
+    if (runtimeKind === "delayed" || displayedDelayedCount > 0) {
       const countLabel = displayedCafeCount > 0
         ? ` · 카페 ${displayedCafeCount.toLocaleString("ko-KR")}곳`
         : "";
-      statusElement.textContent = `데이터 갱신 지연 중${countLabel}`;
+      const partialLabel = displayedDelayedCount > 0 && displayedDelayedCount < displayedCafeCount
+        ? "일부 데이터"
+        : "데이터";
+      const delayLabel = displayedDelayRange === null
+        ? "갱신 지연 중"
+        : displayedDelayRange.min === displayedDelayRange.max
+          ? `${displayedDelayRange.min}분 전 관측`
+          : `${displayedDelayRange.min}~${displayedDelayRange.max}분 전 관측`;
+      statusElement.textContent = `${partialLabel} ${delayLabel}${countLabel}`;
       statusElement.dataset.state = "stale";
       return;
     }
@@ -340,6 +351,8 @@ export async function initializeCafeMap(
     requestController = new AbortController();
     const sequence = ++requestSequence;
     displayedCafeCount = null;
+    displayedDelayedCount = 0;
+    displayedDelayRange = null;
     statusElement.textContent = "현재 화면을 확인하는 중";
     statusElement.dataset.state = "loading";
 
@@ -359,6 +372,16 @@ export async function initializeCafeMap(
       source?.setData(result);
       updateLegend(result.features.some((feature) => feature.properties.level !== null));
       displayedCafeCount = result.features.length;
+      const delayedFeatures = result.features.filter(
+        (feature) => feature.properties.freshness === "delayed",
+      );
+      const delayedAges = delayedFeatures
+        .map((feature) => feature.properties.observationAgeMinutes)
+        .filter((age): age is number => age !== null && Number.isFinite(age));
+      displayedDelayedCount = delayedFeatures.length;
+      displayedDelayRange = delayedAges.length > 0
+        ? { min: Math.min(...delayedAges), max: Math.max(...delayedAges) }
+        : null;
       renderCafeStatus();
     } catch (error) {
       if (requestController.signal.aborted || sequence !== requestSequence) return;
@@ -371,6 +394,8 @@ export async function initializeCafeMap(
   map.on("movestart", () => {
     hideCafePanel();
     displayedCafeCount = null;
+    displayedDelayedCount = 0;
+    displayedDelayRange = null;
     statusElement.textContent = "지도 이동 중";
     statusElement.dataset.state = "moving";
   });

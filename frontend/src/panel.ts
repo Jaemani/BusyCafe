@@ -10,7 +10,10 @@ function formatEvidence(cafe: CafeProperties): string {
   if (!cafe.hotspotName || cafe.distanceM === null) {
     return "이 지역은 아직 혼잡도 근거가 연결되지 않았어요.";
   }
-  return `${cafe.hotspotName} 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m`;
+  const ageLabel = cafe.freshness !== "stale" && cafe.observationAgeMinutes !== null
+    ? ` · ${Math.ceil(cafe.observationAgeMinutes).toLocaleString("ko-KR")}분 전 관측`
+    : "";
+  return `${cafe.hotspotName} 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m${ageLabel}`;
 }
 
 const LEVEL_LABELS = ["데이터 없음", "여유", "보통", "약간 붐빔", "붐빔"] as const;
@@ -61,7 +64,9 @@ export function showCafePanel(cafe: CafeProperties): void {
     cafe.freshness === "stale"
       ? "오래된 근거 · 현재값 미표시"
       : cafe.freshness === "delayed"
-        ? "지연 데이터 · 참고용"
+        ? cafe.observationAgeMinutes === null
+          ? "지연 데이터 · 참고용"
+          : `${Math.ceil(cafe.observationAgeMinutes).toLocaleString("ko-KR")}분 지연 · 참고용`
       : cafe.confidenceTier === null
         ? "근거 강도 산정 전"
         : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[cafe.confidenceTier]}`;
