@@ -14,7 +14,12 @@ from sqlalchemy.orm import Session
 from app.config import OVERTURE_RELEASE, SEOUL_BBOX
 from app.database import create_db_engine
 from app.ingest.curated_cafe_catalog import iter_curated_records
-from app.ingest.overture_places import OvertureCafeRecord, OvertureSeedReport, seed_overture_cafes
+from app.ingest.overture_places import (
+    NumericDeltaSummary,
+    OvertureCafeRecord,
+    OvertureSeedReport,
+    seed_overture_cafes,
+)
 from scripts.build_curated_cafe_catalog import DEFAULT_OUTPUT
 
 
@@ -37,6 +42,29 @@ def _format_changed_field_counts(report: OvertureSeedReport) -> str:
         f"{field}={count}" for field, count in report.changed_field_counts
     )
     return f"updated fields: {counts}"
+
+
+def _format_delta_summary(
+    label: str,
+    summary: NumericDeltaSummary | None,
+    *,
+    include_minimum: bool,
+) -> str:
+    """Render aggregate numeric diagnostics without record values or IDs."""
+
+    if summary is None:
+        return f"{label}: none"
+    parts = [f"count={summary.count}"]
+    if include_minimum:
+        parts.append(f"min={summary.minimum:.6f}")
+    parts.extend(
+        (
+            f"p50={summary.p50:.6f}",
+            f"p95={summary.p95:.6f}",
+            f"max={summary.maximum:.6f}",
+        )
+    )
+    return f"{label}: {', '.join(parts)}"
 
 
 def stage_curated_seed(
@@ -105,6 +133,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{report.unchanged_count}/{report.deactivated_count}"
     )
     print(_format_changed_field_counts(report))
+    print(
+        _format_delta_summary(
+            "coordinate delta m",
+            report.coordinate_delta_m,
+            include_minimum=True,
+        )
+    )
+    print(
+        _format_delta_summary(
+            "confidence absolute delta",
+            report.confidence_abs_delta,
+            include_minimum=False,
+        )
+    )
     return 0
 
 

@@ -14,6 +14,7 @@ from app.ingest.overture_places import (
     format_confidence_report,
     parse_overture_row,
     seed_overture_cafes,
+    summarize_numeric_deltas,
 )
 from app.models import Base, Cafe
 
@@ -166,6 +167,50 @@ def test_seed_dry_run_aggregates_changed_fields_without_values_or_ids(engine) ->
         assert report.updated_count == 2
         assert report.changed_field_counts == (("phone", 2), ("source_release", 2))
         assert all("overture:" not in field for field, _ in report.changed_field_counts)
+
+
+def test_summarize_numeric_deltas_is_deterministic_and_linear() -> None:
+    assert summarize_numeric_deltas([]) is None
+
+    summary = summarize_numeric_deltas([4.0, 0.0, 2.0, 1.0, 3.0])
+
+    assert summary is not None
+    assert summary.count == 5
+    assert summary.minimum == 0.0
+    assert summary.p50 == 2.0
+    assert summary.p95 == pytest.approx(3.8)
+    assert summary.maximum == 4.0
+
+
+def test_seed_dry_run_summarizes_coordinate_and_confidence_deltas(engine) -> None:
+    original = record("overture:1")
+    changed = record(
+        "overture:1",
+        lat=original.lat + 0.001,
+        confidence=original.confidence - 0.2,
+    )
+    with Session(engine) as session:
+        seed_overture_cafes(
+            session,
+            [original],
+            release="same-release",
+            scope_bbox=SEOUL_BBOX,
+        )
+        report = seed_overture_cafes(
+            session,
+            [changed],
+            release="same-release",
+            scope_bbox=SEOUL_BBOX,
+            dry_run=True,
+        )
+
+        assert report.coordinate_delta_m is not None
+        assert report.coordinate_delta_m.count == 1
+        assert report.coordinate_delta_m.minimum == report.coordinate_delta_m.maximum
+        assert report.coordinate_delta_m.maximum == pytest.approx(111.2, abs=0.2)
+        assert report.confidence_abs_delta is not None
+        assert report.confidence_abs_delta.count == 1
+        assert report.confidence_abs_delta.p50 == pytest.approx(0.2)
 
 
 def test_seed_deactivation_is_limited_to_explicit_scope(engine) -> None:

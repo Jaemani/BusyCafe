@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from app.ingest.overture_places import OvertureCafeRecord, OvertureSeedReport
+from app.ingest.overture_places import (
+    NumericDeltaSummary,
+    OvertureCafeRecord,
+    OvertureSeedReport,
+)
 from scripts.seed_curated_cafes import (
     CuratedSeedError,
     _format_changed_field_counts,
+    _format_delta_summary,
     stage_curated_seed,
 )
 
@@ -53,6 +58,27 @@ def test_changed_field_output_is_aggregate_only() -> None:
         "updated fields: phone=3, source_release=10"
     )
     assert _format_changed_field_counts(_report(dry_run=True)) == "updated fields: none"
+
+
+def test_numeric_delta_output_is_aggregate_only() -> None:
+    summary = NumericDeltaSummary(
+        count=3,
+        minimum=0.000001,
+        p50=0.25,
+        p95=1.5,
+        maximum=2.0,
+    )
+
+    assert _format_delta_summary(
+        "coordinate delta m", summary, include_minimum=True
+    ) == "coordinate delta m: count=3, min=0.000001, p50=0.250000, p95=1.500000, max=2.000000"
+    assert _format_delta_summary(
+        "confidence absolute delta", summary, include_minimum=False
+    ) == "confidence absolute delta: count=3, p50=0.250000, p95=1.500000, max=2.000000"
+    assert (
+        _format_delta_summary("coordinate delta m", None, include_minimum=True)
+        == "coordinate delta m: none"
+    )
 
 
 def test_default_stage_is_dry_run_only(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,7 +11,7 @@ import json
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from math import isfinite
+from math import floor, isfinite
 from typing import Any
 
 from sqlalchemy import select
@@ -26,6 +26,7 @@ from app.config import (
     OVERTURE_S3_URI_TEMPLATE,
     SEOUL_BBOX,
 )
+from app.geo import haversine_m
 from app.models import Cafe
 
 
@@ -48,6 +49,40 @@ class OvertureCafeRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class NumericDeltaSummary:
+    count: int
+    minimum: float
+    p50: float
+    p95: float
+    maximum: float
+
+
+def summarize_numeric_deltas(values: Iterable[float]) -> NumericDeltaSummary | None:
+    """Return deterministic linear-percentile diagnostics for non-negative deltas."""
+
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    if any(not isfinite(value) or value < 0 for value in ordered):
+        raise ValueError("numeric deltas must be finite and non-negative")
+
+    def percentile(fraction: float) -> float:
+        rank = (len(ordered) - 1) * fraction
+        lower = floor(rank)
+        upper = min(lower + 1, len(ordered) - 1)
+        weight = rank - lower
+        return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+    return NumericDeltaSummary(
+        count=len(ordered),
+        minimum=ordered[0],
+        p50=percentile(0.50),
+        p95=percentile(0.95),
+        maximum=ordered[-1],
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class OvertureSeedReport:
     source_count: int
     inserted_count: int
@@ -57,6 +92,8 @@ class OvertureSeedReport:
     active_count: int
     dry_run: bool
     changed_field_counts: tuple[tuple[str, int], ...] = ()
+    coordinate_delta_m: NumericDeltaSummary | None = None
+    confidence_abs_delta: NumericDeltaSummary | None = None
 
 
 def _optional_text(value: object, *, limit: int) -> str | None:
@@ -269,6 +306,8 @@ def seed_overture_cafes(
     }
     inserted_count = updated_count = unchanged_count = deactivated_count = 0
     changed_field_counts: dict[str, int] = {}
+    coordinate_deltas_m: list[float] = []
+    confidence_abs_deltas: list[float] = []
     for overture_id in sorted(records_by_id):
         record = records_by_id[overture_id]
         values = _values(record, release=release)
@@ -287,6 +326,14 @@ def seed_overture_cafes(
         updated_count += 1
         for key in changed_fields:
             changed_field_counts[key] = changed_field_counts.get(key, 0) + 1
+        if "lat" in changed_fields or "lng" in changed_fields:
+            coordinate_deltas_m.append(
+                haversine_m(existing.lat, existing.lng, record.lat, record.lng)
+            )
+        if "source_confidence" in changed_fields:
+            confidence_abs_deltas.append(
+                abs(existing.source_confidence - record.confidence)
+            )
         if not dry_run:
             for key in changed_fields:
                 value = values[key]
@@ -309,6 +356,8 @@ def seed_overture_cafes(
         active_count=len(records_by_id),
         dry_run=dry_run,
         changed_field_counts=tuple(sorted(changed_field_counts.items())),
+        coordinate_delta_m=summarize_numeric_deltas(coordinate_deltas_m),
+        confidence_abs_delta=summarize_numeric_deltas(confidence_abs_deltas),
     )
 
 
