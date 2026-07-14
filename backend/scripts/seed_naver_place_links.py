@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
@@ -42,6 +43,15 @@ class NaverSeedReport:
     request_count: int
     last_searched_cafe_id: int | None
     dry_run: bool
+    accepted_links: tuple[NaverAcceptedLink, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NaverAcceptedLink:
+    cafe_id: int
+    cafe_name: str
+    provider_place_id: str
+    detail_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +143,8 @@ def seed_naver_place_links(
             continue
         accepted.append(candidate)
 
+    accepted.sort(key=lambda item: (item.cafe.id, item.provider_place_id))
+
     if not dry_run:
         session.add_all(
             [
@@ -161,6 +173,15 @@ def seed_naver_place_links(
         request_count=client.request_count,
         last_searched_cafe_id=batch[-1].id if batch else None,
         dry_run=dry_run,
+        accepted_links=tuple(
+            NaverAcceptedLink(
+                cafe_id=item.cafe.id,
+                cafe_name=item.cafe.name,
+                provider_place_id=item.provider_place_id,
+                detail_url=item.detail_url,
+            )
+            for item in accepted
+        ),
     )
 
 
@@ -218,6 +239,20 @@ def main(
     print(f"requests: {report.request_count}")
     print(f"last searched cafe id: {report.last_searched_cafe_id}")
     print("statuses: " + ", ".join(f"{k}={v}" for k, v in report.status_counts))
+    for accepted in report.accepted_links:
+        print(
+            "accepted: "
+            + json.dumps(
+                {
+                    "cafe_id": accepted.cafe_id,
+                    "cafe_name": accepted.cafe_name,
+                    "detail_url": accepted.detail_url,
+                    "provider_place_id": accepted.provider_place_id,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
     return 0
 
 

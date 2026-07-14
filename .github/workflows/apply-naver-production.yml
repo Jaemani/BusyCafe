@@ -1,0 +1,94 @@
+name: Apply production Naver place links
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_cafes:
+        description: "Cafe count to write (1-100)"
+        required: true
+        default: 20
+        type: number
+      after_cafe_id:
+        description: "Only inspect cafes with IDs above this cursor"
+        required: true
+        default: 0
+        type: number
+      confirmation:
+        description: "Type APPLY_NAVER_LINKS exactly"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-naver-place-link-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Check secrets, bounds, and confirmation
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          MAX_CAFES: ${{ inputs.max_cafes }}
+          AFTER_CAFE_ID: ${{ inputs.after_cafe_id }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [ -z "$DATABASE_URL" ] || [ -z "$NAVER_CLIENT_ID" ] || [ -z "$NAVER_CLIENT_SECRET" ]; then
+            echo "DATABASE_URL, NAVER_CLIENT_ID, and NAVER_CLIENT_SECRET are required" >&2
+            exit 1
+          fi
+          case "$MAX_CAFES" in
+            ''|*[!0-9]*)
+              echo "max_cafes must be an integer from 1 through 100" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$MAX_CAFES" -lt 1 ] || [ "$MAX_CAFES" -gt 100 ]; then
+            echo "max_cafes must be an integer from 1 through 100" >&2
+            exit 1
+          fi
+          case "$AFTER_CAFE_ID" in
+            ''|*[!0-9]*)
+              echo "after_cafe_id must be a non-negative integer" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$CONFIRMATION" != "APPLY_NAVER_LINKS" ]; then
+            echo "confirmation must equal APPLY_NAVER_LINKS" >&2
+            exit 1
+          fi
+      - name: Probe official Naver local-search contract before write
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: uv run python scripts/probe_naver_local.py
+      - name: Apply bounded exact link enrichment
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          MAX_CAFES: ${{ inputs.max_cafes }}
+          AFTER_CAFE_ID: ${{ inputs.after_cafe_id }}
+        run: >-
+          uv run python scripts/seed_naver_place_links.py
+          --max-cafes "$MAX_CAFES"
+          --after-cafe-id "$AFTER_CAFE_ID"
+          --apply
