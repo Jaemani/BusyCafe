@@ -232,6 +232,60 @@ def test_default_gate_blocks_small_or_short_backtest_even_when_perfect() -> None
     )
 
 
+def test_default_span_gate_opens_at_exactly_seven_days() -> None:
+    start = datetime(2026, 7, 1, 3, 0, tzinfo=UTC)
+    almost_seven_days = (
+        *population_pair(
+            hotspot_id=1,
+            target=start,
+            baseline_population=100,
+            hybrid_population=200,
+            actual_population=200,
+        ),
+        *population_pair(
+            hotspot_id=1,
+            target=start + timedelta(days=7) - timedelta(seconds=1),
+            baseline_population=100,
+            hybrid_population=200,
+            actual_population=200,
+        ),
+    )
+    exact_seven_days = (
+        *almost_seven_days[:2],
+        *population_pair(
+            hotspot_id=1,
+            target=start + timedelta(days=7),
+            baseline_population=100,
+            hybrid_population=200,
+            actual_population=200,
+        ),
+    )
+
+    before = backtest_nowcasts(
+        almost_seven_days,
+        min_samples=2,
+        min_hotspots=1,
+        max_population_wape=0,
+        min_level_exact_accuracy=0,
+        min_level_adjacent_accuracy=1,
+    )
+    at_gate = backtest_nowcasts(
+        exact_seven_days,
+        min_samples=2,
+        min_hotspots=1,
+        max_population_wape=0,
+        min_level_exact_accuracy=0,
+        min_level_adjacent_accuracy=1,
+    )
+
+    assert before.span_days < 7
+    assert before.sample_sufficient is False
+    assert "insufficient_span" in before.promotion_blockers
+    assert at_gate.span_days == pytest.approx(7)
+    assert at_gate.sample_sufficient is True
+    assert "insufficient_span" not in at_gate.promotion_blockers
+
+
 def test_backtest_never_uses_actual_outside_target_tolerance() -> None:
     origin, actual = backtest_pair()
     far_actual = NowcastSnapshot(

@@ -1,6 +1,9 @@
 name: Evaluate production nowcast shadow
 
 on:
+  schedule:
+    # Daily read-only readiness check. This never promotes a model or writes DB.
+    - cron: "23 18 * * *"
   workflow_dispatch:
 
 permissions:
