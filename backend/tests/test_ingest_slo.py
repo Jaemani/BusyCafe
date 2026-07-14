@@ -8,12 +8,23 @@ from sqlalchemy.orm import Session
 
 from app.models import Base, Hotspot, HotspotSnapshot, IngestCycle
 from scripts.analyze_ingest_slo import (
+    _estimated_missed_cycles,
     analyze_ingest_slo,
     enforce_transaction_read_only,
 )
 
 
 NOW = datetime(2026, 7, 14, 1, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("gap_min", "expected"),
+    [(10.01, 1), (14.99, 2)],
+)
+def test_missed_cycle_estimator_tolerates_cadence_jitter(
+    gap_min: float, expected: int
+) -> None:
+    assert _estimated_missed_cycles(gap_min, 5) == expected
 
 
 def add_cycle(

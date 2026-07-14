@@ -77,6 +77,12 @@ def _distribution(values: Sequence[float]) -> dict[str, float | int | None]:
     }
 
 
+def _estimated_missed_cycles(gap_min: float, expected_cadence_min: float) -> int:
+    """Map a jittered gap to nearest cadence slots, excluding its endpoint."""
+
+    return max(0, floor(gap_min / expected_cadence_min + 0.5) - 1)
+
+
 def _parse_as_of(value: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -223,8 +229,8 @@ def analyze_ingest_slo(
                 "from": _iso(start),
                 "to": _iso(end),
                 "gap_min": gap_min,
-                "estimated_missed_cycles": max(
-                    0, ceil(gap_min / expected_cadence_min) - 1
+                "estimated_missed_cycles": _estimated_missed_cycles(
+                    gap_min, expected_cadence_min
                 ),
             }
         )
