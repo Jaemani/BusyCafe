@@ -227,6 +227,12 @@ SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
 # against an actual snapshot which arrived later.  None of these values affect
 # public v1 materialization or API responses.
 NOWCAST_SHADOW_MODEL_VERSION: Final = "v1-forecast-lag-shadow"
+NOWCAST_HYBRID_SHADOW_MODEL_VERSION: Final = (
+    "v1-forecast-population-observed-level-shadow"
+)
+# Population-error deltas within this absolute tolerance are deterministic
+# ties for per-hotspot/day win-rate reporting.
+NOWCAST_HYBRID_TIE_ABS_EPSILON: Final = 1e-9
 NOWCAST_SHADOW_TIME_FORMAT: Final = "%Y-%m-%d %H:%M"
 NOWCAST_SHADOW_MAX_HORIZON_MIN: Final = 12 * 60
 NOWCAST_SHADOW_MAX_INTERPOLATION_GAP_MIN: Final = 90

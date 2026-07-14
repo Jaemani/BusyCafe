@@ -19,6 +19,8 @@ from zoneinfo import ZoneInfo
 
 from app.config import (
     CONGESTION_LEVELS,
+    NOWCAST_HYBRID_SHADOW_MODEL_VERSION,
+    NOWCAST_HYBRID_TIE_ABS_EPSILON,
     NOWCAST_SHADOW_ACTUAL_TOLERANCE_MIN,
     NOWCAST_SHADOW_LAG_BUCKET_EDGES_MIN,
     NOWCAST_SHADOW_MAX_HORIZON_MIN,
@@ -37,6 +39,7 @@ from app.config import (
 
 SEOUL_TIMEZONE = ZoneInfo("Asia/Seoul")
 SelectionMethod = Literal["exact", "interpolated", "nearest"]
+ComparisonOutcome = Literal["win", "tie", "loss"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +94,63 @@ class LagBucketDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class ComparisonOutcomes:
+    eligible_groups: int
+    wins: int
+    ties: int
+    losses: int
+    win_rate: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class HotspotDayPopulationDiagnostics:
+    hotspot_id: int
+    local_day: str
+    samples: int
+    baseline_population_mae: float
+    hybrid_population_mae: float
+    population_mae_delta: float
+    baseline_population_wape: float | None
+    hybrid_population_wape: float | None
+    population_wape_delta: float | None
+    mae_outcome: ComparisonOutcome
+    wape_outcome: ComparisonOutcome | None
+
+
+@dataclass(frozen=True, slots=True)
+class PopulationStratumDiagnostics:
+    stratum_key: str
+    hotspot_day_groups: int
+    samples: int
+    baseline_population_mae: float | None
+    hybrid_population_mae: float | None
+    population_mae_delta: float | None
+    baseline_population_wape: float | None
+    hybrid_population_wape: float | None
+    population_wape_delta: float | None
+    mae_outcomes: ComparisonOutcomes
+    wape_outcomes: ComparisonOutcomes
+
+
+@dataclass(frozen=True, slots=True)
+class HybridComparatorReport:
+    model_version: str
+    population_policy: str
+    level_policy: str
+    population_mae: float | None
+    population_wape: float | None
+    population_bias: float | None
+    level_exact_accuracy: float | None
+    level_adjacent_accuracy: float | None
+    level_exact_accuracy_delta: float | None
+    level_adjacent_accuracy_delta: float | None
+    hotspot_day: tuple[HotspotDayPopulationDiagnostics, ...]
+    aggregate: PopulationStratumDiagnostics
+    by_hotspot: tuple[PopulationStratumDiagnostics, ...]
+    by_day: tuple[PopulationStratumDiagnostics, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class NowcastBacktestReport:
     model_version: str
     origins_total: int
@@ -109,6 +169,7 @@ class NowcastBacktestReport:
     baseline_level_exact_accuracy: float | None
     nowcast_level_adjacent_accuracy: float | None
     baseline_level_adjacent_accuracy: float | None
+    hybrid: HybridComparatorReport
     sample_sufficient: bool
     quality_passed: bool
     promotion_eligible: bool
@@ -183,8 +244,17 @@ def parse_forecast_points(
                 .astimezone(UTC)
             )
             level = CONGESTION_LEVELS[raw_label]
-            population_min = int(item["FCST_PPLTN_MIN"])
-            population_max = int(item["FCST_PPLTN_MAX"])
+            raw_population_min = item["FCST_PPLTN_MIN"]
+            raw_population_max = item["FCST_PPLTN_MAX"]
+            if (
+                isinstance(raw_population_min, bool)
+                or not isinstance(raw_population_min, (str, int))
+                or isinstance(raw_population_max, bool)
+                or not isinstance(raw_population_max, (str, int))
+            ):
+                raise ValueError("forecast population bounds must be integers")
+            population_min = int(raw_population_min)
+            population_max = int(raw_population_max)
         except (KeyError, TypeError, ValueError) as error:
             raise ValueError("invalid forecast point") from error
         _validate_population(population_min, population_max)
@@ -425,6 +495,161 @@ def _build_lag_bucket_diagnostics(
     return tuple(diagnostics)
 
 
+def _comparison_outcome(delta: float) -> ComparisonOutcome:
+    if delta < -NOWCAST_HYBRID_TIE_ABS_EPSILON:
+        return "win"
+    if delta > NOWCAST_HYBRID_TIE_ABS_EPSILON:
+        return "loss"
+    return "tie"
+
+
+def _outcome_counts(
+    outcomes: Sequence[ComparisonOutcome | None],
+) -> ComparisonOutcomes:
+    eligible = [outcome for outcome in outcomes if outcome is not None]
+    wins = eligible.count("win")
+    return ComparisonOutcomes(
+        eligible_groups=len(eligible),
+        wins=wins,
+        ties=eligible.count("tie"),
+        losses=eligible.count("loss"),
+        win_rate=wins / len(eligible) if eligible else None,
+    )
+
+
+def _build_hotspot_day_diagnostics(
+    samples: Sequence[_MetricSample],
+) -> tuple[HotspotDayPopulationDiagnostics, ...]:
+    grouped: dict[tuple[int, str], list[_MetricSample]] = defaultdict(list)
+    for sample in samples:
+        local_day = sample.target_at.astimezone(SEOUL_TIMEZONE).date().isoformat()
+        grouped[(sample.hotspot_id, local_day)].append(sample)
+
+    diagnostics: list[HotspotDayPopulationDiagnostics] = []
+    for (hotspot_id, local_day), items in sorted(grouped.items()):
+        summary = _summarize_metrics(items)
+        if (
+            summary.baseline_population_mae is None
+            or summary.nowcast_population_mae is None
+        ):
+            raise AssertionError("non-empty hotspot/day group has no MAE")
+        mae_delta = (
+            summary.nowcast_population_mae - summary.baseline_population_mae
+        )
+        wape_delta = _delta(
+            summary.nowcast_population_wape,
+            summary.baseline_population_wape,
+        )
+        diagnostics.append(
+            HotspotDayPopulationDiagnostics(
+                hotspot_id=hotspot_id,
+                local_day=local_day,
+                samples=len(items),
+                baseline_population_mae=summary.baseline_population_mae,
+                hybrid_population_mae=summary.nowcast_population_mae,
+                population_mae_delta=mae_delta,
+                baseline_population_wape=summary.baseline_population_wape,
+                hybrid_population_wape=summary.nowcast_population_wape,
+                population_wape_delta=wape_delta,
+                mae_outcome=_comparison_outcome(mae_delta),
+                wape_outcome=(
+                    _comparison_outcome(wape_delta)
+                    if wape_delta is not None
+                    else None
+                ),
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _build_population_stratum(
+    key: str,
+    samples: Sequence[_MetricSample],
+    groups: Sequence[HotspotDayPopulationDiagnostics],
+) -> PopulationStratumDiagnostics:
+    summary = _summarize_metrics(samples)
+    return PopulationStratumDiagnostics(
+        stratum_key=key,
+        hotspot_day_groups=len(groups),
+        samples=len(samples),
+        baseline_population_mae=summary.baseline_population_mae,
+        hybrid_population_mae=summary.nowcast_population_mae,
+        population_mae_delta=_delta(
+            summary.nowcast_population_mae,
+            summary.baseline_population_mae,
+        ),
+        baseline_population_wape=summary.baseline_population_wape,
+        hybrid_population_wape=summary.nowcast_population_wape,
+        population_wape_delta=_delta(
+            summary.nowcast_population_wape,
+            summary.baseline_population_wape,
+        ),
+        mae_outcomes=_outcome_counts([group.mae_outcome for group in groups]),
+        wape_outcomes=_outcome_counts([group.wape_outcome for group in groups]),
+    )
+
+
+def _build_hybrid_comparator(
+    samples: Sequence[_MetricSample],
+    summary: _MetricSummary,
+) -> HybridComparatorReport:
+    hotspot_day = _build_hotspot_day_diagnostics(samples)
+    samples_by_hotspot: dict[int, list[_MetricSample]] = defaultdict(list)
+    samples_by_day: dict[str, list[_MetricSample]] = defaultdict(list)
+    groups_by_hotspot: dict[int, list[HotspotDayPopulationDiagnostics]] = (
+        defaultdict(list)
+    )
+    groups_by_day: dict[str, list[HotspotDayPopulationDiagnostics]] = defaultdict(
+        list
+    )
+    for sample in samples:
+        local_day = sample.target_at.astimezone(SEOUL_TIMEZONE).date().isoformat()
+        samples_by_hotspot[sample.hotspot_id].append(sample)
+        samples_by_day[local_day].append(sample)
+    for group in hotspot_day:
+        groups_by_hotspot[group.hotspot_id].append(group)
+        groups_by_day[group.local_day].append(group)
+
+    return HybridComparatorReport(
+        model_version=NOWCAST_HYBRID_SHADOW_MODEL_VERSION,
+        population_policy="forecast_interpolated_or_nearest",
+        level_policy="latest_observed",
+        population_mae=summary.nowcast_population_mae,
+        population_wape=summary.nowcast_population_wape,
+        population_bias=summary.nowcast_population_bias,
+        # Hybrid deliberately retains the observed ordinal label, so its label
+        # metrics must equal the delayed baseline rather than forecast labels.
+        level_exact_accuracy=summary.baseline_level_exact_accuracy,
+        level_adjacent_accuracy=summary.baseline_level_adjacent_accuracy,
+        level_exact_accuracy_delta=_delta(
+            summary.baseline_level_exact_accuracy,
+            summary.baseline_level_exact_accuracy,
+        ),
+        level_adjacent_accuracy_delta=_delta(
+            summary.baseline_level_adjacent_accuracy,
+            summary.baseline_level_adjacent_accuracy,
+        ),
+        hotspot_day=hotspot_day,
+        aggregate=_build_population_stratum("all", samples, hotspot_day),
+        by_hotspot=tuple(
+            _build_population_stratum(
+                str(hotspot_id),
+                samples_by_hotspot[hotspot_id],
+                groups_by_hotspot[hotspot_id],
+            )
+            for hotspot_id in sorted(samples_by_hotspot)
+        ),
+        by_day=tuple(
+            _build_population_stratum(
+                local_day,
+                samples_by_day[local_day],
+                groups_by_day[local_day],
+            )
+            for local_day in sorted(samples_by_day)
+        ),
+    )
+
+
 def backtest_nowcasts(
     snapshots: Sequence[NowcastSnapshot],
     *,
@@ -632,6 +857,7 @@ def backtest_nowcasts(
         baseline_level_adjacent_accuracy=(
             summary.baseline_level_adjacent_accuracy
         ),
+        hybrid=_build_hybrid_comparator(metric_samples, summary),
         sample_sufficient=sample_sufficient,
         quality_passed=quality_passed,
         promotion_eligible=promotion_eligible,

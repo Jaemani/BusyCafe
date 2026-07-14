@@ -8,7 +8,11 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.config import FIXTURES_DIR, NOWCAST_SHADOW_MODEL_VERSION
+from app.config import (
+    FIXTURES_DIR,
+    NOWCAST_HYBRID_SHADOW_MODEL_VERSION,
+    NOWCAST_SHADOW_MODEL_VERSION,
+)
 from app.models import Base, Hotspot, HotspotSnapshot
 from app.scoring.nowcast_shadow import (
     NowcastSnapshot,
@@ -195,6 +199,11 @@ def test_backtest_compares_forecast_with_actual_that_arrived_later() -> None:
     assert report.baseline_population_mae == pytest.approx(100)
     assert report.nowcast_level_exact_accuracy == pytest.approx(1)
     assert report.baseline_level_exact_accuracy == pytest.approx(0)
+    assert report.hybrid.model_version == NOWCAST_HYBRID_SHADOW_MODEL_VERSION
+    assert report.hybrid.population_mae == pytest.approx(0)
+    assert report.hybrid.level_policy == "latest_observed"
+    assert report.hybrid.level_exact_accuracy == pytest.approx(0)
+    assert report.hybrid.level_exact_accuracy_delta == pytest.approx(0)
     assert report.quality_passed is True
     assert report.promotion_eligible is True
 
@@ -289,6 +298,109 @@ def test_lag_bucket_boundaries_are_inclusive_and_input_order_independent() -> No
         assert bucket.population_mae_delta == pytest.approx(-100)
         assert bucket.nowcast_level_exact_accuracy == pytest.approx(1)
         assert bucket.baseline_level_exact_accuracy == pytest.approx(0)
+
+
+def population_pair(
+    *,
+    hotspot_id: int,
+    target: datetime,
+    baseline_population: int,
+    hybrid_population: int,
+    actual_population: int,
+) -> tuple[NowcastSnapshot, NowcastSnapshot]:
+    observed_at = target - timedelta(minutes=30)
+    origin = snapshot(
+        hotspot_id=hotspot_id,
+        observed_at=observed_at,
+        fetched_at=target,
+        level=2,
+        population_min=baseline_population,
+        population_max=baseline_population,
+        forecasts=(
+            forecast(
+                target.astimezone(ZoneInfo("Asia/Seoul")).strftime(
+                    "%Y-%m-%d %H:%M"
+                ),
+                label="붐빔",
+                population_min=hybrid_population,
+                population_max=hybrid_population,
+            ),
+        ),
+    )
+    actual = snapshot(
+        hotspot_id=hotspot_id,
+        observed_at=target,
+        fetched_at=target + timedelta(minutes=30),
+        level=2,
+        population_min=actual_population,
+        population_max=actual_population,
+    )
+    return origin, actual
+
+
+def test_hybrid_reports_hotspot_day_win_rate_and_stratified_aggregates() -> None:
+    day_one = datetime(2026, 7, 11, 3, 0, tzinfo=UTC)
+    day_two = day_one + timedelta(days=1)
+    snapshots = (
+        *population_pair(
+            hotspot_id=1,
+            target=day_one,
+            baseline_population=100,
+            hybrid_population=200,
+            actual_population=200,
+        ),
+        *population_pair(
+            hotspot_id=1,
+            target=day_two,
+            baseline_population=200,
+            hybrid_population=300,
+            actual_population=200,
+        ),
+        *population_pair(
+            hotspot_id=2,
+            target=day_one + timedelta(hours=1),
+            baseline_population=150,
+            hybrid_population=150,
+            actual_population=200,
+        ),
+    )
+
+    forward = backtest_nowcasts(snapshots)
+    reverse = backtest_nowcasts(tuple(reversed(snapshots)))
+    hybrid = forward.hybrid
+
+    assert hybrid == reverse.hybrid
+    assert hybrid.level_exact_accuracy == pytest.approx(1)
+    assert forward.nowcast_level_exact_accuracy == pytest.approx(0)
+    assert hybrid.level_exact_accuracy_delta == pytest.approx(0)
+    assert [
+        (group.hotspot_id, group.local_day, group.mae_outcome)
+        for group in hybrid.hotspot_day
+    ] == [
+        (1, "2026-07-11", "win"),
+        (1, "2026-07-12", "loss"),
+        (2, "2026-07-11", "tie"),
+    ]
+    assert hybrid.aggregate.samples == 3
+    assert hybrid.aggregate.baseline_population_mae == pytest.approx(50)
+    assert hybrid.aggregate.hybrid_population_mae == pytest.approx(50)
+    assert hybrid.aggregate.mae_outcomes.eligible_groups == 3
+    assert hybrid.aggregate.mae_outcomes.wins == 1
+    assert hybrid.aggregate.mae_outcomes.ties == 1
+    assert hybrid.aggregate.mae_outcomes.losses == 1
+    assert hybrid.aggregate.mae_outcomes.win_rate == pytest.approx(1 / 3)
+    assert hybrid.aggregate.wape_outcomes.win_rate == pytest.approx(1 / 3)
+    assert [stratum.stratum_key for stratum in hybrid.by_hotspot] == ["1", "2"]
+    assert hybrid.by_hotspot[0].mae_outcomes.win_rate == pytest.approx(0.5)
+    assert hybrid.by_hotspot[1].mae_outcomes.ties == 1
+    assert [stratum.stratum_key for stratum in hybrid.by_day] == [
+        "2026-07-11",
+        "2026-07-12",
+    ]
+    assert hybrid.by_day[0].baseline_population_mae == pytest.approx(75)
+    assert hybrid.by_day[0].hybrid_population_mae == pytest.approx(25)
+    assert hybrid.by_day[0].mae_outcomes.win_rate == pytest.approx(0.5)
+    assert hybrid.by_day[1].mae_outcomes.losses == 1
 
 
 def test_database_loader_bounds_append_only_history() -> None:
