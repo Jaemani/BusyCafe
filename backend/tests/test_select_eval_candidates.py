@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.config import SCORING_MODEL_VERSION
-from app.models import Base, Cafe, CafeScore, Hotspot
+from app.models import Base, Cafe, CafeProviderPlace, CafeScore, Hotspot
 from scripts.select_eval_candidates import main, select_candidates
 
 
@@ -107,6 +107,19 @@ def _seed_database(path: Path) -> str:
                 distance_m=distance,
                 confidence=confidence,
             )
+        session.add(
+            CafeProviderPlace(
+                cafe_id=3,
+                provider="kakao",
+                provider_place_id="300",
+                detail_url="https://place.map.kakao.com/300",
+                active=True,
+                match_method="exact_name",
+                match_distance_m=10.0,
+                verified_at=NOW,
+                last_seen_at=NOW,
+            )
+        )
         for cafe_id, distance in enumerate(
             (300.0, 300.1, 600.0, 600.1, 1_500.0, 1_500.1), start=10
         ):
@@ -190,9 +203,13 @@ def test_cli_uses_stdout_by_default_and_reports_shortages_to_stderr(
         "distance_band",
         "primary_distance_m",
         "source_confidence",
+        "kakao_url",
+        "naver_url",
         "poi_valid",
         "exclusion_reason",
     )
+    assert rows[0]["kakao_url"] == "https://place.map.kakao.com/300"
+    assert rows[0]["naver_url"] == ""
     assert rows[0]["poi_valid"] == ""
     assert rows[0]["exclusion_reason"] == ""
     assert "shortage: hotspot='성수카페거리' band=near selected=0/4" in captured.err

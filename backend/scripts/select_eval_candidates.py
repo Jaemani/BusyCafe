@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import (
     COVERED_M,
@@ -22,7 +22,7 @@ from app.config import (
     R_MAX_M,
 )
 from app.database import create_db_engine
-from app.models import Cafe, CafeScore, Hotspot
+from app.models import Cafe, CafeProviderPlace, CafeScore, Hotspot
 
 
 CSV_FIELDS = (
@@ -35,6 +35,8 @@ CSV_FIELDS = (
     "distance_band",
     "primary_distance_m",
     "source_confidence",
+    "kakao_url",
+    "naver_url",
     "poi_valid",
     "exclusion_reason",
 )
@@ -52,6 +54,8 @@ class Candidate:
     distance_band: str
     primary_distance_m: float
     source_confidence: float
+    kakao_url: str | None
+    naver_url: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +90,7 @@ def select_candidates(
 
     rows = session.execute(
         select(Cafe, CafeScore, Hotspot)
+        .options(selectinload(Cafe.provider_places))
         .join(CafeScore, CafeScore.cafe_id == Cafe.id)
         .join(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
         .where(
@@ -103,6 +108,13 @@ def select_candidates(
         band = _distance_band(distance_m)
         if band is None:
             continue
+        direct_links = {
+            place.provider: place.detail_url
+            for place in cafe.provider_places
+            if place.active
+            and place.detail_url
+            and place.provider in {"kakao", "naver"}
+        }
         grouped[(hotspot.name, band)].append(
             Candidate(
                 cafe_id=cafe.id,
@@ -114,6 +126,8 @@ def select_candidates(
                 distance_band=band,
                 primary_distance_m=distance_m,
                 source_confidence=cafe.source_confidence,
+                kakao_url=direct_links.get("kakao"),
+                naver_url=direct_links.get("naver"),
             )
         )
 
@@ -152,6 +166,8 @@ def render_csv(candidates: Sequence[Candidate]) -> str:
                 "distance_band": item.distance_band,
                 "primary_distance_m": f"{item.primary_distance_m:.1f}",
                 "source_confidence": f"{item.source_confidence:.3f}",
+                "kakao_url": item.kakao_url or "",
+                "naver_url": item.naver_url or "",
                 "poi_valid": "",
                 "exclusion_reason": "",
             }
