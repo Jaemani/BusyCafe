@@ -6,8 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-from fastapi.staticfiles import StaticFiles
-
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = ROOT / "backend"
 SNAPSHOT_DB = Path(__file__).resolve().parent / "data" / "preview.db"
@@ -22,9 +20,3 @@ if "DATABASE_URL" not in os.environ:
     os.environ.setdefault("CAFE_CROWD_SNAPSHOT", "1")
 
 from app.main import app  # noqa: E402
-
-
-STATIC_DIR = Path(__file__).resolve().parent / "static"
-if STATIC_DIR.is_dir():
-    # API routes are registered before this catch-all static mount.
-    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="frontend")
