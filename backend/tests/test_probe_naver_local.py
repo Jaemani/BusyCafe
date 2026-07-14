@@ -52,9 +52,13 @@ def test_probe_does_not_count_external_homepage_as_place_link() -> None:
     assert probe(FakeClient(_response(link="https://example.com"))) == (1, 0)
 
 
-def test_probe_rejects_display_item_count_mismatch() -> None:
-    with pytest.raises(ValueError, match="display count"):
-        probe(FakeClient(_response(display=2)))
+def test_probe_accepts_display_as_requested_ceiling() -> None:
+    assert probe(FakeClient(_response(display=5))) == (1, 0)
+
+
+def test_probe_rejects_more_items_than_display() -> None:
+    with pytest.raises(ValueError, match="exceed display"):
+        probe(FakeClient(_response(display=0)))
 
 
 def test_main_requires_both_credentials_without_constructing_client() -> None:

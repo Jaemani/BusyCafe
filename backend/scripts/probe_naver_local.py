@@ -18,8 +18,13 @@ class ProbeClient(Protocol):
 
 def probe(client: ProbeClient) -> tuple[int, int]:
     response = client.search_local(NAVER_VERIFY_QUERY)
-    if response.display != len(response.items):
-        raise ValueError("Naver local-search display count does not match items")
+    # The live API reports ``display`` as the requested result ceiling.  It can
+    # legitimately exceed the number of items returned when fewer results
+    # match.  Only the inverse relationship is an invalid response.
+    if response.display < len(response.items):
+        raise ValueError("Naver local-search items exceed display count")
+    if response.total < len(response.items):
+        raise ValueError("Naver local-search items exceed total count")
     direct_links = sum(
         canonical_naver_place_link(item.link) is not None
         for item in response.items
