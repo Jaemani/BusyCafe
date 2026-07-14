@@ -98,6 +98,11 @@ def test_dry_run_writes_nothing_then_apply_is_atomic_and_idempotent(
         for cafe in cafes
     )
     assert all(cafe.primary_category == "cafe" for cafe in cafes)
+    assert cafes[0].name == "카페 100"
+    assert cafes[0].lat == 37.40
+    assert cafes[0].lng == 126.90
+    assert cafes[0].road_address == "서울 종로구 테스트로 100"
+    assert cafes[0].phone == "02-1234-5678"
     assert cafes[0].source_json == [
         {
             "provider": "kakao",

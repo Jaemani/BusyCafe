@@ -244,7 +244,11 @@ export class CachedApiCafeProvider implements CafeProvider {
   constructor(private readonly apiBaseUrl = "") {}
 
   setCacheVersion(version: string | null): void {
+    if (this.cacheVersion === version) return;
     this.cacheVersion = version;
+    this.tileCache.clear();
+    this.detailCache.clear();
+    this.splitTiles.clear();
   }
 
   async getCafes(

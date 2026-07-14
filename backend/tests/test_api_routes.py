@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -34,6 +34,11 @@ from app.models import (
     HotspotServingState,
     HotspotSnapshot,
     IngestCycle,
+)
+from app.schemas import KakaoPlace
+from scripts.seed_kakao_catalog_expansion import (
+    ValidatedKakaoSnapshot,
+    seed_kakao_catalog_expansion,
 )
 
 
@@ -214,6 +219,80 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     }
 
 
+def test_kakao_origin_place_fields_reach_map_and_detail_api(api_client) -> None:
+    generated_at = datetime(2026, 7, 14, 12, 34, 56, tzinfo=UTC)
+    place = KakaoPlace.model_validate(
+        {
+            "id": "987654321",
+            "place_name": "카카오 원장 카페",
+            "category_name": "음식점 > 카페",
+            "category_group_code": "CE7",
+            "category_group_name": "카페",
+            "phone": "02-9876-5432",
+            "address_name": "서울 성동구 성수동1가 10-1",
+            "road_address_name": "",
+            "x": 127.02,
+            "y": 37.56,
+            "place_url": "http://place.map.kakao.com/987654321",
+            "distance": "",
+        }
+    )
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        report = seed_kakao_catalog_expansion(
+            session,
+            ValidatedKakaoSnapshot(
+                places=(place,),
+                generated_at=generated_at,
+                source_release=generated_at.isoformat(),
+            ),
+            apply=True,
+            max_expected_candidates=1,
+        )
+        assert report.inserted_cafe_count == 1
+        cafe = session.scalar(
+            select(Cafe).where(
+                Cafe.origin_provider == "kakao",
+                Cafe.origin_source_id == "987654321",
+            )
+        )
+        assert cafe is not None
+        cafe_id = cafe.id
+        assert cafe.source_json == [
+            {
+                "provider": "kakao",
+                "provider_place_id": "987654321",
+                "category": "음식점 > 카페",
+                "road_address": None,
+                "lot_address": "서울 성동구 성수동1가 10-1",
+                "phone": "02-9876-5432",
+                "direct_url": "https://place.map.kakao.com/987654321",
+            }
+        ]
+
+    summary = api_client.get(
+        "/api/cafes/summary",
+        params={"bbox": "127.01,37.55,127.03,37.57"},
+    )
+    assert summary.status_code == 200
+    marker = next(item for item in summary.json() if item["id"] == cafe_id)
+    assert marker["name"] == "카카오 원장 카페"
+    assert marker["lat"] == 37.56
+    assert marker["lng"] == 127.02
+
+    response = api_client.get(f"/api/cafes/{cafe_id}")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["name"] == "카카오 원장 카페"
+    assert detail["lat"] == 37.56
+    assert detail["lng"] == 127.02
+    assert detail["road_address"] == "서울 성동구 성수동1가 10-1"
+    assert detail["phone"] == "02-9876-5432"
+    assert detail["external_links"]["kakao"] == (
+        "https://place.map.kakao.com/987654321"
+    )
+
+
 def test_bbox_summary_omits_lazy_evidence_but_keeps_map_state(api_client) -> None:
     response = api_client.get(
         "/api/cafes/summary",
@@ -301,6 +380,13 @@ def test_bbox_api_fails_closed_and_signals_when_viewport_exceeds_cap(
         truncated.headers["access-control-expose-headers"]
         == "X-BusyCafe-Viewport-Truncated"
     )
+    summary_truncated = api_client.get(
+        "/api/cafes/summary",
+        params={"bbox": "126.9,37.5,127.1,37.7"},
+    )
+    assert summary_truncated.status_code == 200
+    assert summary_truncated.json() == []
+    assert summary_truncated.headers["x-busycafe-viewport-truncated"] == "true"
 
 
 def test_detail_api_returns_scoring_model_version(api_client) -> None:

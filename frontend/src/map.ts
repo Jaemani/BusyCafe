@@ -363,7 +363,9 @@ export async function initializeCafeMap(
         // The latest durable snapshot fetch changes only when ingest inserts
         // a new natural-key observation, so duplicate polls reuse tile/detail
         // caches instead of forcing a full viewport reload.
-        cafeProvider.setCacheVersion?.(health.lastIngestAt);
+        cafeProvider.setCacheVersion?.(
+          `${health.lastIngestAt ?? "missing-ingest"}:${health.cafesCount}`,
+        );
         runtimeHealth = evaluateRuntimeHealth(health);
         freshnessLimits = {
           freshMaxAgeMinutes: health.staleWarnMin,
