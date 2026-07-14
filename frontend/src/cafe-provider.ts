@@ -70,6 +70,7 @@ interface CafeApiItem {
   confidence?: number | null;
   freshness?: "fresh" | "delayed" | "stale" | "n/a";
   coverage?: "covered" | "fringe" | "uncovered";
+  age_minutes?: number | null;
   evidence?: {
     hotspot_name?: string | null;
     distance_m?: number | null;
@@ -350,7 +351,7 @@ export class CachedApiCafeProvider implements CafeProvider {
 
     const viewport = tileBounds(tile);
     const bbox = [viewport.minLng, viewport.minLat, viewport.maxLng, viewport.maxLat].join(",");
-    const url = new URL("/api/cafes", this.apiBaseUrl || window.location.origin);
+    const url = new URL("/api/cafes/summary", this.apiBaseUrl || window.location.origin);
     url.searchParams.set("bbox", bbox);
     url.searchParams.set("min_conf", "0");
     if (this.cacheVersion !== null) {
@@ -413,7 +414,9 @@ export class CachedApiCafeProvider implements CafeProvider {
           hotspotName: item.evidence?.hotspot_name ?? null,
           distanceM: item.evidence?.distance_m ?? null,
           observedAt: item.evidence?.observed_at ?? null,
-          observationAgeMinutes: this.validObservationAge(item.evidence?.age_minutes),
+          observationAgeMinutes: this.validObservationAge(
+            item.age_minutes ?? item.evidence?.age_minutes,
+          ),
           observationAgeMeasuredAtMs,
         },
       }];

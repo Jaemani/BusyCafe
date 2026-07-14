@@ -125,6 +125,8 @@ export function showCafePanelLoading(cafe: CafeMapProperties): void {
   requiredElement<HTMLElement>("#cafe-source").textContent = "장소 정보를 확인하고 있습니다.";
   resetExternalLinks();
   showPanelShell(cafe);
+  requiredElement<HTMLElement>("#cafe-evidence").textContent =
+    "상세 근거 불러오는 중";
 }
 
 export function showCafePanelError(
@@ -138,6 +140,8 @@ export function showCafePanelError(
   requiredElement<HTMLElement>("#cafe-source").textContent = "지도 혼잡도는 계속 볼 수 있습니다.";
   resetExternalLinks();
   showPanelShell(cafe);
+  requiredElement<HTMLElement>("#cafe-evidence").textContent =
+    "상세 근거를 불러오지 못했습니다.";
 }
 
 export function updateOpenCafePanel(cafe: CafeMapProperties): void {

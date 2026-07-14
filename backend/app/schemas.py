@@ -257,6 +257,20 @@ class CafeMapResponse(BaseModel):
     evidence: EvidenceResponse
 
 
+class CafeMapSummaryResponse(BaseModel):
+    """Viewport-only fields; full evidence remains available from detail reads."""
+
+    id: int
+    name: str
+    lat: float
+    lng: float
+    level: int | None = None
+    confidence: float | None = None
+    freshness: Literal["fresh", "delayed", "stale", "n/a"]
+    coverage: Literal["covered", "fringe", "uncovered"]
+    age_minutes: int | None = Field(default=None, ge=0)
+
+
 class ContributorResponse(BaseModel):
     hotspot_id: int
     distance_m: float

@@ -211,6 +211,35 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     }
 
 
+def test_bbox_summary_omits_lazy_evidence_but_keeps_map_state(api_client) -> None:
+    response = api_client.get(
+        "/api/cafes/summary",
+        params={
+            "bbox": "126.9,37.5,127.1,37.7",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == MAP_CACHE_CONTROL
+    payload = response.json()
+    assert len(payload) == 1
+    assert set(payload[0]) == {
+        "id",
+        "name",
+        "lat",
+        "lng",
+        "level",
+        "confidence",
+        "freshness",
+        "coverage",
+        "age_minutes",
+    }
+    assert payload[0]["age_minutes"] in (0, 1)
+    assert payload[0]["freshness"] == "fresh"
+    assert payload[0]["level"] == 2
+    assert payload[0]["coverage"] == "covered"
+
+
 def test_api_request_modules_never_import_scoring_code() -> None:
     api_dir = Path(__file__).resolve().parents[1] / "app" / "api"
     violations: list[str] = []

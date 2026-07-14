@@ -62,7 +62,7 @@ def _cache_control_for_path(path: str) -> str | None:
         return HEALTH_CACHE_CONTROL
     if path == "/api/sources":
         return STATIC_CACHE_CONTROL
-    if path in {"/api/cafes", "/api/hotspots"}:
+    if path in {"/api/cafes", "/api/cafes/summary", "/api/hotspots"}:
         return MAP_CACHE_CONTROL
     if (
         path.startswith("/api/cafes/")

@@ -31,6 +31,7 @@ from app.models import (
 from app.schemas import (
     CafeDetailResponse,
     CafeMapResponse,
+    CafeMapSummaryResponse,
     ContributorResponse,
     DataSourceManifestItem,
     EvidenceResponse,
@@ -370,6 +371,40 @@ def _cafe_map_response(
     )
 
 
+def _cafe_map_summary_response(
+    cafe: Cafe,
+    score: CafeScore | None,
+    *,
+    now: datetime | None = None,
+) -> CafeMapSummaryResponse:
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    normalized_observed_at = _utc(score.source_observed_at) if score else None
+    freshness = (
+        "n/a"
+        if score is None
+        else _observation_freshness(normalized_observed_at, now=current_time)
+    )
+    expose_level = score is not None and freshness in ("fresh", "delayed")
+    expose_confidence = score is not None and freshness == "fresh"
+    return CafeMapSummaryResponse(
+        id=cafe.id,
+        name=cafe.name,
+        lat=cafe.lat,
+        lng=cafe.lng,
+        level=score.level if expose_level else None,
+        confidence=score.confidence if expose_confidence else None,
+        freshness=freshness,
+        coverage=(score.coverage if score else "uncovered"),
+        age_minutes=(
+            _observation_age_minutes(normalized_observed_at, now=current_time)
+            if score is not None
+            else None
+        ),
+    )
+
+
 @router.get("/sources", response_model=SourceManifestResponse)
 def sources() -> SourceManifestResponse:
     return _SOURCE_MANIFEST
@@ -421,6 +456,57 @@ def list_cafes(
     items = [
         _cafe_map_response(cafe, score, hotspot, now=request_time)
         for cafe, score, hotspot in rows
+    ]
+    return [
+        item
+        for item in items
+        if min_conf == 0
+        or (item.confidence is not None and item.confidence >= min_conf)
+    ]
+
+
+@router.get("/cafes/summary", response_model=list[CafeMapSummaryResponse])
+def list_cafe_summaries(
+    response: Response,
+    bbox: str = Query(..., description="minLng,minLat,maxLng,maxLat"),
+    min_conf: float = Query(0, ge=0, le=1),
+    db: Session = Depends(get_db),
+) -> list[CafeMapSummaryResponse]:
+    min_lng, min_lat, max_lng, max_lat = _parse_bbox(bbox)
+    statement = (
+        select(Cafe, CafeScore)
+        .options(
+            load_only(Cafe.id, Cafe.name, Cafe.lat, Cafe.lng, raiseload=True),
+            load_only(
+                CafeScore.cafe_id,
+                CafeScore.source_observed_at,
+                CafeScore.level,
+                CafeScore.confidence,
+                CafeScore.coverage,
+                raiseload=True,
+            ),
+            raiseload(Cafe.provider_places),
+        )
+        .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
+        .where(
+            Cafe.active.is_(True),
+            Cafe.lng.between(min_lng, max_lng),
+            Cafe.lat.between(min_lat, max_lat),
+        )
+        .order_by(Cafe.id)
+        .limit(MAX_CAFES_PER_VIEWPORT + 1)
+    )
+    if min_conf > 0:
+        statement = statement.where(CafeScore.confidence >= min_conf)
+    rows = db.execute(statement).all()
+    truncated = len(rows) > MAX_CAFES_PER_VIEWPORT
+    response.headers[VIEWPORT_TRUNCATED_HEADER] = str(truncated).lower()
+    if truncated:
+        return []
+    request_time = datetime.now(UTC)
+    items = [
+        _cafe_map_summary_response(cafe, score, now=request_time)
+        for cafe, score in rows
     ]
     return [
         item
