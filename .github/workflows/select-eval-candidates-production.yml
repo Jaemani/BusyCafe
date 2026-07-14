@@ -43,7 +43,10 @@ jobs:
       - name: Verify production database schema
         run: uv run alembic -c alembic.ini current --check-heads
       - name: Select deterministic field-observation candidates
-        run: uv run python scripts/select_eval_candidates.py --output "$OUTPUT"
+        run: >-
+          uv run python scripts/select_eval_candidates.py
+          --require-complete
+          --output "$OUTPUT"
       - name: Upload field-observation CSV
         uses: actions/upload-artifact@v6
         with:

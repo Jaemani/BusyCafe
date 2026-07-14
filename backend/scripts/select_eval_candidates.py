@@ -185,6 +185,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="hotspot name (repeatable; defaults to Hongdae and Seongsu)",
     )
     parser.add_argument("--output", type=Path, help="write CSV instead of stdout")
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="fail without writing CSV when any hotspot/distance band is short",
+    )
     args = parser.parse_args(argv)
 
     hotspot_names = tuple(args.hotspots or EVAL_DEFAULT_HOTSPOT_NAMES)
@@ -195,18 +200,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     finally:
         engine.dispose()
 
-    rendered = render_csv(result.candidates)
-    if args.output is None:
-        print(rendered, end="")
-    else:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(rendered, encoding="utf-8")
     for hotspot_name, band, found, expected in result.shortages:
         print(
             f"shortage: hotspot={hotspot_name!r} band={band} "
             f"selected={found}/{expected}",
             file=sys.stderr,
         )
+    if args.require_complete and result.shortages:
+        return 1
+
+    rendered = render_csv(result.candidates)
+    if args.output is None:
+        print(rendered, end="")
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(rendered, encoding="utf-8")
     return 0
 
 

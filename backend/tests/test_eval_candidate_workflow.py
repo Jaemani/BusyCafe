@@ -23,6 +23,7 @@ def test_eval_candidate_workflow_is_read_only_and_uploads_csv() -> None:
     assert "workflow_dispatch:" in raw
     assert "select_eval_candidates.py" in commands
     assert "--output" in commands
+    assert "--require-complete" in commands
     assert "--apply" not in commands
     assert "upgrade head" not in commands
     assert any(

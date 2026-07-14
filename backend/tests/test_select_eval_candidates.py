@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -231,3 +232,81 @@ def test_cli_uses_stdout_by_default_and_reports_shortages_to_stderr(
     assert captured.out == ""
     assert output.read_text(encoding="utf-8").startswith("cafe_id,name,")
     assert "shortage:" in captured.err
+
+
+def test_cli_require_complete_fails_before_writing_short_selection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    database_url = _seed_database(tmp_path / "candidates.db")
+    output = tmp_path / "field_candidates.csv"
+
+    assert (
+        main(
+            [
+                "--database-url",
+                database_url,
+                "--require-complete",
+                "--output",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "shortage:" in captured.err
+    assert not output.exists()
+
+
+def test_cli_require_complete_writes_exact_default_selection(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    database_url = _seed_database(tmp_path / "candidates.db")
+    engine = create_engine(database_url)
+    with Session(engine) as session:
+        cafe_id = 100
+        for hotspot_id, bands in (
+            (1, (400.0, 800.0)),
+            (2, (100.0, 400.0, 800.0)),
+        ):
+            for distance_m in bands:
+                for _ in range(4):
+                    _add_candidate(
+                        session,
+                        cafe_id=cafe_id,
+                        hotspot_id=hotspot_id,
+                        distance_m=distance_m,
+                        confidence=0.9,
+                    )
+                    cafe_id += 1
+        session.commit()
+    engine.dispose()
+    output = tmp_path / "field_candidates.csv"
+
+    assert (
+        main(
+            [
+                "--database-url",
+                database_url,
+                "--require-complete",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    with output.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 24
+    assert Counter(
+        (row["hotspot_name"], row["distance_band"]) for row in rows
+    ) == Counter(
+        {
+            (hotspot_name, band): 4
+            for hotspot_name in ("홍대 관광특구", "성수카페거리")
+            for band in ("near", "mid", "fringe")
+        }
+    )
