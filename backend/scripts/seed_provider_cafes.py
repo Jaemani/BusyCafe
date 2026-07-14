@@ -10,10 +10,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.config import PROVIDER_CAFE_RELEASE, PROVIDER_VERIFIED_CAFE_CONFIDENCE
+from app.config import (
+    PROVIDER_CAFE_RELEASE,
+    PROVIDER_LAST_SEEN_UPDATE_BATCH_SIZE,
+    PROVIDER_VERIFIED_CAFE_CONFIDENCE,
+)
 from app.database import create_db_engine
 from app.ingest.overture_places import overture_seed_value_equal
 from app.ingest.provider_cafe_catalog import (
@@ -270,6 +274,7 @@ def seed_provider_cafes(
         session.flush()
 
     provider_inserted = provider_updated = provider_unchanged = 0
+    unchanged_provider_ids: list[int] = []
     for reference in references:
         origin = (reference.canonical_source, reference.canonical_source_id)
         target = cafes_by_origin.get(origin) or created_by_origin.get(origin)
@@ -305,14 +310,15 @@ def seed_provider_cafes(
             provider_updated += 1
         else:
             provider_unchanged += 1
-        if not dry_run:
+        if not dry_run and changed:
             existing.detail_url = reference.direct_url
             existing.active = True
             existing.match_method = reference.match_rule
             existing.match_distance_m = reference.match_distance_m
-            if changed:
-                existing.verified_at = seen_at
+            existing.verified_at = seen_at
             existing.last_seen_at = seen_at
+        elif not dry_run:
+            unchanged_provider_ids.append(existing.id)
 
     incoming_provider_keys = {
         (reference.provider, reference.provider_place_id)
@@ -332,6 +338,20 @@ def seed_provider_cafes(
                 existing.active = False
 
     if not dry_run:
+        for offset in range(
+            0,
+            len(unchanged_provider_ids),
+            PROVIDER_LAST_SEEN_UPDATE_BATCH_SIZE,
+        ):
+            batch = unchanged_provider_ids[
+                offset : offset + PROVIDER_LAST_SEEN_UPDATE_BATCH_SIZE
+            ]
+            session.execute(
+                update(CafeProviderPlace)
+                .where(CafeProviderPlace.id.in_(batch))
+                .values(last_seen_at=seen_at),
+                execution_options={"synchronize_session": False},
+            )
         session.commit()
     return ProviderSeedReport(
         cafe_source_count=len(catalog.new_cafe_candidates),

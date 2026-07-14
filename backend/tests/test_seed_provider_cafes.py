@@ -180,6 +180,65 @@ def test_seed_flushes_new_cafes_as_one_batch_before_provider_links(
     assert flush_batches == [(3, 0), (0, 3)]
 
 
+def test_seed_bulk_updates_last_seen_for_unchanged_provider(
+    session: Session,
+) -> None:
+    existing = _cafe("overture", "ov-1", overture_id="ov-1")
+    session.add(existing)
+    session.flush()
+    previous_seen_at = datetime(2026, 7, 12, 3, 0, tzinfo=UTC)
+    session.add(
+        CafeProviderPlace(
+            cafe_id=existing.id,
+            provider="kakao",
+            provider_place_id="100",
+            detail_url="https://place.map.kakao.com/100",
+            active=True,
+            match_method="exact_name",
+            match_distance_m=4.5,
+            verified_at=previous_seen_at,
+            last_seen_at=previous_seen_at,
+        )
+    )
+    session.commit()
+    update_statements: list[str] = []
+
+    def capture_update(
+        connection: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,
+    ) -> None:
+        del connection, cursor, parameters, context, executemany
+        if statement.startswith("UPDATE cafe_provider_places"):
+            update_statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", capture_update)
+    try:
+        report = seed_provider_cafes(
+            session,
+            ProviderCatalogRecords(
+                (_reference("overture", "ov-1", "100"),),
+                (),
+            ),
+            dry_run=False,
+            now=NOW,
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_update)
+
+    session.expire_all()
+    place = session.scalar(select(CafeProviderPlace))
+    assert report.provider_unchanged_count == 1
+    assert place is not None
+    assert place.last_seen_at.replace(tzinfo=UTC) == NOW
+    assert len(update_statements) == 1
+    assert " IN (" in update_statements[0]
+
+
 def test_seed_updates_permit_origin_and_provider_without_deactivation(
     session: Session,
 ) -> None:

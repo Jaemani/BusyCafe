@@ -337,6 +337,7 @@ OVERTURE_CAFE_CATEGORIES: Final = (
 # a CE7 provider place. This catalog-quality value is not forecast confidence.
 PROVIDER_CAFE_RELEASE: Final = "OA-16095+kakao-local"
 PROVIDER_VERIFIED_CAFE_CONFIDENCE: Final = 1.0
+PROVIDER_LAST_SEEN_UPDATE_BATCH_SIZE: Final = 500
 
 # `--confidence-report` (read-only, no network) bucket range for the Overture
 # confidence-threshold study. Does not affect ingest filtering.
