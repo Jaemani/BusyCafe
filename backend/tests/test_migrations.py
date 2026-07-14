@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from alembic import command
@@ -8,6 +9,7 @@ import pytest
 from sqlalchemy import create_engine, inspect, text
 
 from app.config import BACKEND_DIR, SCORING_MODEL_VERSION, get_settings
+from app.database import normalize_database_url
 from app.models import Base
 
 
@@ -295,4 +297,210 @@ def test_provider_neutral_downgrade_refuses_provider_only_cafes(
         assert inspect(engine).has_table("cafe_provider_places")
         engine.dispose()
     finally:
+        get_settings.cache_clear()
+
+
+def test_public_table_lockdown_is_sqlite_compatible(
+    tmp_path: Path, monkeypatch
+) -> None:
+    database_path = tmp_path / "rls-noop.db"
+    database_url = f"sqlite+pysqlite:///{database_path}"
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    get_settings.cache_clear()
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+
+    try:
+        command.upgrade(config, "head")
+        engine = create_engine(database_url)
+        assert set(Base.metadata.tables).issubset(inspect(engine).get_table_names())
+
+        command.downgrade(config, "20260714_0007")
+        command.upgrade(config, "head")
+        assert set(Base.metadata.tables).issubset(inspect(engine).get_table_names())
+        engine.dispose()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_public_table_lockdown_revokes_supabase_client_access_on_postgresql() -> None:
+    raw_database_url = os.environ.get("DATABASE_URL", "")
+    if not raw_database_url:
+        pytest.skip("PostgreSQL CI database is not configured")
+    database_url = normalize_database_url(raw_database_url)
+    if not database_url.startswith("postgresql+psycopg://"):
+        pytest.skip("PostgreSQL-only security assertion")
+
+    engine = create_engine(database_url)
+    if engine.url.database != "cafe_crowd_test":
+        engine.dispose()
+        pytest.skip("refusing to mutate a non-test PostgreSQL database")
+    with engine.connect() as connection:
+        is_superuser = connection.execute(
+            text(
+                "SELECT rolsuper FROM pg_roles WHERE rolname = current_user"
+            )
+        ).scalar_one()
+    if not is_superuser:
+        engine.dispose()
+        pytest.skip("test role cannot create Supabase compatibility roles")
+
+    get_settings.cache_clear()
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    expected_tables = {"alembic_version", *Base.metadata.tables.keys()}
+
+    try:
+        # Make reruns deterministic, then recreate the exposure this migration
+        # must remove. The CI PostgreSQL service is isolated and ephemeral.
+        command.upgrade(config, "head")
+        command.downgrade(config, "20260714_0007")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "DO $roles$ BEGIN "
+                    "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') "
+                    "THEN CREATE ROLE anon NOLOGIN; END IF; "
+                    "IF NOT EXISTS (SELECT 1 FROM pg_roles "
+                    "WHERE rolname = 'authenticated') "
+                    "THEN CREATE ROLE authenticated NOLOGIN; END IF; "
+                    "END $roles$"
+                )
+            )
+            connection.execute(
+                text(
+                    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public "
+                    "TO anon, authenticated"
+                )
+            )
+            connection.execute(
+                text(
+                    "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public "
+                    "TO anon, authenticated"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT ALL PRIVILEGES ON TABLES TO anon, authenticated"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+                    "GRANT ALL PRIVILEGES ON SEQUENCES TO anon, authenticated"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.begin() as connection:
+            rls_states = dict(
+                connection.execute(
+                    text(
+                        "SELECT relation.relname, relation.relrowsecurity "
+                        "FROM pg_class AS relation "
+                        "JOIN pg_namespace AS namespace "
+                        "ON namespace.oid = relation.relnamespace "
+                        "WHERE namespace.nspname = 'public' "
+                        "AND relation.relkind = 'r'"
+                    )
+                ).all()
+            )
+            assert expected_tables <= rls_states.keys()
+            assert all(rls_states[name] for name in expected_tables)
+
+            sequence_rows = connection.execute(
+                text(
+                    "SELECT format('%I.%I', namespace.nspname, relation.relname), "
+                    "owning_table.relname "
+                    "FROM pg_class AS relation "
+                    "JOIN pg_namespace AS namespace "
+                    "ON namespace.oid = relation.relnamespace "
+                    "JOIN pg_depend AS dependency "
+                    "ON dependency.objid = relation.oid "
+                    "AND dependency.classid = 'pg_class'::regclass "
+                    "AND dependency.refclassid = 'pg_class'::regclass "
+                    "AND dependency.deptype IN ('a', 'i') "
+                    "JOIN pg_class AS owning_table "
+                    "ON owning_table.oid = dependency.refobjid "
+                    "WHERE relation.relkind = 'S' "
+                    "AND namespace.nspname = 'public'"
+                )
+            ).all()
+            sequence_names = [
+                sequence_name
+                for sequence_name, owning_table in sequence_rows
+                if owning_table in expected_tables
+            ]
+            assert sequence_names
+
+            for role_name in ("anon", "authenticated"):
+                for table_name in expected_tables:
+                    assert not connection.execute(
+                        text(
+                            "SELECT has_table_privilege("
+                            ":role_name, :table_name, 'SELECT')"
+                        ),
+                        {
+                            "role_name": role_name,
+                            "table_name": f"public.{table_name}",
+                        },
+                    ).scalar_one()
+                for sequence_name in sequence_names:
+                    assert not connection.execute(
+                        text(
+                            "SELECT has_sequence_privilege("
+                            ":role_name, :sequence_name, 'USAGE')"
+                        ),
+                        {
+                            "role_name": role_name,
+                            "sequence_name": sequence_name,
+                        },
+                    ).scalar_one()
+
+            # Revoked default privileges must also protect future app objects.
+            connection.execute(
+                text(
+                    "CREATE TABLE public.busy_cafe_security_probe "
+                    "(id serial PRIMARY KEY)"
+                )
+            )
+            for role_name in ("anon", "authenticated"):
+                assert not connection.execute(
+                    text(
+                        "SELECT has_table_privilege("
+                        ":role_name, 'public.busy_cafe_security_probe', 'SELECT')"
+                    ),
+                    {"role_name": role_name},
+                ).scalar_one()
+                assert not connection.execute(
+                    text(
+                        "SELECT has_sequence_privilege("
+                        ":role_name, 'public.busy_cafe_security_probe_id_seq', "
+                        "'USAGE')"
+                    ),
+                    {"role_name": role_name},
+                ).scalar_one()
+            connection.execute(
+                text("DROP TABLE public.busy_cafe_security_probe")
+            )
+
+            # The backend's postgres owner path still bypasses non-forced RLS.
+            inserted_id = connection.execute(
+                text(
+                    "INSERT INTO hotspots (area_cd, name, lat, lng, is_polled) "
+                    "VALUES ('RLS-CI-PROBE', 'RLS CI probe', 37.5, 127.0, false) "
+                    "ON CONFLICT (area_cd) DO UPDATE SET name = EXCLUDED.name "
+                    "RETURNING id"
+                )
+            ).scalar_one()
+            assert connection.execute(
+                text("SELECT name FROM hotspots WHERE id = :id"),
+                {"id": inserted_id},
+            ).scalar_one() == "RLS CI probe"
+            connection.execute(
+                text("DELETE FROM hotspots WHERE id = :id"),
+                {"id": inserted_id},
+            )
+    finally:
+        engine.dispose()
         get_settings.cache_clear()
