@@ -183,6 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.output is None:
         print(rendered, end="")
     else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
     for hotspot_name, band, found, expected in result.shortages:
         print(

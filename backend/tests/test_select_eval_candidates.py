@@ -198,7 +198,7 @@ def test_cli_uses_stdout_by_default_and_reports_shortages_to_stderr(
     assert "shortage: hotspot='성수카페거리' band=near selected=0/4" in captured.err
     assert list(tmp_path.glob("*.csv")) == []
 
-    output = tmp_path / "field_candidates.csv"
+    output = tmp_path / "nested" / "field_candidates.csv"
     assert (
         main(
             [
