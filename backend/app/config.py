@@ -113,8 +113,10 @@ KAKAO_VERIFY_RADIUS_M: Final = 1_000
 # Naver Search Local API is an offline provider-link enrichment source.  Its
 # official contract returns at most five results per query and has a 25,000
 # request daily quota.  A result is useful only when ``link`` itself contains
-# a canonical numeric Naver Place ID; search URLs are never synthesized.
+# a canonical numeric Naver Place ID; non-identity search fallbacks use the
+# separate public map-search contract below and never enter provider identity.
 NAVER_SEARCH_BASE_URL: Final = "https://openapi.naver.com"
+NAVER_MAP_SEARCH_BASE_URL: Final = "https://map.naver.com/p/search"
 NAVER_LOCAL_SEARCH_PATH: Final = "/v1/search/local.json"
 NAVER_LOCAL_MAX_DISPLAY: Final = 5
 NAVER_LOCAL_DAILY_CALL_LIMIT: Final = 25_000

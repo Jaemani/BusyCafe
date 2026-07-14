@@ -217,9 +217,10 @@ class EvidenceResponse(BaseModel):
 
 
 class ExternalLinksResponse(BaseModel):
-    """Only provider-verified, direct place-detail URLs are exposed."""
+    """Verified detail URLs plus an explicitly non-identity search fallback."""
 
     naver: str | None = None
+    naver_search: str | None = None
     kakao: str | None = None
     google: str | None = None
 

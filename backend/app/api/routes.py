@@ -6,7 +6,7 @@ import os
 import re
 from datetime import UTC, datetime, timedelta
 from math import ceil, isfinite
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, func, select
@@ -16,6 +16,7 @@ from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
     MAX_CAFES_PER_VIEWPORT,
+    NAVER_MAP_SEARCH_BASE_URL,
     OVERTURE_RELEASE,
     STALE_WARN_MIN,
 )
@@ -239,7 +240,21 @@ def _cafe_external_links(cafe: Cafe) -> ExternalLinksResponse:
             == place.provider_place_id
         ):
             resolved[place.provider] = candidate
+    resolved["naver_search"] = (
+        _naver_map_search_url(cafe) if resolved["naver"] is None else None
+    )
     return ExternalLinksResponse(**resolved)
+
+
+def _naver_map_search_url(cafe: Cafe) -> str | None:
+    """Build an address-first map search without claiming a provider identity."""
+
+    name = " ".join(cafe.name.split())
+    road_address = " ".join((cafe.road_address or "").split())
+    if not name or not road_address:
+        return None
+    query = quote(f"{road_address} {name}", safe="")
+    return f"{NAVER_MAP_SEARCH_BASE_URL}/{query}"
 
 
 def _provider_place_id_from_detail_url(

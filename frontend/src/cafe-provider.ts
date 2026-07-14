@@ -22,6 +22,7 @@ export interface CafeProperties extends CafeMapProperties {
   website: string | null;
   sourceLabel: string;
   naverUrl: string | null;
+  naverSearchUrl: string | null;
   kakaoUrl: string | null;
   googleUrl: string | null;
   confidenceTier: "high" | "mid" | "low" | null;
@@ -87,6 +88,7 @@ interface CafeDetailApiItem extends CafeApiItem {
   confidence_tier?: "high" | "mid" | "low" | null;
   external_links?: {
     naver?: string | null;
+    naver_search?: string | null;
     kakao?: string | null;
     google?: string | null;
   } | null;
@@ -306,6 +308,7 @@ export class CachedApiCafeProvider implements CafeProvider {
       lng: item.lng,
       sourceLabel: item.source_label ?? "서버 검증 카페 원장",
       naverUrl: item.external_links?.naver ?? null,
+      naverSearchUrl: item.external_links?.naver_search ?? null,
       kakaoUrl: item.external_links?.kakao ?? null,
       googleUrl: item.external_links?.google ?? null,
       coverage: item.coverage ?? "uncovered",

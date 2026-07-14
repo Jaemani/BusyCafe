@@ -43,6 +43,16 @@ function setExternalLink(selector: string, href: string | null): boolean {
   return true;
 }
 
+function setNaverLink(
+  directUrl: string | null,
+  searchUrl: string | null,
+): boolean {
+  const link = requiredElement<HTMLAnchorElement>("#map-link-naver");
+  const href = directUrl ?? searchUrl;
+  link.textContent = directUrl ? "네이버지도에서 보기" : "네이버맵 검색";
+  return setExternalLink("#map-link-naver", href);
+}
+
 function renderCrowdEstimate(
   cafe: CafeMapProperties,
   confidenceTier: CafeProperties["confidenceTier"] | null,
@@ -70,7 +80,7 @@ function renderCrowdEstimate(
 }
 
 function resetExternalLinks(): void {
-  setExternalLink("#map-link-naver", null);
+  setNaverLink(null, null);
   setExternalLink("#map-link-kakao", null);
   setExternalLink("#map-link-google", null);
   requiredElement<HTMLElement>("#external-map-links").hidden = true;
@@ -99,7 +109,7 @@ function renderCafePanel(cafe: CafeProperties): void {
   requiredElement<HTMLElement>("#cafe-source").textContent =
     `${cafe.sourceLabel} · 원본과 검증 상태를 함께 표시합니다.`;
   const hasExternalLink = [
-    setExternalLink("#map-link-naver", cafe.naverUrl),
+    setNaverLink(cafe.naverUrl, cafe.naverSearchUrl),
     setExternalLink("#map-link-kakao", cafe.kakaoUrl),
     setExternalLink("#map-link-google", cafe.googleUrl),
   ].some(Boolean);

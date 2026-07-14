@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -204,6 +205,8 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     assert detail["phone"] == "02-123-4567"
     assert detail["website"] == "https://example.test"
     assert detail["external_links"]["kakao"].endswith("/456")
+    assert detail["external_links"]["naver"].endswith("/123")
+    assert detail["external_links"]["naver_search"] is None
     assert detail["trend_12h"][0]["level"] == 2
     assert detail["forecast_1h"] == {
         "FCST_TIME": "precomputed",
@@ -580,6 +583,46 @@ def test_search_or_untrusted_external_links_are_not_exposed(api_client) -> None:
     assert links.google is None
 
 
+def test_naver_search_fallback_uses_encoded_address_then_name(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        cafe.external_links_json = {
+            "kakao": "https://place.map.kakao.com/456",
+            "naver_search": "https://evil.example/injected",
+        }
+        cafe.road_address = " 서울시  테스트구 /1?x=# "
+        cafe.name = " 정확한   카페%점 "
+        cafe_id = cafe.id
+        session.commit()
+
+    item = api_client.get(f"/api/cafes/{cafe_id}").json()
+    expected_query = "서울시 테스트구 /1?x=# 정확한 카페%점"
+
+    assert item["external_links"]["naver"] is None
+    assert item["external_links"]["naver_search"] == (
+        f"https://map.naver.com/p/search/{quote(expected_query, safe='')}"
+    )
+    assert "evil.example" not in item["external_links"]["naver_search"]
+
+
+def test_naver_search_fallback_requires_road_address(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.query(Cafe).filter(Cafe.active.is_(True)).one()
+        cafe.external_links_json = {
+            "kakao": "https://place.map.kakao.com/456",
+        }
+        cafe.road_address = None
+        cafe_id = cafe.id
+        session.commit()
+
+    item = api_client.get(f"/api/cafes/{cafe_id}").json()
+
+    assert item["external_links"]["naver"] is None
+    assert item["external_links"]["naver_search"] is None
+
+
 def test_provider_table_links_override_json_and_mobile_naver_is_direct(
     api_client,
 ) -> None:
@@ -608,6 +651,7 @@ def test_provider_table_links_override_json_and_mobile_naver_is_direct(
     assert item["external_links"]["naver"].startswith(
         "https://m.place.naver.com/restaurant/999/"
     )
+    assert item["external_links"]["naver_search"] is None
     assert item["external_links"]["kakao"].endswith("/456")
 
 
