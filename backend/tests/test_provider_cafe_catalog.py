@@ -162,6 +162,9 @@ def test_builder_links_existing_and_emits_only_permit_owned_new_cafes() -> None:
     assert build.report.permit_excluded_as_existing_count == 1
     assert build.report.overture_naver_direct_count == 0
     assert build.report.overture_kakao_match_count == 1
+    assert build.report.overture_kakao_spatial_match_count == 1
+    assert build.report.overture_kakao_identity_match_count == 0
+    assert build.report.overture_kakao_identity_ambiguous_count == 0
     assert build.report.overture_kakao_ambiguous_count == 0
     assert build.report.overture_kakao_unmatched_count == 5
     assert build.report.permit_kakao_candidate_count == 3
@@ -228,6 +231,153 @@ def test_builder_rejects_duplicate_permit_identity() -> None:
 
     with pytest.raises(ProviderCatalogError, match="duplicate permit source ID"):
         build_provider_cafe_catalog(overture, (permits[0], permits[0]), kakao)
+
+
+def test_builder_adds_only_two_signal_exact_global_one_to_one_identities() -> None:
+    overture = (
+        _overture(
+            "name-address",
+            name="정확 카페",
+            road_address="종로 1",
+            lat=37.41,
+            lng=126.76,
+        ),
+        _overture(
+            "name-phone",
+            name="국가번호 카페",
+            phone="+82 2-1234-5678",
+            road_address="서로 10",
+            lat=37.41,
+            lng=126.76,
+        ),
+        _overture(
+            "phone-address",
+            name="오버처 상호",
+            phone="+82 2-9876-5432",
+            road_address="을지로 20",
+            lat=37.41,
+            lng=126.76,
+        ),
+    )
+    kakao = (
+        _kakao(
+            "100",
+            place_name="정확카페",
+            road_address_name="서울 종로구 종로1",
+            phone="02-0000-0000",
+            latitude=37.70,
+            longitude=127.19,
+        ),
+        _kakao(
+            "200",
+            place_name="국가번호 카페",
+            road_address_name="서울 강남구 다른로 99",
+            phone="02-1234-5678",
+            latitude=37.70,
+            longitude=127.19,
+        ),
+        _kakao(
+            "300",
+            place_name="카카오 상호",
+            road_address_name="서울 중구 을지로 20",
+            phone="02-9876-5432",
+            latitude=37.70,
+            longitude=127.19,
+        ),
+    )
+
+    build = build_provider_cafe_catalog(overture, (), kakao)
+
+    refs = {reference.canonical_source_id: reference for reference in build.existing_provider_refs}
+    assert {key: value.provider_place_id for key, value in refs.items()} == {
+        "name-address": "100",
+        "name-phone": "200",
+        "phone-address": "300",
+    }
+    assert refs["name-address"].match_rule == "exact_name_and_address"
+    assert refs["name-phone"].match_rule == "exact_name_and_phone"
+    assert refs["phone-address"].match_rule == "exact_phone_and_address"
+    assert all(reference.match_distance_m > 1_000 for reference in refs.values())
+    assert build.report.overture_kakao_spatial_match_count == 0
+    assert build.report.overture_kakao_identity_match_count == 3
+    assert build.report.overture_kakao_match_count == 3
+
+
+def test_builder_rejects_one_signal_and_quarantines_identity_collisions() -> None:
+    overture = (
+        _overture(
+            "single-signal",
+            name="이름만 같음",
+            road_address="서로 1",
+            lat=37.41,
+        ),
+        _overture(
+            "collision-a",
+            name="충돌 카페",
+            road_address="종로 2",
+            lat=37.42,
+        ),
+        _overture(
+            "collision-b",
+            name="충돌카페",
+            road_address="종로2",
+            lat=37.43,
+        ),
+    )
+    kakao = (
+        _kakao(
+            "100",
+            place_name="이름만 같음",
+            road_address_name="서울 종로구 다른로 99",
+            latitude=37.70,
+        ),
+        _kakao(
+            "200",
+            place_name="충돌 카페",
+            road_address_name="서울 종로구 종로 2",
+            latitude=37.70,
+        ),
+    )
+
+    build = build_provider_cafe_catalog(overture, (), kakao)
+
+    assert build.existing_provider_refs == ()
+    assert build.report.overture_kakao_identity_match_count == 0
+    assert build.report.overture_kakao_identity_ambiguous_count == 1
+
+
+def test_identity_enrichment_never_steals_kakao_id_used_by_permit_candidate() -> None:
+    overture = (
+        _overture(
+            "overture",
+            name="같은 카페",
+            road_address="종로 1",
+            lat=37.41,
+            lng=126.76,
+        ),
+    )
+    permit = _permit(
+        "permit",
+        name="같은 카페",
+        road_address="서울 종로구 종로 1",
+        latitude=37.70,
+        longitude=127.19,
+    )
+    kakao = _kakao(
+        "100",
+        place_name="같은카페",
+        road_address_name="서울 종로구 종로 1",
+        latitude=37.70,
+        longitude=127.19,
+    )
+
+    build = build_provider_cafe_catalog(overture, (permit,), (kakao,))
+
+    assert build.existing_provider_refs == ()
+    assert len(build.new_cafe_candidates) == 1
+    assert build.new_cafe_candidates[0].canonical_source_id == "permit"
+    assert build.new_cafe_candidates[0].provider_refs[0].provider_place_id == "100"
+    assert build.report.overture_kakao_identity_match_count == 0
 
 
 def test_builder_rejects_wrong_provider_categories_and_sources() -> None:

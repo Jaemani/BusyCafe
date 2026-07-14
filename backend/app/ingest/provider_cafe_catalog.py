@@ -11,6 +11,8 @@ import hashlib
 import hmac
 import json
 import re
+import unicodedata
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from math import isfinite
@@ -18,8 +20,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import KAKAO_CAFE_CATEGORY_CODE, SEOUL_BBOX
+from app.geo import haversine_m
 from app.ingest.overture_places import OvertureCafeRecord, OvertureIngestError
-from app.ingest.permit_reconciliation import CatalogPlace, reconcile_candidates
+from app.ingest.permit_reconciliation import (
+    CatalogPlace,
+    normalize_name,
+    reconcile_candidates,
+)
 from app.ingest.seoul_refreshment_candidates import PlaceCandidate
 from app.schemas import KakaoPlace
 
@@ -79,6 +86,9 @@ class ProviderCatalogReport:
     permit_excluded_as_existing_count: int
     overture_naver_direct_count: int
     overture_kakao_match_count: int
+    overture_kakao_spatial_match_count: int
+    overture_kakao_identity_match_count: int
+    overture_kakao_identity_ambiguous_count: int
     overture_kakao_ambiguous_count: int
     overture_kakao_unmatched_count: int
     permit_kakao_candidate_count: int
@@ -102,6 +112,190 @@ class ProviderCatalogRecords:
 
     existing_provider_refs: tuple[ProviderReference, ...]
     new_cafe_candidates: tuple[ProviderNeutralCafeCandidate, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ExactKakaoIdentityMatch:
+    overture_id: str
+    kakao_place_id: str
+    rule: str
+    distance_m: float
+
+
+@dataclass(frozen=True, slots=True)
+class ExactKakaoIdentityResult:
+    matches: tuple[ExactKakaoIdentityMatch, ...]
+    ambiguous_overture_ids: tuple[str, ...]
+    ambiguous_kakao_place_ids: tuple[str, ...]
+
+
+def _korean_phone(value: str | None) -> str | None:
+    """Normalize punctuation and an explicit +82 country prefix only."""
+
+    if not value:
+        return None
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    digits = "".join(
+        character for character in normalized if character.isdecimal()
+    )
+    if normalized.startswith("+82") and digits.startswith("82"):
+        national = digits[2:]
+        digits = national if national.startswith("0") else f"0{national}"
+    return digits or None
+
+
+def _seoul_address_core(value: str | None) -> str | None:
+    """Remove only explicit Seoul/district prefixes, then compare exact text."""
+
+    if not value:
+        return None
+    parts = unicodedata.normalize("NFKC", value).casefold().split()
+    if parts and parts[0] in {"서울", "서울시", "서울특별시"}:
+        parts = parts[1:]
+    if parts and parts[0].endswith("구"):
+        parts = parts[1:]
+    core = "".join(
+        character
+        for character in "".join(parts)
+        if character.isalnum()
+    )
+    # A usable Korean place address must contain both a named component and a
+    # building/lot number.  This prevents weak values such as "1" becoming an
+    # identity signal while avoiding a tunable length threshold.
+    if not any(character.isalpha() for character in core):
+        return None
+    if not any(character.isdecimal() for character in core):
+        return None
+    return core
+
+
+def _overture_addresses(record: OvertureCafeRecord) -> frozenset[str]:
+    core = _seoul_address_core(record.road_address)
+    return frozenset((core,)) if core else frozenset()
+
+
+def _kakao_addresses(place: KakaoPlace) -> frozenset[str]:
+    return frozenset(
+        core
+        for value in (place.road_address_name, place.address_name)
+        if (core := _seoul_address_core(value)) is not None
+    )
+
+
+def reconcile_exact_kakao_identities(
+    overture_records: Sequence[OvertureCafeRecord],
+    kakao_places: Sequence[KakaoPlace],
+) -> ExactKakaoIdentityResult:
+    """Resolve only global 1:1 identities sharing two exact independent fields."""
+
+    overture_by_id: dict[str, OvertureCafeRecord] = {}
+    for record in overture_records:
+        if record.overture_id in overture_by_id:
+            raise ProviderCatalogError(
+                f"duplicate Overture ID in identity input: {record.overture_id}"
+            )
+        overture_by_id[record.overture_id] = record
+    kakao_by_id: dict[str, KakaoPlace] = {}
+    names: dict[str, set[str]] = defaultdict(set)
+    phones: dict[str, set[str]] = defaultdict(set)
+    addresses: dict[str, set[str]] = defaultdict(set)
+    for place in kakao_places:
+        if place.place_id in kakao_by_id:
+            raise ProviderCatalogError(
+                f"duplicate Kakao place ID in identity input: {place.place_id}"
+            )
+        kakao_by_id[place.place_id] = place
+        name = normalize_name(place.place_name)
+        if name:
+            names[name].add(place.place_id)
+        phone = _korean_phone(place.phone)
+        if phone:
+            phones[phone].add(place.place_id)
+        for address in _kakao_addresses(place):
+            addresses[address].add(place.place_id)
+
+    potentials: dict[str, tuple[ExactKakaoIdentityMatch, ...]] = {}
+    overture_ids_by_kakao: dict[str, set[str]] = defaultdict(set)
+    for overture_id in sorted(overture_by_id):
+        record = overture_by_id[overture_id]
+        name = normalize_name(record.name)
+        phone = _korean_phone(record.phone)
+        record_addresses = _overture_addresses(record)
+        candidate_ids = set(names.get(name, ()))
+        if phone:
+            candidate_ids.update(phones.get(phone, ()))
+        for address in record_addresses:
+            candidate_ids.update(addresses.get(address, ()))
+
+        matches: list[ExactKakaoIdentityMatch] = []
+        for place_id in sorted(candidate_ids):
+            place = kakao_by_id[place_id]
+            name_equal = bool(name) and name == normalize_name(place.place_name)
+            phone_equal = bool(phone) and phone == _korean_phone(place.phone)
+            address_equal = bool(record_addresses & _kakao_addresses(place))
+            if sum((name_equal, phone_equal, address_equal)) < 2:
+                continue
+            signal_names = tuple(
+                signal
+                for signal, matched in (
+                    ("name", name_equal),
+                    ("phone", phone_equal),
+                    ("address", address_equal),
+                )
+                if matched
+            )
+            match = ExactKakaoIdentityMatch(
+                overture_id=overture_id,
+                kakao_place_id=place_id,
+                rule="exact_" + "_and_".join(signal_names),
+                distance_m=haversine_m(
+                    record.lat,
+                    record.lng,
+                    place.latitude,
+                    place.longitude,
+                ),
+            )
+            matches.append(match)
+            overture_ids_by_kakao[place_id].add(overture_id)
+        potentials[overture_id] = tuple(matches)
+
+    resolved: list[ExactKakaoIdentityMatch] = []
+    ambiguous_overture: set[str] = set()
+    ambiguous_kakao: set[str] = set()
+    for overture_id in sorted(potentials):
+        candidate_matches = potentials[overture_id]
+        if not candidate_matches:
+            continue
+        if (
+            len(candidate_matches) == 1
+            and len(
+                overture_ids_by_kakao[candidate_matches[0].kakao_place_id]
+            )
+            == 1
+        ):
+            resolved.append(candidate_matches[0])
+            continue
+        ambiguous_overture.add(overture_id)
+        ambiguous_kakao.update(
+            match.kakao_place_id for match in candidate_matches
+        )
+    # Reverse collisions make every claimant ambiguous, including a claimant
+    # which otherwise had only one potential match.
+    for place_id, overture_ids in overture_ids_by_kakao.items():
+        if len(overture_ids) > 1:
+            ambiguous_kakao.add(place_id)
+            ambiguous_overture.update(overture_ids)
+
+    return ExactKakaoIdentityResult(
+        matches=tuple(
+            match
+            for match in resolved
+            if match.overture_id not in ambiguous_overture
+            and match.kakao_place_id not in ambiguous_kakao
+        ),
+        ambiguous_overture_ids=tuple(sorted(ambiguous_overture)),
+        ambiguous_kakao_place_ids=tuple(sorted(ambiguous_kakao)),
+    )
 
 
 def _kakao_direct_url(place_id: str) -> str:
@@ -249,7 +443,7 @@ def build_provider_cafe_catalog(
     overture_catalog = _overture_catalog(overture_records)
 
     overture_matches = reconcile_candidates(kakao_candidates, overture_catalog)
-    kakao_refs = tuple(
+    spatial_kakao_refs = tuple(
         _provider_ref(
             canonical_source=OVERTURE_SOURCE,
             canonical_source_id=match.catalog.catalog_id,
@@ -264,28 +458,6 @@ def build_provider_cafe_catalog(
         for record in overture_records
         if (reference := _overture_naver_ref(record)) is not None
     )
-    provider_owners: dict[tuple[str, str], str] = {}
-    for reference in (*kakao_refs, *naver_refs):
-        key = (reference.provider, reference.provider_place_id)
-        previous_owner = provider_owners.setdefault(
-            key, reference.canonical_source_id
-        )
-        if previous_owner != reference.canonical_source_id:
-            raise ProviderCatalogError(
-                f"duplicate {reference.provider} provider place ID"
-            )
-    existing_refs = tuple(
-        sorted(
-            (*kakao_refs, *naver_refs),
-            key=lambda ref: (
-                ref.canonical_source,
-                ref.canonical_source_id,
-                ref.provider,
-                ref.provider_place_id,
-            ),
-        )
-    )
-
     existing_permit_ids = _existing_permit_ids(overture_records)
     seen_permits: set[str] = set()
     eligible_permits: list[PlaceCandidate] = []
@@ -359,6 +531,61 @@ def build_provider_cafe_catalog(
         sorted(new_candidates, key=lambda item: item.canonical_source_id)
     )
 
+    # Do not steal a provider identity already assigned to a permit-origin cafe.
+    # Identity enrichment runs only over Kakao rows unused by both earlier
+    # spatial Overture reconciliation and permit reconciliation.
+    permit_matched_kakao_ids = {
+        match.catalog.catalog_id for match in permit_matches.matches
+    }
+    spatial_matched_overture_ids = {
+        match.catalog.catalog_id for match in overture_matches.matches
+    }
+    identity_result = reconcile_exact_kakao_identities(
+        tuple(
+            record
+            for record in overture_records
+            if record.overture_id not in spatial_matched_overture_ids
+        ),
+        tuple(
+            kakao_by_id[candidate.source_id]
+            for candidate in safe_unmatched_kakao
+            if candidate.source_id not in permit_matched_kakao_ids
+        ),
+    )
+    identity_kakao_refs = tuple(
+        _provider_ref(
+            canonical_source=OVERTURE_SOURCE,
+            canonical_source_id=match.overture_id,
+            kakao_place_id=match.kakao_place_id,
+            match_rule=match.rule,
+            distance_m=match.distance_m,
+        )
+        for match in identity_result.matches
+    )
+    kakao_refs = (*spatial_kakao_refs, *identity_kakao_refs)
+
+    provider_owners: dict[tuple[str, str], str] = {}
+    for reference in (*kakao_refs, *naver_refs):
+        key = (reference.provider, reference.provider_place_id)
+        previous_owner = provider_owners.setdefault(
+            key, reference.canonical_source_id
+        )
+        if previous_owner != reference.canonical_source_id:
+            raise ProviderCatalogError(
+                f"duplicate {reference.provider} provider place ID"
+            )
+    existing_refs = tuple(
+        sorted(
+            (*kakao_refs, *naver_refs),
+            key=lambda ref: (
+                ref.canonical_source,
+                ref.canonical_source_id,
+                ref.provider,
+                ref.provider_place_id,
+            ),
+        )
+    )
+
     return ProviderCatalogBuild(
         existing_provider_refs=existing_refs,
         new_cafe_candidates=new_candidates_tuple,
@@ -369,9 +596,21 @@ def build_provider_cafe_catalog(
             existing_permit_annotation_count=len(existing_permit_ids),
             permit_excluded_as_existing_count=excluded_existing_count,
             overture_naver_direct_count=len(naver_refs),
-            overture_kakao_match_count=len(overture_matches.matches),
-            overture_kakao_ambiguous_count=len(overture_matches.ambiguous),
-            overture_kakao_unmatched_count=len(overture_matches.unmatched),
+            overture_kakao_match_count=(
+                len(overture_matches.matches) + len(identity_result.matches)
+            ),
+            overture_kakao_spatial_match_count=len(overture_matches.matches),
+            overture_kakao_identity_match_count=len(identity_result.matches),
+            overture_kakao_identity_ambiguous_count=len(
+                identity_result.ambiguous_kakao_place_ids
+            ),
+            overture_kakao_ambiguous_count=(
+                len(overture_matches.ambiguous)
+                + len(identity_result.ambiguous_kakao_place_ids)
+            ),
+            overture_kakao_unmatched_count=(
+                len(overture_matches.unmatched) - len(identity_result.matches)
+            ),
             permit_kakao_candidate_count=len(eligible_permits),
             permit_kakao_catalog_count=len(kakao_catalog),
             permit_kakao_match_count=len(permit_matches.matches),

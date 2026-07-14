@@ -283,7 +283,14 @@ def test_seed_rejects_duplicate_incoming_reference_before_write(
 
 @pytest.mark.parametrize(
     "match_method",
-    ["exact_name", "exact_phone", "exact_name_and_phone"],
+    [
+        "exact_name",
+        "exact_phone",
+        "exact_name_and_phone",
+        "exact_name_and_address",
+        "exact_phone_and_address",
+        "exact_name_and_phone_and_address",
+    ],
 )
 def test_seed_retires_only_absent_managed_kakao_references(
     session: Session,

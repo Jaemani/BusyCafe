@@ -34,7 +34,14 @@ class ProviderSeedError(RuntimeError):
 
 
 _MANAGED_KAKAO_MATCH_METHODS = frozenset(
-    {"exact_name", "exact_phone", "exact_name_and_phone"}
+    {
+        "exact_name",
+        "exact_phone",
+        "exact_name_and_phone",
+        "exact_name_and_address",
+        "exact_phone_and_address",
+        "exact_name_and_phone_and_address",
+    }
 )
 
 
