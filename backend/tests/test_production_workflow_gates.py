@@ -184,3 +184,15 @@ def test_enabled_production_gate_fails_when_required_configuration_is_missing(
 
     assert process.returncode != 0
     assert "is enabled but" in process.stderr
+
+
+def test_monitor_workflow_smokes_public_map_shell() -> None:
+    script = _preflight_script(
+        "monitor-production.yml", "Smoke public map shell"
+    )
+
+    assert '${PRODUCTION_HEALTH_URL%/api/health}' in script
+    assert "curl --fail" in script
+    assert "--max-time 10" in script
+    assert "grep --fixed-strings --quiet" in script
+    assert 'id="map"' in script

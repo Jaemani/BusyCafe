@@ -76,3 +76,15 @@ jobs:
       - if: steps.configuration.outputs.enabled == 'true'
         working-directory: backend
         run: uv run python scripts/check_freshness.py "$PRODUCTION_HEALTH_URL"
+      - if: steps.configuration.outputs.enabled == 'true'
+        name: Smoke public map shell
+        run: |
+          app_url="${PRODUCTION_HEALTH_URL%/api/health}"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          curl --fail --silent --show-error --location --max-time 10 \
+            "$app_url/" --output "$response_file"
+          if ! grep --fixed-strings --quiet 'id="map"' "$response_file"; then
+            echo "Production root does not contain the map shell." >&2
+            exit 1
+          fi
