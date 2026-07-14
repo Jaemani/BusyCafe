@@ -1,12 +1,11 @@
 {
   "version": 2,
-  "framework": "vite",
-  "installCommand": "cd frontend && npm ci",
-  "buildCommand": "cd frontend && npm run build",
+  "installCommand": "python -m pip install -r api/requirements.txt && cd frontend && npm ci",
+  "buildCommand": "cd frontend && npm run build && mkdir -p ../api/static && cp -R dist/. ../api/static/",
   "outputDirectory": "frontend/dist",
   "functions": {
     "api/index.py": {
-      "includeFiles": "{api/data/preview.db,backend/app/**}"
+      "includeFiles": "{api/data/preview.db,api/static/**,backend/app/**}"
     }
   },
   "rewrites": [
