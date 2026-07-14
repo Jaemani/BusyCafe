@@ -21,6 +21,7 @@ from app.schemas import KakaoPlace
 
 
 KAKAO_CANONICAL_SOURCE = "kakao"
+_SEOUL_ADDRESS_PREFIXES = frozenset({"서울", "서울시", "서울특별시"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +57,7 @@ class KakaoExpansionConflict:
 @dataclass(frozen=True, slots=True)
 class KakaoExpansionReport:
     kakao_input_count: int
+    outside_target_region_count: int
     unique_kakao_place_count: int
     duplicate_kakao_place_id_count: int
     canonical_cafe_count: int
@@ -105,6 +107,14 @@ def _place_addresses(place: KakaoPlace) -> frozenset[str]:
         for value in (place.road_address_name, place.address_name)
         if (normalized := _address_core(value)) is not None
     )
+
+
+def _has_seoul_address(place: KakaoPlace) -> bool:
+    for value in (place.road_address_name, place.address_name):
+        parts = unicodedata.normalize("NFKC", value).strip().split()
+        if parts and parts[0] in _SEOUL_ADDRESS_PREFIXES:
+            return True
+    return False
 
 
 def _candidate(place: KakaoPlace) -> KakaoCanonicalCandidate:
@@ -170,11 +180,17 @@ def build_kakao_expansion(
     used_ids = frozenset(provider_ids)
 
     place_groups: dict[str, list[KakaoPlace]] = defaultdict(list)
+    all_input_ids: set[str] = set()
+    outside_target_region_count = 0
     for place in kakao_places:
         if place.category_group_code != KAKAO_CAFE_CATEGORY_CODE:
             raise ValueError(f"Kakao place is not CE7: {place.place_id}")
         if not place.place_id.isascii() or not place.place_id.isdigit():
             raise ValueError("Kakao place ID must be ASCII digits")
+        all_input_ids.add(place.place_id)
+        if not _has_seoul_address(place):
+            outside_target_region_count += 1
+            continue
         place_groups[place.place_id].append(place)
     duplicate_ids = {
         place_id for place_id, records in place_groups.items() if len(records) > 1
@@ -311,13 +327,13 @@ def build_kakao_expansion(
     rule_counts = Counter(
         rule for conflict in conflict_records for rule in conflict.rules
     )
-    input_ids = set(place_groups)
-    provider_ids_in_cache = used_ids & input_ids
+    provider_ids_in_cache = used_ids & all_input_ids
     return KakaoExpansionBuild(
         candidates=candidates,
         conflicts=conflict_records,
         report=KakaoExpansionReport(
             kakao_input_count=len(kakao_places),
+            outside_target_region_count=outside_target_region_count,
             unique_kakao_place_count=len(unique_places),
             duplicate_kakao_place_id_count=len(duplicate_ids),
             canonical_cafe_count=len(canonical_by_id),

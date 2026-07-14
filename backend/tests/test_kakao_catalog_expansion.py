@@ -71,6 +71,7 @@ def test_expansion_uses_kakao_identity_and_quarantines_collisions() -> None:
     assert candidate.canonical_source == "kakao"
     assert candidate.direct_url == "https://place.map.kakao.com/200"
     assert build.report.kakao_input_count == 11
+    assert build.report.outside_target_region_count == 0
     assert build.report.unique_kakao_place_count == 9
     assert build.report.duplicate_kakao_place_id_count == 1
     assert build.report.existing_provider_id_in_cache_count == 1
@@ -95,6 +96,39 @@ def test_expansion_is_order_independent() -> None:
     )
 
     assert first == second
+
+
+def test_expansion_excludes_non_seoul_and_missing_addresses() -> None:
+    records = (
+        _kakao(
+            "100",
+            address_name="경기 구리시 테스트동 1",
+            road_address_name="경기 구리시 테스트로 1",
+            x=127.14,
+            y=37.60,
+        ),
+        _kakao(
+            "200",
+            address_name="",
+            road_address_name="",
+            x=127.01,
+            y=37.60,
+        ),
+        _kakao(
+            "300",
+            address_name="경기 안양시 테스트동 1",
+            road_address_name="서울특별시 금천구 테스트로 1",
+            x=126.90,
+            y=37.44,
+        ),
+    )
+
+    build = build_kakao_expansion(records, (), ())
+
+    assert [item.canonical_source_id for item in build.candidates] == ["300"]
+    assert build.report.outside_target_region_count == 2
+    assert build.report.unmatched_kakao_place_count == 1
+    assert build.report.candidate_count == 1
 
 
 def test_expansion_rejects_invalid_provider_ownership_inputs() -> None:
