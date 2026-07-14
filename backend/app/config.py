@@ -106,6 +106,9 @@ KAKAO_RETRYABLE_STATUS_CODES: Final = frozenset({429, 500, 502, 503, 504})
 KAKAO_RETRY_AFTER_MAX_SECONDS: Final = 30.0
 KAKAO_CACHE_DIR: Final = BACKEND_DIR / "data" / "kakao"
 KAKAO_CACHE_FILENAME: Final = "kakao-ce7-seoul.jsonl"
+# Hard stop for the manually confirmed Kakao-owned canonical catalog apply.
+# The operator supplies a lower expected-candidate bound for every write run.
+KAKAO_CATALOG_APPLY_ABSOLUTE_MAX_CANDIDATES: Final = 40_000
 KAKAO_VERIFY_LNG: Final = 126.9769
 KAKAO_VERIFY_LAT: Final = 37.5759
 KAKAO_VERIFY_RADIUS_M: Final = 1_000

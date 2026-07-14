@@ -1,0 +1,118 @@
+name: Apply production Kakao canonical cafe catalog
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_expected_candidates:
+        description: "Maximum Kakao-owned cafes allowed to insert (1-40000)"
+        required: true
+        default: 25000
+        type: number
+      confirmation:
+        description: "Type APPLY_KAKAO_CATALOG exactly"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-cafe-catalog-refresh
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+      MAX_EXPECTED_CANDIDATES: ${{ inputs.max_expected_candidates }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      KAKAO_CACHE: data/kakao-apply/kakao-ce7-seoul.jsonl
+      KAKAO_MANIFEST: data/kakao-apply/kakao-ce7-seoul.jsonl.manifest.json
+    steps:
+      - name: Check secrets, bound, and exact confirmation
+        working-directory: .
+        run: |
+          if [ -z "${DATABASE_URL:-}" ] || [ -z "${KAKAO_REST_KEY:-}" ]; then
+            echo "DATABASE_URL and KAKAO_REST_KEY are required" >&2
+            exit 1
+          fi
+          case "$DATABASE_URL" in
+            postgresql://*|postgres://*|postgresql+psycopg://*) ;;
+            *)
+              echo "DATABASE_URL must be a PostgreSQL connection string" >&2
+              exit 1
+              ;;
+          esac
+          case "$MAX_EXPECTED_CANDIDATES" in
+            ''|*[!0-9]*)
+              echo "max_expected_candidates must be an integer from 1 through 40000" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$MAX_EXPECTED_CANDIDATES" -lt 1 ] || [ "$MAX_EXPECTED_CANDIDATES" -gt 40000 ]; then
+            echo "max_expected_candidates must be an integer from 1 through 40000" >&2
+            exit 1
+          fi
+          if [ "$CONFIRMATION" != "APPLY_KAKAO_CATALOG" ]; then
+            echo "confirmation must equal APPLY_KAKAO_CATALOG" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --frozen
+
+      - name: Prepare ephemeral Kakao workspace
+        run: mkdir -p "$(dirname "$KAKAO_CACHE")"
+
+      - name: Sweep and validate current Kakao CE7 catalog
+        run: >-
+          uv run python scripts/cache_kakao_cafes.py
+          --output "$KAKAO_CACHE"
+          --apply
+
+      - name: Verify production database schema
+        run: uv run alembic -c alembic.ini current --check-heads
+
+      - name: Re-read production and dry-run exact expansion
+        run: >-
+          uv run python scripts/seed_kakao_catalog_expansion.py
+          --kakao-cache "$KAKAO_CACHE"
+          --kakao-manifest "$KAKAO_MANIFEST"
+          --max-candidates "$MAX_EXPECTED_CANDIDATES"
+
+      - name: Re-read production and apply exact expansion
+        run: >-
+          uv run python scripts/seed_kakao_catalog_expansion.py
+          --kakao-cache "$KAKAO_CACHE"
+          --kakao-manifest "$KAKAO_MANIFEST"
+          --max-candidates "$MAX_EXPECTED_CANDIDATES"
+          --apply
+
+      - name: Materialize cafe scores after insert
+        run: uv run python scripts/materialize_scores.py
+
+      - if: ${{ always() }}
+        name: Upload validated Kakao manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: kakao-catalog-apply-manifest-${{ github.run_id }}
+          path: backend/${{ env.KAKAO_MANIFEST }}
+          if-no-files-found: warn
+          retention-days: 30
