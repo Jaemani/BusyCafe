@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "regions": ["icn1"],
   "installCommand": "python -m pip install -r api/requirements.txt && cd frontend && npm ci",
   "buildCommand": "cd frontend && npm run build && mkdir -p ../api/static && cp -R dist/. ../api/static/",
   "outputDirectory": "frontend/dist",

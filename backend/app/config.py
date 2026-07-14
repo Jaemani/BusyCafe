@@ -139,6 +139,14 @@ HTTP_USER_AGENT: Final = "cafe-crowd/0.1"
 HTTP_MAX_CONNECTIONS: Final = 4
 HTTP_MAX_KEEPALIVE_CONNECTIONS: Final = 4
 
+# Keep each serverless instance's direct PostgreSQL footprint small. Public map
+# reads should normally terminate at Vercel's shared cache; bounded overflow
+# protects the managed database when several cold instances miss together.
+DB_POOL_SIZE: Final = 1
+DB_MAX_OVERFLOW: Final = 2
+DB_POOL_TIMEOUT_SEC: Final = 5
+DB_POOL_RECYCLE_SEC: Final = 300
+
 # Polling interval confirmed after the portal reported no call-count limit.
 # Scoring defaults remain subject to Phase 6 calibration.
 POLL_INTERVAL_MIN: Final = 5
@@ -284,6 +292,10 @@ API_MAP_BROWSER_MAX_AGE_SEC: Final = 30
 API_MAP_EDGE_MAX_AGE_SEC: Final = 60
 API_MAP_STALE_WHILE_REVALIDATE_SEC: Final = 120
 API_MAP_STALE_IF_ERROR_SEC: Final = 600
+# Frontend map requests carry a data version derived from durable ingest time
+# and catalog size. A new ingest therefore uses a new cache key immediately;
+# the old version can stay at the edge for one full polling interval.
+API_VERSIONED_MAP_EDGE_MAX_AGE_SEC: Final = POLL_INTERVAL_MIN * 60
 # Health drives the stale banner and therefore gets a much shorter edge TTL.
 API_HEALTH_BROWSER_MAX_AGE_SEC: Final = 0
 API_HEALTH_EDGE_MAX_AGE_SEC: Final = 10

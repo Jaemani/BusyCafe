@@ -23,6 +23,7 @@ from app.main import (
     HEALTH_CACHE_CONTROL,
     MAP_CACHE_CONTROL,
     STATIC_CACHE_CONTROL,
+    VERSIONED_MAP_CACHE_CONTROL,
     create_app,
 )
 from app.models import (
@@ -466,10 +467,18 @@ def test_public_read_cache_policies_match_mutability(api_client) -> None:
     hotspots = api_client.get("/api/hotspots")
     health = api_client.get("/api/health")
     sources = api_client.get("/api/sources")
+    versioned_map = api_client.get(
+        "/api/cafes/summary",
+        params={
+            "bbox": "126.9,37.5,127.1,37.7",
+            "data_version": "2026-07-14T00:00:00Z:29917",
+        },
+    )
 
     assert hotspots.headers["cache-control"] == MAP_CACHE_CONTROL
     assert health.headers["cache-control"] == HEALTH_CACHE_CONTROL
     assert sources.headers["cache-control"] == STATIC_CACHE_CONTROL
+    assert versioned_map.headers["cache-control"] == VERSIONED_MAP_CACHE_CONTROL
 
 
 @pytest.mark.parametrize(

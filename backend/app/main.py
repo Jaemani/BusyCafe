@@ -18,6 +18,7 @@ from app.config import (
     API_STATIC_EDGE_MAX_AGE_SEC,
     API_STATIC_STALE_IF_ERROR_SEC,
     API_STATIC_STALE_WHILE_REVALIDATE_SEC,
+    API_VERSIONED_MAP_EDGE_MAX_AGE_SEC,
     FRONTEND_CORS_ORIGINS,
     TAILNET_CORS_ORIGIN_REGEX,
 )
@@ -40,6 +41,12 @@ def _public_cache_control(
 MAP_CACHE_CONTROL = _public_cache_control(
     browser_max_age=API_MAP_BROWSER_MAX_AGE_SEC,
     edge_max_age=API_MAP_EDGE_MAX_AGE_SEC,
+    stale_while_revalidate=API_MAP_STALE_WHILE_REVALIDATE_SEC,
+    stale_if_error=API_MAP_STALE_IF_ERROR_SEC,
+)
+VERSIONED_MAP_CACHE_CONTROL = _public_cache_control(
+    browser_max_age=API_MAP_BROWSER_MAX_AGE_SEC,
+    edge_max_age=API_VERSIONED_MAP_EDGE_MAX_AGE_SEC,
     stale_while_revalidate=API_MAP_STALE_WHILE_REVALIDATE_SEC,
     stale_if_error=API_MAP_STALE_IF_ERROR_SEC,
 )
@@ -86,6 +93,11 @@ def create_app() -> FastAPI:
 
         response = await call_next(request)
         cache_control = _cache_control_for_path(request.url.path)
+        if (
+            cache_control == MAP_CACHE_CONTROL
+            and request.query_params.get("data_version")
+        ):
+            cache_control = VERSIONED_MAP_CACHE_CONTROL
         if (
             request.method == "GET"
             and response.status_code == 200

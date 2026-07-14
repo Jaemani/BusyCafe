@@ -76,6 +76,12 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
                     "hotspot_serving_states"
                 )
             }
+            snapshot_indexes = {
+                item["name"]
+                for item in inspect(connection).get_indexes(
+                    "hotspot_snapshots"
+                )
+            }
             canonical_origin = connection.execute(
                 text(
                     "SELECT origin_provider, origin_source_id FROM cafes "
@@ -122,6 +128,7 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
             "verified_at",
             "last_seen_at",
         }
+        assert "ix_snap_fetched_at" in snapshot_indexes
         assert set(serving_state_columns) == {
             "hotspot_id",
             "computed_at",

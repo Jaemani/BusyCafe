@@ -4,6 +4,12 @@ from unittest.mock import patch
 
 import pytest
 
+from app.config import (
+    DB_MAX_OVERFLOW,
+    DB_POOL_RECYCLE_SEC,
+    DB_POOL_SIZE,
+    DB_POOL_TIMEOUT_SEC,
+)
 from app.database import create_db_engine, normalize_database_url
 
 
@@ -38,6 +44,10 @@ def test_create_db_engine_normalizes_postgres_urls(
         expected_url,
         pool_pre_ping=True,
         connect_args={"prepare_threshold": None},
+        pool_size=DB_POOL_SIZE,
+        max_overflow=DB_MAX_OVERFLOW,
+        pool_timeout=DB_POOL_TIMEOUT_SEC,
+        pool_recycle=DB_POOL_RECYCLE_SEC,
     )
 
 

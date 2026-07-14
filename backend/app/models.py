@@ -138,6 +138,7 @@ class HotspotSnapshot(Base):
             "hotspot_id",
             text("observed_at DESC"),
         ),
+        Index("ix_snap_fetched_at", text("fetched_at DESC")),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

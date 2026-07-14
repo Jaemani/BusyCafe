@@ -7,7 +7,13 @@ from collections.abc import Generator
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config import get_settings
+from app.config import (
+    DB_MAX_OVERFLOW,
+    DB_POOL_RECYCLE_SEC,
+    DB_POOL_SIZE,
+    DB_POOL_TIMEOUT_SEC,
+    get_settings,
+)
 
 
 def normalize_database_url(database_url: str) -> str:
@@ -30,7 +36,18 @@ def create_db_engine(database_url: str | None = None) -> Engine:
         connect_args = {"prepare_threshold": None}
     else:
         connect_args = {}
-    return create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+    engine_options: dict[str, object] = {
+        "pool_pre_ping": True,
+        "connect_args": connect_args,
+    }
+    if url.startswith("postgresql+psycopg://"):
+        engine_options.update(
+            pool_size=DB_POOL_SIZE,
+            max_overflow=DB_MAX_OVERFLOW,
+            pool_timeout=DB_POOL_TIMEOUT_SEC,
+            pool_recycle=DB_POOL_RECYCLE_SEC,
+        )
+    return create_engine(url, **engine_options)
 
 
 engine = create_db_engine()

@@ -395,4 +395,5 @@ def test_expected_query_indexes_exist(engine):
     assert "ix_cafes_bbox" in cafe_indexes
     assert "ix_cafes_active_bbox" in cafe_indexes
     assert "ix_snap_hotspot_time" in snapshot_indexes
+    assert "ix_snap_fetched_at" in snapshot_indexes
     assert "ix_parse_failure_hotspot_time" in failure_indexes
