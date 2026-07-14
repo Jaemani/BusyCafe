@@ -423,7 +423,8 @@ def test_public_table_lockdown_revokes_supabase_client_access_on_postgresql() ->
                     "JOIN pg_class AS owning_table "
                     "ON owning_table.oid = dependency.refobjid "
                     "WHERE relation.relkind = 'S' "
-                    "AND namespace.nspname = 'public'"
+                    "AND namespace.nspname = 'public' "
+                    "AND owning_table.relkind = 'r'"
                 )
             ).all()
             sequence_names = [

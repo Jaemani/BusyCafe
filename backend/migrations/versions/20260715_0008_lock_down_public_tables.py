@@ -94,6 +94,7 @@ def upgrade() -> None:
                             WHERE sequence_relation.relkind = 'S'
                               AND sequence_namespace.nspname = 'public'
                               AND table_namespace.nspname = 'public'
+                              AND owning_table.relkind = 'r'
                               AND owning_table.relname IN ({table_names})
                         LOOP
                             EXECUTE format(
