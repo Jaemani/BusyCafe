@@ -63,11 +63,19 @@
             </div>
           </div>
         </div>
+        <section id="crowd-feedback" class="crowd-feedback" aria-labelledby="crowd-feedback-prompt" hidden>
+          <p id="crowd-feedback-prompt">지금 주변 분위기와 비교해 주세요</p>
+          <div>
+            <button type="button" data-crowd-feedback="similar" aria-pressed="false">비슷해요</button>
+            <button type="button" data-crowd-feedback="busier" aria-pressed="false">더 붐벼요</button>
+            <button type="button" data-crowd-feedback="quieter" aria-pressed="false">더 한산해요</button>
+          </div>
+        </section>
         <p id="cafe-source" class="cafe-source"></p>
         <nav id="external-map-links" class="external-map-links" aria-label="외부 지도에서 보기" hidden>
-          <a id="map-link-naver" target="_blank" rel="noopener noreferrer" hidden>네이버지도에서 보기</a>
-          <a id="map-link-kakao" target="_blank" rel="noopener noreferrer" hidden>카카오맵에서 보기</a>
-          <a id="map-link-google" target="_blank" rel="noopener noreferrer" hidden>Google 지도에서 보기</a>
+          <a id="map-link-naver" data-analytics-provider="naver" target="_blank" rel="noopener noreferrer" hidden>네이버지도에서 보기</a>
+          <a id="map-link-kakao" data-analytics-provider="kakao" target="_blank" rel="noopener noreferrer" hidden>카카오맵에서 보기</a>
+          <a id="map-link-google" data-analytics-provider="google" target="_blank" rel="noopener noreferrer" hidden>Google 지도에서 보기</a>
         </nav>
       </aside>
 

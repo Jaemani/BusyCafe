@@ -27,6 +27,13 @@ import {
   fetchRuntimeHealth,
   type RuntimeHealthState,
 } from "./runtime-health";
+import {
+  trackCafeDetailError,
+  trackCafeMarkerClick,
+  trackGeolocationClick,
+  trackGeolocationResult,
+  trackViewportLoad,
+} from "./analytics";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const INITIAL_CENTER: [number, number] = [126.9237, 37.5563];
@@ -240,7 +247,13 @@ function bindInteractions(
     const feature = event.features?.[0];
     if (!feature) return;
     const cafe = readCafeProperties(feature);
-    if (cafe) onCafeSelect(cafe.id);
+    if (cafe) {
+      trackCafeMarkerClick(
+        cafe.coverage,
+        cafe.level !== null && cafe.freshness !== "stale",
+      );
+      onCafeSelect(cafe.id);
+    }
   });
 
   for (const layer of [CLUSTER_LAYER, CAFE_HIT_LAYER]) {
@@ -288,22 +301,28 @@ export async function initializeCafeMap(
     showUserLocation: true,
   });
   map.addControl(geolocateControl, "bottom-right");
+  container
+    .querySelector<HTMLButtonElement>(".maplibregl-ctrl-geolocate")
+    ?.addEventListener("click", trackGeolocationClick);
   const attributionControl = new maplibregl.AttributionControl({ compact: true });
   map.addControl(attributionControl, "bottom-right");
 
   const cafeProvider = provider ?? new CachedApiCafeProvider();
 
   geolocateControl.on("geolocate", () => {
+    trackGeolocationResult("success");
     statusElement.textContent = "내 위치를 찾았습니다";
     statusElement.dataset.state = "ready";
   });
   geolocateControl.on("error", () => {
+    trackGeolocationResult("error");
     statusElement.textContent = "위치 권한을 확인해 주세요";
     statusElement.dataset.state = "error";
   });
 
   let requestController: AbortController | null = null;
   let requestSequence = 0;
+  let hasTrackedViewportLoad = false;
   let runtimeHealth: RuntimeHealthState | "unknown" | null = null;
   let freshnessLimits: FreshnessLimits | null = null;
   let displayedCafeCount: number | null = null;
@@ -452,6 +471,7 @@ export async function initializeCafeMap(
       showCafePanel(detail);
     } catch (error) {
       if (controller.signal.aborted || sequence !== detailRequestSequence) return;
+      trackCafeDetailError();
       showCafePanelError(
         cafe.properties,
         error instanceof Error ? error.message : "카페 상세 정보를 불러오지 못했습니다",
@@ -497,6 +517,17 @@ export async function initializeCafeMap(
       rawCafeCollection = result;
       hasLoadedCafeData = true;
       updateDisplayedCollection(true);
+      if (!hasTrackedViewportLoad) {
+        hasTrackedViewportLoad = true;
+        trackViewportLoad(
+          displayedCafeCollection.features.length,
+          displayedCafeCollection.features.filter(
+            (feature) =>
+              feature.properties.level !== null &&
+              feature.properties.freshness !== "stale",
+          ).length,
+        );
+      }
     } catch (error) {
       if (controller.signal.aborted || sequence !== requestSequence) return;
       if (!background || !hasLoadedCafeData) {

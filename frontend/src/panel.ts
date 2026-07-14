@@ -1,4 +1,9 @@
 import type { CafeMapProperties, CafeProperties } from "./cafe-provider";
+import {
+  isCustomAnalyticsEnabled,
+  trackCrowdFeedback,
+  type CrowdFeedback,
+} from "./analytics";
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -30,12 +35,14 @@ const EVIDENCE_STRENGTH_LABELS = {
 
 let openCafeId: string | null = null;
 let openCafeDetail: CafeProperties | null = null;
+let crowdFeedbackSubmitted = false;
 
 function setExternalLink(selector: string, href: string | null): boolean {
   const link = requiredElement<HTMLAnchorElement>(selector);
   if (!href) {
     link.hidden = true;
     link.removeAttribute("href");
+    delete link.dataset.analyticsLinkType;
     return false;
   }
   link.href = href;
@@ -50,7 +57,61 @@ function setNaverLink(
   const link = requiredElement<HTMLAnchorElement>("#map-link-naver");
   const href = directUrl ?? searchUrl;
   link.textContent = directUrl ? "네이버지도에서 보기" : "네이버맵 검색";
-  return setExternalLink("#map-link-naver", href);
+  const visible = setExternalLink("#map-link-naver", href);
+  if (visible) link.dataset.analyticsLinkType = directUrl ? "direct" : "search";
+  return visible;
+}
+
+function resetCrowdFeedback(): void {
+  crowdFeedbackSubmitted = false;
+  const section = requiredElement<HTMLElement>("#crowd-feedback");
+  section.hidden = true;
+  requiredElement<HTMLElement>("#crowd-feedback-prompt").textContent =
+    "지금 주변 분위기와 비교해 주세요";
+  section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
+    (button) => {
+      button.disabled = false;
+      button.setAttribute("aria-pressed", "false");
+    },
+  );
+}
+
+export function initializeCrowdFeedback(): void {
+  const section = requiredElement<HTMLElement>("#crowd-feedback");
+  if (!isCustomAnalyticsEnabled()) {
+    section.hidden = true;
+    return;
+  }
+  section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
+    (button) => {
+      button.addEventListener("click", () => {
+        const feedback = button.dataset.crowdFeedback;
+        if (
+          crowdFeedbackSubmitted ||
+          openCafeDetail === null ||
+          (feedback !== "similar" && feedback !== "busier" && feedback !== "quieter")
+        ) return;
+
+        crowdFeedbackSubmitted = true;
+        trackCrowdFeedback(
+          feedback as CrowdFeedback,
+          openCafeDetail.level,
+          openCafeDetail.coverage,
+        );
+        requiredElement<HTMLElement>("#crowd-feedback-prompt").textContent =
+          "피드백을 반영했어요";
+        section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
+          (candidate) => {
+            candidate.disabled = true;
+            candidate.setAttribute(
+              "aria-pressed",
+              candidate === button ? "true" : "false",
+            );
+          },
+        );
+      });
+    },
+  );
 }
 
 function renderCrowdEstimate(
@@ -113,12 +174,19 @@ function renderCafePanel(cafe: CafeProperties): void {
     setExternalLink("#map-link-kakao", cafe.kakaoUrl),
     setExternalLink("#map-link-google", cafe.googleUrl),
   ].some(Boolean);
+  const kakaoLink = requiredElement<HTMLAnchorElement>("#map-link-kakao");
+  if (!kakaoLink.hidden) kakaoLink.dataset.analyticsLinkType = "direct";
+  const googleLink = requiredElement<HTMLAnchorElement>("#map-link-google");
+  if (!googleLink.hidden) googleLink.dataset.analyticsLinkType = "direct";
   requiredElement<HTMLElement>("#external-map-links").hidden = !hasExternalLink;
+  requiredElement<HTMLElement>("#crowd-feedback").hidden =
+    !isCustomAnalyticsEnabled() || cafe.level === null || cafe.freshness === "stale";
   requiredElement<HTMLElement>("#cafe-panel").hidden = false;
   document.body.classList.add("panel-open");
 }
 
 export function showCafePanel(cafe: CafeProperties): void {
+  if (openCafeId !== cafe.id) resetCrowdFeedback();
   openCafeId = cafe.id;
   openCafeDetail = cafe;
   renderCafePanel(cafe);
@@ -127,6 +195,7 @@ export function showCafePanel(cafe: CafeProperties): void {
 export function showCafePanelLoading(cafe: CafeMapProperties): void {
   openCafeId = cafe.id;
   openCafeDetail = null;
+  resetCrowdFeedback();
   requiredElement<HTMLElement>("#cafe-address").textContent = "상세 정보 불러오는 중";
   requiredElement<HTMLElement>("#cafe-phone").textContent = "";
   const website = requiredElement<HTMLAnchorElement>("#cafe-website");
@@ -145,6 +214,7 @@ export function showCafePanelError(
 ): void {
   if (openCafeId !== cafe.id) return;
   openCafeDetail = null;
+  resetCrowdFeedback();
   requiredElement<HTMLElement>("#cafe-address").textContent = message;
   requiredElement<HTMLElement>("#cafe-phone").textContent = "잠시 후 다시 선택해 주세요";
   requiredElement<HTMLElement>("#cafe-source").textContent = "지도 혼잡도는 계속 볼 수 있습니다.";

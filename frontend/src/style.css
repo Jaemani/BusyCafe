@@ -209,6 +209,49 @@ h1 {
   line-height: 1.45;
 }
 
+.crowd-feedback {
+  margin-top: 0.75rem;
+}
+
+.crowd-feedback p {
+  margin: 0 0 0.4rem;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.crowd-feedback div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.crowd-feedback button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.5rem 0.35rem;
+  color: var(--forest);
+  background: #f5f7f4;
+  font-size: 0.68rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.crowd-feedback button:hover,
+.crowd-feedback button:focus-visible,
+.crowd-feedback button[aria-pressed="true"] {
+  background: #dce9df;
+}
+
+.crowd-feedback button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.crowd-feedback button[aria-pressed="true"]:disabled {
+  opacity: 1;
+}
+
 .external-map-links {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
