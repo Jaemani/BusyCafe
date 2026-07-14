@@ -128,16 +128,43 @@ def test_dry_run_writes_nothing_then_apply_is_atomic_and_idempotent(
     assert all(link.active for link in links)
     assert all(link.match_method == KAKAO_SOURCE_MATCH_METHOD for link in links)
 
-    repeated = seed_kakao_catalog_expansion(
-        session,
-        snapshot,
-        apply=True,
-        max_expected_candidates=2,
-    )
+    committed = False
+    post_commit_selects: list[str] = []
+
+    def mark_commit(_session: Session) -> None:
+        nonlocal committed
+        committed = True
+
+    def capture_post_commit_select(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if committed and statement.lstrip().upper().startswith("SELECT"):
+            post_commit_selects.append(statement)
+
+    engine = session.get_bind()
+    event.listen(session, "after_commit", mark_commit)
+    event.listen(engine, "before_cursor_execute", capture_post_commit_select)
+    try:
+        repeated = seed_kakao_catalog_expansion(
+            session,
+            snapshot,
+            apply=True,
+            max_expected_candidates=2,
+        )
+    finally:
+        event.remove(session, "after_commit", mark_commit)
+        event.remove(engine, "before_cursor_execute", capture_post_commit_select)
 
     assert repeated.candidate_count == 0
     assert repeated.inserted_cafe_count == 0
+    assert repeated.existing_kakao_origin_count == 2
     assert repeated.existing_provider_id_missing_from_cache_count == 0
+    assert post_commit_selects == []
     assert session.scalar(select(func.count()).select_from(Cafe)) == 2
     assert session.scalar(select(func.count()).select_from(CafeProviderPlace)) == 2
 

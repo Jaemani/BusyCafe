@@ -242,6 +242,9 @@ def seed_kakao_catalog_expansion(
             session.scalars(select(CafeProviderPlace).order_by(CafeProviderPlace.id))
         )
         _validate_database_ownership(cafes, provider_places)
+        existing_kakao_origin_count = sum(
+            cafe.origin_provider == KAKAO_CANONICAL_SOURCE for cafe in cafes
+        )
         canonical = tuple(
             CanonicalCafeIdentity(
                 canonical_id=cafe.id,
@@ -330,9 +333,7 @@ def seed_kakao_catalog_expansion(
                 build.report.outside_target_region_count
             ),
             canonical_cafe_count=len(cafes),
-            existing_kakao_origin_count=sum(
-                cafe.origin_provider == KAKAO_CANONICAL_SOURCE for cafe in cafes
-            ),
+            existing_kakao_origin_count=existing_kakao_origin_count,
             existing_kakao_provider_count=len(kakao_provider_ids),
             existing_provider_id_missing_from_cache_count=(
                 build.report.existing_provider_id_missing_from_cache_count
