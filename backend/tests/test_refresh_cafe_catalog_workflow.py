@@ -76,12 +76,18 @@ def test_catalog_refresh_materializes_scores_only_after_explicit_apply() -> None
 def test_catalog_refresh_builds_kakao_provider_stage_before_database_seed() -> None:
     workflow = _workflow()
     kakao = _step(workflow, "Sweep Kakao CE7 cafe catalog")
+    expansion = _step(workflow, "Report Kakao canonical expansion candidates")
     build = _step(workflow, "Build provider cafe catalog")
     dry_run = _step(workflow, "Dry-run provider cafe seed")
     apply = _step(workflow, "Apply provider cafe seed")
 
     assert "cache_kakao_cafes.py" in kakao
     assert "--apply" in kakao
+    assert "report_kakao_catalog_expansion.py" in expansion
+    assert '--kakao-cache "$KAKAO_CACHE"' in expansion
+    assert '--kakao-manifest "$KAKAO_MANIFEST"' in expansion
+    assert "--apply" not in expansion
+    assert "if:" not in expansion
     assert "build_provider_cafe_catalog.py" in build
     assert '--kakao-manifest "$KAKAO_MANIFEST"' in build
     assert "--curated-cache" in build
@@ -93,6 +99,9 @@ def test_catalog_refresh_builds_kakao_provider_stage_before_database_seed() -> N
     assert "if: ${{ inputs.apply == true }}" in apply
     assert "seed_provider_cafes.py" in apply
     assert "--apply" in apply
+    assert workflow.index(
+        "name: Report Kakao canonical expansion candidates"
+    ) < workflow.index("name: Build provider cafe catalog")
     assert workflow.index("name: Build provider cafe catalog") < workflow.index(
         "name: Dry-run provider cafe seed"
     )

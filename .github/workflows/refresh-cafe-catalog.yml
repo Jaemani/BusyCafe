@@ -98,6 +98,12 @@ jobs:
           --output "$KAKAO_CACHE"
           --apply
 
+      - name: Report Kakao canonical expansion candidates
+        run: >-
+          uv run python scripts/report_kakao_catalog_expansion.py
+          --kakao-cache "$KAKAO_CACHE"
+          --kakao-manifest "$KAKAO_MANIFEST"
+
       - name: Build provider cafe catalog
         run: >-
           uv run python scripts/build_provider_cafe_catalog.py
