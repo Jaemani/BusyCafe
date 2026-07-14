@@ -293,7 +293,7 @@ def test_cafe_reads_never_scan_raw_snapshots(api_client) -> None:
     def capture_selects(
         _connection, _cursor, statement, _parameters, _context, _executemany
     ) -> None:
-        if statement.lstrip().upper().startswith("SELECT"):
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
             selected_statements.append(statement.lower())
 
     event.listen(engine, "before_cursor_execute", capture_selects)
@@ -310,6 +310,38 @@ def test_cafe_reads_never_scan_raw_snapshots(api_client) -> None:
     cafe_reads = "\n".join(selected_statements)
     assert "hotspot_snapshots" not in cafe_reads
     assert "hotspot_serving_states" in cafe_reads
+
+
+def test_bbox_read_omits_unused_score_and_hotspot_columns(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    engine = factory.kw["bind"]
+    selected_statements: list[str] = []
+
+    def capture_selects(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            selected_statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", capture_selects)
+    try:
+        response = api_client.get(
+            "/api/cafes",
+            params={"bbox": "126.9,37.5,127.1,37.7"},
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+    assert response.status_code == 200
+    assert len(selected_statements) == 1
+    statement = selected_statements[0]
+    assert "cafe_scores.contributors_json" not in statement
+    assert "cafe_scores.model_version" not in statement
+    assert "cafe_scores.computed_at" not in statement
+    assert "cafe_scores.confidence_tier" not in statement
+    assert "hotspots.category" not in statement
+    assert "hotspots.lat" not in statement
+    assert "hotspots.lng" not in statement
 
 
 def test_public_read_cache_policies_match_mutability(api_client) -> None:
@@ -681,6 +713,27 @@ def test_health_counts_only_active_cafes(api_client, monkeypatch) -> None:
     assert response.json()["last_cycle_targets"] == 1
     assert response.json()["last_cycle_saved"] == 0
     assert response.json()["last_cycle_failed"] == 0
+
+
+def test_health_uses_one_database_round_trip(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    engine = factory.kw["bind"]
+    selected_statements: list[str] = []
+
+    def capture_selects(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            selected_statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", capture_selects)
+    try:
+        response = api_client.get("/api/health")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+    assert response.status_code == 200
+    assert len(selected_statements) == 1
 
 
 def test_health_reports_snapshot_mode_from_runtime_environment(

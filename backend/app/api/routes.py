@@ -387,6 +387,17 @@ def list_cafes(
         select(Cafe, CafeScore, Hotspot)
         .options(
             load_only(Cafe.id, Cafe.name, Cafe.lat, Cafe.lng, raiseload=True),
+            load_only(
+                CafeScore.cafe_id,
+                CafeScore.source_observed_at,
+                CafeScore.level,
+                CafeScore.confidence,
+                CafeScore.coverage,
+                CafeScore.primary_hotspot_id,
+                CafeScore.primary_distance_m,
+                raiseload=True,
+            ),
+            load_only(Hotspot.id, Hotspot.name, raiseload=True),
             raiseload(Cafe.provider_places),
         )
         .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
@@ -538,37 +549,64 @@ def list_hotspots(db: Session = Depends(get_db)) -> list[HotspotStatusResponse]:
 @router.get("/health", response_model=HealthResponse)
 def health(db: Session = Depends(get_db)) -> HealthResponse:
     now = datetime.now(UTC)
-    latest_cycle = db.scalar(
-        select(IngestCycle).order_by(
+    latest_cycle = (
+        select(
+            IngestCycle.status,
+            IngestCycle.targets,
+            IngestCycle.saved,
+            IngestCycle.failed,
+        )
+        .order_by(
             IngestCycle.started_at.desc(), IngestCycle.id.desc()
-        ).limit(1)
+        )
+        .limit(1)
+        .cte("latest_cycle")
     )
+    stats = db.execute(
+        select(
+            select(func.max(HotspotSnapshot.fetched_at))
+            .scalar_subquery()
+            .label("last_ingest_at"),
+            select(func.max(IngestCycle.completed_at))
+            .where(IngestCycle.status == "complete")
+            .scalar_subquery()
+            .label("last_complete_cycle_at"),
+            select(latest_cycle.c.status)
+            .scalar_subquery()
+            .label("last_cycle_status"),
+            select(latest_cycle.c.targets)
+            .scalar_subquery()
+            .label("last_cycle_targets"),
+            select(latest_cycle.c.saved)
+            .scalar_subquery()
+            .label("last_cycle_saved"),
+            select(latest_cycle.c.failed)
+            .scalar_subquery()
+            .label("last_cycle_failed"),
+            select(func.count())
+            .select_from(HotspotSnapshot)
+            .where(HotspotSnapshot.fetched_at >= now - timedelta(hours=1))
+            .scalar_subquery()
+            .label("snapshots_last_hour"),
+            select(func.count())
+            .select_from(Cafe)
+            .where(Cafe.active.is_(True))
+            .scalar_subquery()
+            .label("cafes_count"),
+        )
+    ).one()
     return HealthResponse(
         data_mode=(
             "snapshot" if os.getenv("CAFE_CROWD_SNAPSHOT") == "1" else "live"
         ),
         stale_warn_min=STALE_WARN_MIN,
         current_display_max_age_min=CURRENT_DISPLAY_MAX_AGE_MIN,
-        last_ingest_at=_utc(db.scalar(select(func.max(HotspotSnapshot.fetched_at)))),
-        last_complete_cycle_at=_utc(
-            db.scalar(
-                select(func.max(IngestCycle.completed_at)).where(
-                    IngestCycle.status == "complete"
-                )
-            )
-        ),
-        last_cycle_status=latest_cycle.status if latest_cycle else None,
-        last_cycle_targets=latest_cycle.targets if latest_cycle else None,
-        last_cycle_saved=latest_cycle.saved if latest_cycle else None,
-        last_cycle_failed=latest_cycle.failed if latest_cycle else None,
-        snapshots_last_hour=db.scalar(
-            select(func.count())
-            .select_from(HotspotSnapshot)
-            .where(HotspotSnapshot.fetched_at >= now - timedelta(hours=1))
-        )
-        or 0,
-        cafes_count=db.scalar(
-            select(func.count()).select_from(Cafe).where(Cafe.active.is_(True))
-        )
-        or 0,
+        last_ingest_at=_utc(stats.last_ingest_at),
+        last_complete_cycle_at=_utc(stats.last_complete_cycle_at),
+        last_cycle_status=stats.last_cycle_status,
+        last_cycle_targets=stats.last_cycle_targets,
+        last_cycle_saved=stats.last_cycle_saved,
+        last_cycle_failed=stats.last_cycle_failed,
+        snapshots_last_hour=stats.snapshots_last_hour or 0,
+        cafes_count=stats.cafes_count or 0,
     )
