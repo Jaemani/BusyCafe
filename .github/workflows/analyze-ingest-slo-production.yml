@@ -1,0 +1,40 @@
+name: Analyze production ingest SLO
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: Analysis window in hours
+        required: true
+        default: "24"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-ingest-slo-analysis
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Emit read-only ingest SLO JSON
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WINDOW_HOURS: ${{ inputs.window_hours }}
+        run: uv run python scripts/analyze_ingest_slo.py --window-hours "$WINDOW_HOURS"

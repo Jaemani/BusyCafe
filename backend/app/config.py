@@ -143,6 +143,10 @@ POLL_INTERVAL_MIN: Final = 5
 PRODUCTION_POLL_MINUTE_OFFSET: Final = 2
 PRODUCTION_MONITOR_DELAY_MIN: Final = 2
 POLL_MAX_CONSECUTIVE_FAILURES: Final = 5
+# Read-only operational report defaults. A cadence gap is reported only after
+# two expected poll intervals so normal worker runtime jitter is not an outage.
+INGEST_SLO_DEFAULT_WINDOW_HOURS: Final = 24.0
+INGEST_SLO_CADENCE_GAP_FACTOR: Final = 2.0
 # Bounds upstream pressure while reducing the 121-place cycle latency.
 # Seoul endpoint accepted the same five targets sequentially while the
 # four-way production batch timed out on every target. Keep ingestion serial
