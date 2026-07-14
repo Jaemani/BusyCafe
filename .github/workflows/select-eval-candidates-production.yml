@@ -1,0 +1,53 @@
+name: Select production eval candidates
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-eval-candidate-selection
+  cancel-in-progress: true
+
+jobs:
+  select:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OUTPUT: data/phase6-eval-candidates.csv
+    steps:
+      - name: Check production database secret
+        working-directory: .
+        run: |
+          case "${DATABASE_URL:-}" in
+            postgresql://*|postgres://*|postgresql+psycopg://*) ;;
+            *)
+              echo "Production DATABASE_URL must be a PostgreSQL connection string." >&2
+              exit 1
+              ;;
+          esac
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Verify production database schema
+        run: uv run alembic -c alembic.ini current --check-heads
+      - name: Select deterministic field-observation candidates
+        run: uv run python scripts/select_eval_candidates.py --output "$OUTPUT"
+      - name: Upload field-observation CSV
+        uses: actions/upload-artifact@v6
+        with:
+          name: phase6-eval-candidates-${{ github.run_id }}
+          path: backend/${{ env.OUTPUT }}
+          if-no-files-found: error
+          retention-days: 30
