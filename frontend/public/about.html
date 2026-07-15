@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index,follow" />
+    <meta
+      name="description"
+      content="Busy Cafe의 혼잡도 산정 방식, 데이터 출처와 라이선스 안내"
+    />
+    <title>서비스·데이터 안내 · Busy Cafe</title>
+    <style>
+      :root {
+        color: #20231f;
+        background: #f4f1e9;
+        font-family: Pretendard, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.65;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      main {
+        width: min(760px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 56px 0 80px;
+      }
+      a { color: #315f46; text-underline-offset: 0.15em; }
+      h1 { margin: 0 0 8px; font-size: clamp(2rem, 7vw, 3.5rem); line-height: 1.15; }
+      h2 { margin: 44px 0 12px; font-size: 1.25rem; }
+      h3 { margin: 0 0 6px; font-size: 1rem; }
+      p, li { color: #42473f; }
+      ul { padding-left: 1.25rem; }
+      .back { display: inline-block; margin-bottom: 32px; }
+      .lede { font-size: 1.08rem; color: #20231f; }
+      .notice, .card {
+        border: 1px solid #c7c2b5;
+        border-radius: 16px;
+        background: #fffdf7;
+      }
+      .notice { padding: 18px 20px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .card { padding: 16px 18px; }
+      .card p { margin: 0; font-size: 0.92rem; }
+      .meta { color: #72766e; font-size: 0.88rem; }
+      footer { margin-top: 56px; color: #72766e; font-size: 0.9rem; }
+      @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="/">← 지도로 돌아가기</a>
+      <h1>Busy Cafe는 이렇게 계산해요</h1>
+      <p class="lede">
+        카페 안의 좌석이나 대기 인원을 측정하지 않습니다. 서울시가 제공하는 지역 관측을
+        카페 위치와 연결해 <strong>주변 지역이 상대적으로 얼마나 붐비는지</strong> 추정합니다.
+      </p>
+
+      <section class="notice" aria-label="중요 안내">
+        <strong>마커 색은 매장 내부 혼잡도가 아닙니다.</strong>
+        방문 전 관측 지역, 거리, 데이터 시각과 외부 지도 장소 정보를 함께 확인해 주세요.
+      </section>
+
+      <h2>지도에서 보는 법</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>주변 혼잡도</h3>
+          <p>여유·보통·약간 붐빔·붐빔의 네 단계로 표시합니다. 같은 지역 안에서 비교하는 참고값입니다.</p>
+        </article>
+        <article class="card">
+          <h3>관측 거리</h3>
+          <p>가까운 서울시 관측 지점 최대 3곳을 거리 가중 방식으로 연결합니다. 가장 가까운 지점과 거리를 함께 표시합니다.</p>
+        </article>
+        <article class="card">
+          <h3>경계 지역</h3>
+          <p>가장 가까운 관측 지점이 600m를 넘으면 경계 지역입니다. 1,500m를 넘으면 현재 혼잡도를 표시하지 않습니다.</p>
+        </article>
+        <article class="card">
+          <h3>데이터 시각</h3>
+          <p>25분 이내는 현재 참고값, 25~120분은 지연 참고값입니다. 120분을 넘으면 현재값을 숨깁니다.</p>
+        </article>
+      </div>
+
+      <h2>카페 정보</h2>
+      <p>
+        카페 목록은 서버에 미리 저장해 빠르게 제공합니다. Overture Places를 기본 원장으로
+        사용하고, 카카오 로컬 API와 서울시 휴게음식점 인허가 정보로 장소를 보강하거나
+        대조합니다. 외부 지도 버튼은 검증된 상세 링크를 우선 사용하며, 네이버 장소 ID가
+        없으면 카페명과 주소를 넣은 검색 링크임을 별도로 표시합니다.
+      </p>
+      <p class="meta">
+        장소 원장의 숫자형 품질값은 매장 존재 여부나 혼잡도 정확도의 확률이 아니므로 상세
+        패널에 노출하지 않습니다. 원본 release와 검증 metadata는 서버에 보존합니다.
+      </p>
+
+      <h2>데이터 출처와 이용조건</h2>
+      <ul>
+        <li>
+          혼잡도: <a href="https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do" target="_blank" rel="noopener noreferrer">서울특별시 서울시 실시간 도시데이터(OA-21285)</a>
+          · <a href="https://www.kogl.or.kr/info/licenseType1.do" target="_blank" rel="noopener noreferrer">공공누리 제1유형</a>
+        </li>
+        <li>
+          영업 인허가 대조: <a href="https://data.seoul.go.kr/dataList/OA-16095/S/1/datasetView.do" target="_blank" rel="noopener noreferrer">서울시 휴게음식점 인허가 정보(OA-16095)</a>
+          · 공공누리 제1유형
+        </li>
+        <li>
+          장소 원장: <a href="https://docs.overturemaps.org/attribution/" target="_blank" rel="noopener noreferrer">Overture Places</a>
+          · 현행 서울 원장 공급자에 CDLA-Permissive-2.0과 CC0-1.0 적용
+        </li>
+        <li>
+          장소 보강: <a href="https://developers.kakao.com/docs/latest/ko/local/dev-guide" target="_blank" rel="noopener noreferrer">카카오 로컬 API</a>
+          · Kakao API 운영정책
+        </li>
+        <li>
+          베이스맵: <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>
+          © OpenMapTiles · OpenStreetMap contributors, ODbL
+        </li>
+      </ul>
+      <p>
+        현재 적용 release와 기계 판독 가능한 전체 링크는
+        <a href="/api/sources" target="_blank" rel="noopener noreferrer">전체 출처 목록</a>에서
+        확인할 수 있습니다. Busy Cafe 코드는
+        <a href="https://github.com/Jaemani/BusyCafe" target="_blank" rel="noopener noreferrer">GitHub</a>에서
+        Apache License 2.0으로 공개하며, 외부 데이터에는 각 제공자의 조건이 별도로 적용됩니다.
+      </p>
+
+      <h2>운영과 문의</h2>
+      <p>
+        장소 누락·폐업·위치 오류는
+        <a href="https://github.com/Jaemani/BusyCafe/issues/new" target="_blank" rel="noopener noreferrer">GitHub 이슈</a>로
+        알려주세요. 개인정보와 분석 방식은 <a href="/privacy.html">개인정보·운영 안내</a>에서
+        확인할 수 있습니다.
+      </p>
+
+      <!-- 후원 URL 검증 뒤 이 위치에 텍스트 링크 한 개만 추가한다. -->
+      <footer>최종 갱신: 2026-07-15 · 계산식과 데이터 경계가 바뀌면 함께 갱신합니다.</footer>
+    </main>
+  </body>
+</html>

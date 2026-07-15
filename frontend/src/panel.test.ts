@@ -91,4 +91,34 @@ describe("crowd feedback", () => {
     similar.click();
     expect(analyticsMocks.trackCrowdFeedback).toHaveBeenCalledTimes(2);
   });
+
+  it("shows concise evidence once and hides raw catalog metadata", () => {
+    const delayedCafe = {
+      ...cafe("delayed"),
+      sourceLabel:
+        "카카오맵 등록 장소 · 2026-07-14T12:33:46.294683+00:00 · 장소 원장 품질 1.00",
+      coverage: "fringe" as const,
+      level: 1 as const,
+      freshness: "delayed" as const,
+      hotspotName: "뚝섬역",
+      distanceM: 846,
+      observationAgeMinutes: 34,
+    };
+
+    showCafePanel(delayedCafe);
+
+    expect(document.querySelector("#cafe-level")?.textContent).toBe("여유로 추정돼요");
+    expect(document.querySelector("#cafe-evidence")?.textContent).toBe(
+      "뚝섬역 관측 기준 · 846m 거리",
+    );
+    expect(document.querySelector("#cafe-coverage")?.textContent).toBe("경계 지역");
+    expect(document.querySelector("#cafe-confidence")?.textContent).toBe(
+      "34분 전 · 참고용",
+    );
+    expect(document.querySelector("#cafe-source")?.textContent).toBe(
+      "카카오맵에서 확인한 장소",
+    );
+    expect(document.body.textContent).not.toContain("장소 원장 품질");
+    expect(document.body.textContent).not.toContain("2026-07-14T12:33");
+  });
 });

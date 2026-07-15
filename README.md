@@ -4,7 +4,8 @@
 근거와 함께 보여주는 지도입니다. 카페 마커는 매장 좌석 점유율이 아닙니다. 평소 대비
 도시 활동도는 현재 shadow 검증 중이며 공개 결과로 제공하지 않습니다.
 
-**공개 프리뷰:** https://busy-cafe.vercel.app
+**공개 프리뷰:** https://busy-cafe.vercel.app  
+**서비스·데이터·라이선스 안내:** https://busy-cafe.vercel.app/about.html
 
 > 현재 공개 베타는 Supabase PostgreSQL을 읽습니다. Supabase `pg_cron`이 5분마다
 > GitHub one-shot worker를 호출하고, 후속 monitor가 완전 수집 시각과 실패를 확인합니다.

@@ -6,6 +6,8 @@
 
 ### Added
 
+- 사용자용 `/about.html`: 주변 혼잡도 산정 경계, 데이터 지연, 카페 원장 구성과
+  서울시·Overture·Kakao·OpenFreeMap/OpenStreetMap 이용조건을 한 화면에 정리
 - Supabase public table RLS와 `anon`/`authenticated` table·sequence grant 차단. 서버의
   PostgreSQL owner/pooler 경로는 유지하면서 브라우저 Data API 접근을 fail-closed 처리한다
 - Supabase `pg_cron`이 5분 poll과 후속 freshness monitor를 GitHub workflow로 dispatch하는
@@ -82,6 +84,9 @@
 
 ### Changed
 
+- 카페 상세의 release timestamp·숫자형 원장 품질·중복 `참고용` 문구를 사용자용 표현으로
+  축약. 혼잡도, 관측 지점·거리, 경계 여부와 데이터 나이를 각각 한 번만 표시하고 원본
+  metadata와 상세 라이선스는 API와 `/about.html`에 보존
 - materialize가 최근 12시간 모든 snapshot의 forecast JSON과 이전 serving-state JSON을
   반복 전송하지 않고 최신 forecast와 필요한 PK만 조회하도록 축소
 - 관측 신선도를 `fresh`/`delayed`/`stale`로 분리했다. 운영상 fresh 경계는 25분으로

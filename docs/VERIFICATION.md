@@ -1141,3 +1141,29 @@
 - 판정: **PASS(실패 격리·감지·자동 회복)**. 한 cycle의 upstream no-record는 기존 partial
   계약으로 처리됐고 별도 코드 변경이나 수동 DB 보정은 하지 않았다. 반복 빈도가 freshness
   SLO를 훼손하면 area별 no-record 비율을 집계해 별도 incident로 승격한다.
+
+## 2026-07-15 — 사용자용 상세 문구와 About 정보 구조
+
+- 사용자 확인: Vercel Analytics dashboard에서 production pageview가 실제로 보이는 것을
+  `[HUMAN]` 확인했다. script HTTP 200만 확인했던 이전 pending gate를 PASS로 전환한다.
+- 문제: 상세 패널이 장소 release timestamp, `장소 원장 품질 1.00`, 원본 검증 설명과
+  관측 나이를 그대로 이어 붙였다. `경계 지역 · 참고용`과 `34분 지연 · 참고용`처럼 같은
+  주의 문구도 반복돼, 사용자가 필요한 혼잡도·거리·시각보다 내부 metadata가 앞섰다.
+- 변경 계약:
+  - API와 DB의 원본 provider, release, confidence와 검증 metadata는 삭제하지 않는다.
+  - 상세 패널은 `주변은 여유로 추정돼요`, `뚝섬역 관측 기준 · 846m 거리`,
+    `경계 지역`, `34분 전 · 참고용`처럼 의미를 한 번씩만 표시한다.
+  - 숫자형 장소 confidence는 매장 존재·혼잡 정확도 확률이 아니므로 사용자 패널에서
+    숨기고, provider는 `카카오맵에서 확인한 장소`처럼 짧게 번역한다.
+  - 산정 반경·신선도 경계, 카페 원장 구성, provider별 이용조건과 전체 manifest 링크는
+    `/about.html`이 소유한다. 지도 header에는 서울시 실시간 도시데이터 기반임과 About
+    진입점을 남기고 MapLibre의 필수 베이스맵 attribution은 그대로 유지한다.
+  - 확인되지 않은 후원 URL은 노출하지 않는다. About 하단에는 검증된 Buy Me a Coffee
+    URL을 나중에 텍스트 링크 한 개로 추가할 위치만 코드 주석으로 남긴다.
+- 자동 검증:
+  - frontend Vitest 5 passed
+  - TypeScript `tsc --noEmit` PASS
+  - Vite production build PASS; `dist/about.html`, `dist/privacy.html` 존재 확인
+  - 상세 회귀 테스트에서 raw timestamp·`장소 원장 품질` 미노출과 거리·나이 중복 제거 확인
+- 판정: **PASS(로컬 자동 검증)**. 격리 deployment와 production alias의 About 링크,
+  모바일 패널 문구, 기존 지도 attribution은 배포 뒤 smoke한다.

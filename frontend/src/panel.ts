@@ -15,23 +15,58 @@ function formatEvidence(cafe: CafeMapProperties): string {
   if (!cafe.hotspotName || cafe.distanceM === null) {
     return "이 지역은 아직 혼잡도 근거가 연결되지 않았어요.";
   }
-  const ageLabel = cafe.freshness !== "stale" && cafe.observationAgeMinutes !== null
-    ? ` · ${Math.ceil(cafe.observationAgeMinutes).toLocaleString("ko-KR")}분 전 관측`
-    : "";
-  return `${cafe.hotspotName} 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m${ageLabel}`;
+  return `${cafe.hotspotName} 관측 기준 · ${Math.round(cafe.distanceM).toLocaleString("ko-KR")}m 거리`;
 }
 
-const LEVEL_LABELS = ["데이터 없음", "여유", "보통", "약간 붐빔", "붐빔"] as const;
+const LEVEL_LABELS = [
+  "데이터가 없어요",
+  "여유로 추정돼요",
+  "보통으로 추정돼요",
+  "약간 붐비는 것으로 추정돼요",
+  "붐비는 것으로 추정돼요",
+] as const;
 const COVERAGE_LABELS = {
-  covered: "커버됨",
-  fringe: "경계 지역 · 참고용",
-  uncovered: "실시간 미커버",
+  covered: "관측 지역",
+  fringe: "경계 지역",
+  uncovered: "관측 범위 밖",
 } as const;
 const EVIDENCE_STRENGTH_LABELS = {
   high: "높음",
   mid: "보통",
   low: "낮음",
 } as const;
+
+function formatSourceLabel(label: string): string {
+  const [origin = label] = label.split(" · ");
+  const friendlyOrigin = {
+    "카카오맵 등록 장소": "카카오맵에서 확인한 장소",
+    "네이버 지도 등록 장소": "네이버지도에서 확인한 장소",
+    "Google Maps 등록 장소": "Google 지도에서 확인한 장소",
+    "Overture Places": "Overture Places 기반 장소",
+    "서울시 영업 인허가 원장": "서울시 인허가 기반 장소",
+  }[origin] ?? origin;
+  return label.includes("서울시 영업 인허가 대조")
+    ? `${friendlyOrigin} · 서울시 인허가 대조 완료`
+    : friendlyOrigin;
+}
+
+function formatObservationBadge(
+  cafe: CafeMapProperties,
+  confidenceTier: CafeProperties["confidenceTier"] | null,
+): string {
+  const age = cafe.observationAgeMinutes === null
+    ? null
+    : `${Math.ceil(cafe.observationAgeMinutes).toLocaleString("ko-KR")}분 전`;
+  if (cafe.freshness === "stale") {
+    return age ? `${age} · 현재값 숨김` : "갱신 대기 · 현재값 숨김";
+  }
+  if (cafe.freshness === "delayed") {
+    return age ? `${age} · 참고용` : "지연 데이터 · 참고용";
+  }
+  if (confidenceTier === null) return age ?? "근거 확인 중";
+  const strength = `근거 ${EVIDENCE_STRENGTH_LABELS[confidenceTier]}`;
+  return age ? `${age} · ${strength}` : strength;
+}
 
 let openCafeId: string | null = null;
 let openCafeDetail: CafeProperties | null = null;
@@ -120,22 +155,14 @@ function renderCrowdEstimate(
 ): void {
   requiredElement<HTMLElement>("#cafe-level").textContent =
     cafe.freshness === "stale"
-      ? "갱신 지연 · 현재 혼잡도 숨김"
+      ? "현재 혼잡도를 표시하지 않아요"
       : cafe.level === null
         ? LEVEL_LABELS[0]
         : LEVEL_LABELS[cafe.level];
   requiredElement<HTMLElement>("#cafe-coverage").textContent =
     COVERAGE_LABELS[cafe.coverage];
   requiredElement<HTMLElement>("#cafe-confidence").textContent =
-    cafe.freshness === "stale"
-      ? "오래된 근거 · 현재값 미표시"
-      : cafe.freshness === "delayed"
-        ? cafe.observationAgeMinutes === null
-          ? "지연 데이터 · 참고용"
-          : `${Math.ceil(cafe.observationAgeMinutes).toLocaleString("ko-KR")}분 지연 · 참고용`
-      : confidenceTier === null
-        ? "근거 강도 산정 전"
-        : `근거 강도 ${EVIDENCE_STRENGTH_LABELS[confidenceTier]}`;
+    formatObservationBadge(cafe, confidenceTier);
   requiredElement<HTMLElement>("#estimate-dot").dataset.level = String(cafe.level ?? 0);
   requiredElement<HTMLElement>("#cafe-evidence").textContent = formatEvidence(cafe);
 }
@@ -168,7 +195,7 @@ function renderCafePanel(cafe: CafeProperties): void {
   }
   renderCrowdEstimate(cafe, cafe.confidenceTier);
   requiredElement<HTMLElement>("#cafe-source").textContent =
-    `${cafe.sourceLabel} · 원본과 검증 상태를 함께 표시합니다.`;
+    formatSourceLabel(cafe.sourceLabel);
   const hasExternalLink = [
     setNaverLink(cafe.naverUrl, cafe.naverSearchUrl),
     setExternalLink("#map-link-kakao", cafe.kakaoUrl),
@@ -201,7 +228,7 @@ export function showCafePanelLoading(cafe: CafeMapProperties): void {
   const website = requiredElement<HTMLAnchorElement>("#cafe-website");
   website.hidden = true;
   website.removeAttribute("href");
-  requiredElement<HTMLElement>("#cafe-source").textContent = "장소 정보를 확인하고 있습니다.";
+  requiredElement<HTMLElement>("#cafe-source").textContent = "장소 정보 확인 중";
   resetExternalLinks();
   showPanelShell(cafe);
   requiredElement<HTMLElement>("#cafe-evidence").textContent =
@@ -217,7 +244,7 @@ export function showCafePanelError(
   resetCrowdFeedback();
   requiredElement<HTMLElement>("#cafe-address").textContent = message;
   requiredElement<HTMLElement>("#cafe-phone").textContent = "잠시 후 다시 선택해 주세요";
-  requiredElement<HTMLElement>("#cafe-source").textContent = "지도 혼잡도는 계속 볼 수 있습니다.";
+  requiredElement<HTMLElement>("#cafe-source").textContent = "장소 상세를 불러오지 못했어요";
   resetExternalLinks();
   showPanelShell(cafe);
   requiredElement<HTMLElement>("#cafe-evidence").textContent =

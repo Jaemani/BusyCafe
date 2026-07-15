@@ -209,6 +209,12 @@ h1 {
   line-height: 1.45;
 }
 
+.cafe-source span:not(:empty)::after { content: " · "; }
+.cafe-source a {
+  color: inherit;
+  text-underline-offset: 0.12em;
+}
+
 .crowd-feedback {
   margin-top: 0.75rem;
 }

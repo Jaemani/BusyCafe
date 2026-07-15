@@ -27,20 +27,9 @@
           지도를 준비하고 있습니다
         </p>
         <p class="source-line">
-          혼잡도
-          <a
-            href="https://data.seoul.go.kr/dataList/OA-21285/A/1/datasetView.do"
-            target="_blank"
-            rel="noopener noreferrer"
-          >서울특별시 서울시 실시간 도시데이터</a>
-          · 카페
-          <a
-            href="https://docs.overturemaps.org/attribution/"
-            target="_blank"
-            rel="noopener noreferrer"
-          >Overture Places</a>
-          · <a href="/api/sources" target="_blank" rel="noopener noreferrer">전체 라이선스</a>
-          · <a href="/privacy.html">개인정보·운영 안내</a>
+          서울시 실시간 도시데이터 기반
+          · <a href="/about.html">서비스·데이터 안내</a>
+          · <a href="/privacy.html">개인정보</a>
         </p>
       </header>
 
@@ -56,7 +45,7 @@
         <div class="estimate-placeholder">
           <span id="estimate-dot" class="estimate-dot" data-level="0"></span>
           <div>
-            <strong>주변 혼잡도 추정 · <span id="cafe-level">데이터 없음</span></strong>
+            <strong>주변은 <span id="cafe-level">데이터가 없어요</span></strong>
             <p id="cafe-evidence">이 지역은 아직 혼잡도 근거가 연결되지 않았어요.</p>
             <div class="estimate-badges">
               <span id="cafe-coverage">실시간 미커버</span>
@@ -72,7 +61,10 @@
             <button type="button" data-crowd-feedback="quieter" aria-pressed="false">더 한산해요</button>
           </div>
         </section>
-        <p id="cafe-source" class="cafe-source"></p>
+        <p class="cafe-source">
+          <span id="cafe-source"></span>
+          <a href="/about.html">데이터 안내</a>
+        </p>
         <nav id="external-map-links" class="external-map-links" aria-label="외부 지도에서 보기" hidden>
           <a id="map-link-naver" data-analytics-provider="naver" target="_blank" rel="noopener noreferrer" hidden>네이버지도에서 보기</a>
           <a id="map-link-kakao" data-analytics-provider="kakao" target="_blank" rel="noopener noreferrer" hidden>카카오맵에서 보기</a>
