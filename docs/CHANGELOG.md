@@ -6,6 +6,10 @@
 
 ### Added
 
+- 수도권 생활이동 OA-22300의 엄격한 UTF-8 CSV/ZIP 스트리밍 파서와 offline 이동 shadow.
+  유입은 도착시각, 유출은 출발시각으로 정렬하고 목적별 비율·순유입·행정구역 중심점 간
+  합성 방향·방향 강도·좌표 coverage를 결정적으로 산출한다. dry-run 기본, 원자 게시,
+  원본·경계 SHA와 버전을 보존하며 공개 API·DB·지도에는 아직 반영하지 않음
 - 카페명·주소 전역 검색과 스타벅스·투썸·메가MGC·컴포즈·빽다방·이디야·폴바셋
   필터. 검색은 PostgreSQL cache만 읽고 exact→prefix→부분 일치 순으로 정렬하며,
   PostgreSQL `pg_trgm` index와 2~80자·최대 50건 제한을 적용

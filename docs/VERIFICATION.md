@@ -1272,3 +1272,124 @@
 - 판정: **PASS** — 이름·주소 검색, 7개 브랜드 필터, Kakao direct detail link, Kakao-first
   누락 회복, 좌표 안전 격리, score 사전 계산이 production에서 확인됐다. 큰 이동 격리 24곳
   원본 대조와 apply bulk 최적화는 미완 후속 작업이다.
+
+## 2026-07-15 — 수도권 생활이동 OA-22300 하루치 offline shadow 실측
+
+### 공식 원천과 다운로드 계약
+
+- 공식 페이지: <https://data.seoul.go.kr/dataList/OA-22300/F/1/datasetView.do>
+- 데이터셋명: `수도권 생활이동 (출발-도착지 기준)`. 서울시·KT가 개발했으며 전국
+  내/외국인의 수도권 출발·도착 이동을 일별·시간대별, 목적 7종으로 제공한다고 설명한다.
+- 페이지 파일 목록 실측: 2023-01-01~2026-06-30 일별 1,277개.
+- 다운로드 endpoint:
+  `POST https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do?useCache=false`
+  with `infId=OA-22300`, `seq=260630`, `infSeq=1`. 인증키·로그인·쿠키 없이 성공했다.
+- 권리: 서울특별시, 제3저작권자 없음, 공공누리 제1유형(출처표시, 상업적 이용·변경 가능).
+- 실파일: `seoul_purpose_admdong3_20260630.zip`, 75,286,481 bytes,
+  SHA-256 `11623a80a0cd54f2451ac969538049c527f74f565368cacb1486a0cdcff84a09`.
+- ZIP integrity PASS. 단일 내부 파일
+  `seoul_purpose_admdong3_final_20260630.csv`, 445,664,262 bytes,
+  UTF-8, header 제외 6,414,571행.
+- 공식 layout `purpose_od_layout.xlsx`, 17,084 bytes, SHA-256
+  `35540d258b7824ae3120f0a35f75bd93f6a180e891cbd6ef48f212de0f241775`.
+
+공식 layout과 실파일로 다음 11개 필드를 확정했다.
+
+| 필드 | 의미 |
+|---|---|
+| `o_admdong_cd`, `d_admdong_cd` | 출발·도착 행정구역 코드 |
+| `st_time_cd`, `fns_time_cd` | 출발·도착 시간 코드 |
+| `in_forn_div_nm`, `forn_citiz_nm` | 내/외국인 구분, 국적 |
+| `move_purpose` | 1 출근, 2 등교, 3 귀가, 4 쇼핑, 5 관광, 6 병원, 7 기타 |
+| `move_dist`, `move_time` | 평균 이동거리 m, 평균 이동시간 분 |
+| `cnt` | 이동인구 추정치. 정수 개인 수로 표현하지 않음 |
+| `etl_ymd` | 기준일 |
+
+실파일의 시간 코드는 단일 형식이 아니었다. 평시에는 `00..06`, `10..16`, `20..23`의
+두 자리 1시간 코드, 출퇴근대에는 `0700/0720/0740`부터 `1940`까지 20분 코드가 사용됐다.
+출발·도착 각각 고유 bin은 36개였다. parser는 이 실측 집합만 허용하고 원본 분 단위를
+보존한다. 현 shadow는 생활인구 비교를 위해 `floor-to-hour`로 정규화하며 이 결정을 artifact
+provenance에 기록한다.
+
+### 행정구역 중심점과 방향의 한계
+
+- OD 기준일 직전 경계로 `vuski/admdongkor ver20260401`을 commit
+  `e24f80c67e1fd87fb124afe2e5532f7b1bb5b0d1`에서 고정했다. 원본 GeoJSON 34,641,788
+  bytes, SHA-256 `6a63d079ba8af4701ab200ad0b54ebdea8689808b6e0e9f17973b9ba7883dc6a`.
+- WGS84 경계를 EPSG:5179로 투영해 면적 중심점을 계산한 뒤 WGS84로 되돌렸다. 결과는
+  서울 행정동 427개 + 전국 시군구 255개 = 682개, artifact SHA-256
+  `bf84a8a4d7d3df2e8798a43f87d30b2f5b7cac093797484458e0425a918c352f`.
+- 하루 OD에 실제 등장한 코드는 서울 행정동 427개 + 비서울 시군구 230개 = 657개이며
+  657/657 모두 exact code로 매칭됐다. 지오코딩이나 이름 추정은 사용하지 않았다.
+- `admdongkor` 가공분은 CC BY 4.0, 원 경계는 SGIS 공공누리 제1유형이다. 현재 artifact는
+  local/gitignored research 자료이고 공개 게시 전 두 출처표시를 모두 추가해야 한다.
+- 방향은 출발 중심점→도착 중심점의 이동인구 가중 합성 방향이다. 실제 이동 궤적,
+  순간 진행방향, 골목·도로·고속도로 통과를 뜻하지 않는다. 구역 내 이동은 총량에는
+  포함하지만 방향에서는 제외하며, 상쇄 정도를 `direction_strength`로 별도 보존한다.
+
+### 구현 중 발견한 시간축 오류
+
+최초 엔진은 유입과 유출을 모두 도착시각으로 묶었다. 이 경우 `net`이 같은 시간대 사건을
+비교하지 않아 잘못된 순유입이 된다. 실 artifact 게시 전에 발견해 다음 계약으로 수정했다.
+
+- 유입·목적·접근 방향: 목적지 `arrival_hour`
+- 유출: 출발지 `departure_hour`
+- 결과: 두 키의 합집합. 유출만 있는 구역·시간도 보존
+- 구역 내 이동: 도착시 유입, 출발시 유출에 각각 포함; 방향에서는 제외
+
+서로 다른 출발·도착 시간과 outbound-only fixture가 이 계약을 회귀 테스트로 고정한다.
+공개 영향은 없으며 상세 기록은 INC-2026-017에 남겼다.
+
+### 하루치 3개 시간대 실행
+
+원본 하루 전체를 엄격 파싱하고, 08·14·18시가 출발 또는 도착인 행을 선택해 아침·낮·저녁
+shadow를 만들었다. 요청 경로, DB, production API와 frontend는 변경하지 않았다.
+
+재현 명령의 핵심은 다음과 같다.
+
+```bash
+cd backend
+uv run python scripts/build_purpose_od_shadow.py \
+  --input data/od/seoul_purpose_admdong3_20260630.zip \
+  --centroids data/od/purpose_od_centroids_ver20260401_v1.json \
+  --target-date 2026-06-30 \
+  --source-version oa-22300-20260630 \
+  --schema-version oa-22300-purpose-od-csv-v1 \
+  --output data/od/purpose_od_shadow_20260630_h08_h14_h18.json \
+  --hour 8 --hour 14 --hour 18
+```
+
+- dry-run/apply 모두 source 6,414,571행 전수 파싱, 선택 2,392,689행, 결과 1,970개
+  `zone × hour` group.
+- centroid code/row/추정인구 coverage는 모두 1.0, 누락 origin/destination code 0.
+- dry-run과 apply artifact SHA-256 동일:
+  `e7ea3320fc169304b219418a8bac7e580c8def805c12a4ee825a4ee1bd438451`.
+- apply 실행: 69.86초, max RSS 232,456,192 bytes, output 약 1.7MB. 원본과 결과는
+  `backend/data/` 아래 gitignored이며 Supabase에 원시행을 적재하지 않았다.
+- 초기 Sequence 구현은 선택 3시간도 과도한 객체 복제를 일으켰다. exact `Decimal`
+  streaming accumulator로 바꿔 입력 순서 독립성과 bounded aggregate state를 함께 유지했다.
+- 전체 backend 회귀는 `821 passed, 2 skipped`, 대상 모듈 mypy·compileall과
+  `git diff --check` 모두 PASS했다.
+
+서울 행정동 합계와 대표 표본은 다음과 같았다. `cnt` 추정치이므로 반올림한 탐색값이다.
+
+| 시각 | 서울 유입 | 서울 유출 | 순유입 | 해석 |
+|---:|---:|---:|---:|---|
+| 08시 | 2,130,513 | 1,701,064 | +429,448 | 업무지역 출근 유입이 뚜렷 |
+| 14시 | 1,216,595 | 1,220,351 | -3,757 | 전체 서울은 대체로 균형 |
+| 18시 | 1,887,680 | 1,932,426 | -44,746 | 업무지역 유출·주거지역 귀가 유입 |
+
+- 08시 순유입 상위는 여의동 +57,247, 가산동 +41,670, 역삼1동 +40,283이었다. 각각
+  유입 목적에서 출근이 약 85%, 89%, 83%로 가장 컸다.
+- 14시 서교동은 유입 13,597, 유출 11,072, 순유입 +2,525였지만 목적 7 `기타`가
+  약 77%였다. 목적 코드만으로 카페 방문 수요라고 해석할 수 없다.
+- 18시 여의동 -31,559, 가산동 -29,191, 역삼1동 -25,060으로 아침 업무지역 유입의
+  역방향이 나타났다.
+- 성수·서교·연남의 합성 방향 강도는 대체로 0.07~0.32로 낮았다. 단일 화살표보다 여러
+  방향의 상쇄가 큰 경우가 많아 strength 없는 방향 표시는 금지한다.
+
+판정: **PASS(feasibility only)**. 과거 OD를 결정적으로 처리해 시간대별 유입·유출·목적·
+평균 접근방향을 만들 수 있다. 그러나 하루치 자체는 예측력이나 카페 혼잡 정확도 근거가
+아니다. 여러 주의 같은 요일·공휴일·시간대를 만든 뒤 생활인구 단독 대비 citydata/현장
+라벨의 rolling-origin 개선을 확인할 때만 shadow feature로 채택한다. 공개 v1은 변경하지
+않는다.

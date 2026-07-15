@@ -2,6 +2,7 @@
 
 - 최초 확인일: 2026-07-12 (KST)
 - Kakao 운영 경로 추가 확인일: 2026-07-15 (KST)
+- offline 생활이동 연구 원천 추가 확인일: 2026-07-15 (KST)
 - 검토 기준 커밋: `4468dc84e08038f7f5d639330b750d10447c8d94`
 - Kakao 운영 경로 추가 기준 커밋: `3cc82b4`
 - 범위: 현재 프로덕션이 실제 사용하는 코드, Kakao Local·Overture Places 카페 원장,
@@ -117,6 +118,17 @@ OA-21285 데이터셋 페이지의 2026-07-12 표시 내용은 다음과 같다.
 | 공공누리 | https://www.kogl.or.kr/info/licenseType1.do | 제1유형의 공유·변경·영리 이용 허용과 출처표시 의무 |
 | Kakao Developers 운영정책 | https://developers.kakao.com/terms/ko/site-policies | UX 목적 cache와 최신성 의무, Developers 정보 이용·제공 제한 |
 | Kakao Local API | https://developers.kakao.com/docs/ko/local/common | Local API의 장소·주소 검색 기능과 공식 제품 문서 |
+| 수도권 생활이동 OA-22300 | https://data.seoul.go.kr/dataList/OA-22300/F/1/datasetView.do | 서울특별시 저작권, 제3저작권자 없음, 공공누리 제1유형, 상업·변경 가능 |
+| admdongkor 데이터 | https://github.com/vuski/admdongkor/blob/master/LICENSE-DATA | SGIS 공공누리 제1유형 원자료, 가공분 CC BY 4.0, 양쪽 출처표시 문구 |
+
+### Offline 연구 전용 원천
+
+OA-22300 원본과 `admdongkor ver20260401` 기반 중심점은 현재 production API·DB·지도에
+게시하지 않고 로컬 offline shadow에서만 사용한다. OA-22300은 서울특별시 공공누리
+제1유형이고, 중심점 경계는 SGIS 공공누리 제1유형 원자료를 `vuski/admdongkor`가 가공해
+CC BY 4.0으로 제공한다. 모든 artifact는 양쪽 source version과 SHA-256을 보존한다.
+향후 결과나 경계를 공개 제품에 게시할 경우 About·`/api/sources`에 서울특별시 OA-22300,
+SGIS, `vuski/admdongkor`, 공공누리 제1유형과 CC BY 4.0 출처를 함께 추가한 뒤 승격한다.
 
 ## 공개 릴리스 해제 조건
 
