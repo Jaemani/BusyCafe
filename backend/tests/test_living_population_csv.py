@@ -98,6 +98,18 @@ def test_accepts_extra_demographic_columns(tmp_path: Path) -> None:
     assert record.administrative_dong_code == "11110515"
 
 
+def test_accepts_verified_trailing_decimal_point(tmp_path: Path) -> None:
+    path = _write_csv(
+        tmp_path,
+        ["20260630,00,11110515,다사52505325,540."],
+    )
+
+    record = next(iter_living_population_csv(path))
+
+    assert record.total_population == Decimal("540")
+    assert record.total_population_raw == "540."
+
+
 @pytest.mark.parametrize(
     "row",
     [

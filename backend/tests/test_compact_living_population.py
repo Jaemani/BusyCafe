@@ -44,6 +44,22 @@ def test_dry_run_validates_and_hashes_without_writing(tmp_path: Path) -> None:
     assert list(tmp_path.iterdir()) == [cells]
 
 
+def test_accepts_verified_trailing_decimal_point(tmp_path: Path) -> None:
+    source = _write_csv(
+        tmp_path / "trailing-decimal.csv",
+        ["20260630,00,11110515,다사52505325,540."],
+    )
+    cells = _allowlist(tmp_path / "cells.txt", "다사52505325")
+
+    result = compact.compact_living_population(
+        inputs=[source],
+        cell_ids_path=cells,
+        output_path=tmp_path / "compact.parquet",
+    )
+
+    assert result.manifest["row_counts"]["input"] == 1
+
+
 def test_apply_writes_normalized_parquet_and_manifest(tmp_path: Path) -> None:
     cells = _allowlist(
         tmp_path / "cells.txt", "다사52505325", "다사52755375"

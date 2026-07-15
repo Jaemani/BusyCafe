@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import csv
 import re
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -23,7 +23,7 @@ from app.ingest.national_grid import decode_cell_id
 
 CSV_ENCODING: Final = "cp949"
 MASK_TOKEN: Final = "*"
-NON_NEGATIVE_DECIMAL_PATTERN: Final = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+NON_NEGATIVE_DECIMAL_PATTERN: Final = re.compile(r"[0-9]+(?:\.[0-9]*)?")
 REQUIRED_COLUMNS: Final = (
     "일자",
     "시간",
@@ -116,7 +116,7 @@ def _parse_total(value: str, *, line_number: int) -> tuple[Decimal | None, bool]
     return number, False
 
 
-def _validate_header(fieldnames: list[str] | None) -> None:
+def _validate_header(fieldnames: Sequence[str] | None) -> None:
     if fieldnames is None:
         raise LivingPopulationCsvError("CSV is empty or has no header")
     duplicates = sorted(

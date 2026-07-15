@@ -217,7 +217,7 @@ def _validate_rows(connection: duckdb.DuckDBPyConnection) -> tuple[int, dict[str
             count(*) FILTER (WHERE NOT coalesce(
                 total_raw = '*'
                 OR (
-                    regexp_full_match(total_raw, '[0-9]+(?:\\.[0-9]+)?')
+                    regexp_full_match(total_raw, '[0-9]+(?:\\.[0-9]*)?')
                     AND try_cast(total_raw AS DOUBLE) IS NOT NULL
                     AND isfinite(try_cast(total_raw AS DOUBLE))
                     AND try_cast(total_raw AS DOUBLE) >= 0
@@ -340,9 +340,11 @@ def compact_living_population(
                 "allowlist cells missing from source "
                 f"({len(missing_cells)}/{len(cell_ids)}): {', '.join(sample)}{suffix}"
             )
-        filtered_rows, masked_rows = connection.execute(
+        filtered_row = connection.execute(
             "SELECT count(*), count(*) FILTER (WHERE masked) FROM selected_rows"
         ).fetchone()
+        assert filtered_row is not None
+        filtered_rows, masked_rows = filtered_row
         rows_by_source = dict(
             connection.execute(
                 "SELECT source_path, count(*) FROM source_rows GROUP BY source_path"
