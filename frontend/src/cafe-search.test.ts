@@ -16,6 +16,14 @@ vi.mock("./analytics", () => ({
     "빽다방",
     "이디야커피",
     "폴바셋",
+    "더벤티",
+    "매머드커피",
+    "텐퍼센트커피",
+    "할리스",
+    "탐앤탐스",
+    "카페베네",
+    "커피빈",
+    "엔제리너스",
   ].includes(brand),
   ...analyticsMocks,
 }));
@@ -246,6 +254,14 @@ describe("brand matching", () => {
   it("supports common display-name variants without fuzzy matching unrelated cafes", () => {
     expect(cafeMatchesBrand("메가커피 서울역점", "메가MGC커피")).toBe(true);
     expect(cafeMatchesBrand("이디야 성수점", "이디야커피")).toBe(true);
+    expect(cafeMatchesBrand("더벤티 홍대점", "더벤티")).toBe(true);
+    expect(cafeMatchesBrand("매머드 익스프레스 시청점", "매머드커피")).toBe(true);
+    expect(cafeMatchesBrand("텐퍼센트 커피 성수점", "텐퍼센트커피")).toBe(true);
+    expect(cafeMatchesBrand("할리스커피 종로점", "할리스")).toBe(true);
+    expect(cafeMatchesBrand("TOM N TOMS COFFEE", "탐앤탐스")).toBe(true);
+    expect(cafeMatchesBrand("CAFFE BENE 명동점", "카페베네")).toBe(true);
+    expect(cafeMatchesBrand("The Coffee Bean & Tea Leaf", "커피빈")).toBe(true);
+    expect(cafeMatchesBrand("Angel-in-us Coffee", "엔제리너스")).toBe(true);
     expect(cafeMatchesBrand("개인 카페 메가톤", "메가MGC커피")).toBe(false);
     expect(cafeMatchesBrand("개인 카페", null)).toBe(true);
   });

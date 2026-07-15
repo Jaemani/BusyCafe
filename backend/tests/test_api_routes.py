@@ -611,6 +611,53 @@ def test_cafe_search_brand_allowlist_accepts_canonical_and_alias(api_client) -> 
 
 
 @pytest.mark.parametrize(
+    ("canonical", "alias", "catalog_name"),
+    [
+        ("더벤티", "the venti", "더벤티 서초점"),
+        ("매머드커피", "매머드 익스프레스", "매머드익스프레스 서초점"),
+        ("텐퍼센트커피", "10%커피", "텐퍼센트커피 서초점"),
+        ("할리스", "hollys coffee", "할리스커피 서초점"),
+        ("탐앤탐스", "tom n toms", "탐앤탐스 서초점"),
+        ("카페베네", "caffe bene", "카페베네 서초점"),
+        ("커피빈", "coffee bean", "커피빈 서초점"),
+        ("엔제리너스", "angel-in-us", "엔제리너스커피 서초점"),
+    ],
+)
+def test_cafe_search_additional_brand_aliases(
+    api_client,
+    canonical: str,
+    alias: str,
+    catalog_name: str,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add(
+            Cafe(
+                overture_id=f"overture:search-brand:{canonical}",
+                source_release="test",
+                source_confidence=1.0,
+                primary_category="cafe",
+                name=catalog_name,
+                lat=37.49,
+                lng=127.01,
+            )
+        )
+        session.commit()
+
+    canonical_response = api_client.get(
+        "/api/cafes/search", params={"brand": canonical}
+    )
+    alias_response = api_client.get(
+        "/api/cafes/search", params={"brand": alias}
+    )
+
+    assert canonical_response.status_code == 200
+    assert alias_response.status_code == 200
+    assert canonical_response.json() == alias_response.json()
+    assert catalog_name in [item["name"] for item in canonical_response.json()]
+
+
+@pytest.mark.parametrize(
     "params",
     [
         {},

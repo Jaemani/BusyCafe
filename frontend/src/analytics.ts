@@ -18,7 +18,15 @@ export type CafeBrand =
   | "컴포즈커피"
   | "빽다방"
   | "이디야커피"
-  | "폴바셋";
+  | "폴바셋"
+  | "더벤티"
+  | "매머드커피"
+  | "텐퍼센트커피"
+  | "할리스"
+  | "탐앤탐스"
+  | "카페베네"
+  | "커피빈"
+  | "엔제리너스";
 
 const CAFE_BRANDS = new Set<string>([
   "스타벅스",
@@ -28,6 +36,14 @@ const CAFE_BRANDS = new Set<string>([
   "빽다방",
   "이디야커피",
   "폴바셋",
+  "더벤티",
+  "매머드커피",
+  "텐퍼센트커피",
+  "할리스",
+  "탐앤탐스",
+  "카페베네",
+  "커피빈",
+  "엔제리너스",
 ]);
 
 export function stripAnalyticsUrlDetails(event: BeforeSendEvent): BeforeSendEvent | null {

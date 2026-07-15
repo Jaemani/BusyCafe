@@ -9,6 +9,7 @@ import {
 } from "./analytics";
 import { initializeCafeMap } from "./map";
 import { hideCafePanel, initializeCrowdFeedback } from "./panel";
+import { initializeCommuteNotice } from "./commute-notice";
 
 const status = document.querySelector<HTMLElement>("#search-status");
 const closeButton = document.querySelector<HTMLButtonElement>("#panel-close");
@@ -20,6 +21,7 @@ if (!status || !closeButton) {
 closeButton.addEventListener("click", hideCafePanel);
 initializeProductAnalytics();
 initializeCrowdFeedback();
+initializeCommuteNotice();
 
 document.addEventListener("click", (event) => {
   const target = event.target;

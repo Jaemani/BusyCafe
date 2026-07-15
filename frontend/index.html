@@ -26,6 +26,10 @@
         <p id="search-status" class="search-status" role="status">
           지도를 준비하고 있습니다
         </p>
+        <aside id="commute-notice" class="commute-notice" role="note" hidden>
+          <p>출퇴근시간에는 유동인구가 많아 정확도가 낮아질 수 있습니다.</p>
+          <button id="commute-notice-close" type="button" aria-label="출퇴근시간 안내 닫기">×</button>
+        </aside>
         <section class="cafe-search" aria-label="카페 찾기">
           <form id="cafe-search-form" class="cafe-search-form" role="search">
             <label class="sr-only" for="cafe-search-input">카페 이름 또는 주소</label>
@@ -52,6 +56,14 @@
             <button type="button" data-cafe-brand="빽다방" aria-pressed="false">빽다방</button>
             <button type="button" data-cafe-brand="이디야커피" aria-pressed="false">이디야</button>
             <button type="button" data-cafe-brand="폴바셋" aria-pressed="false">폴바셋</button>
+            <button type="button" data-cafe-brand="더벤티" aria-pressed="false">더벤티</button>
+            <button type="button" data-cafe-brand="매머드커피" aria-pressed="false">매머드</button>
+            <button type="button" data-cafe-brand="텐퍼센트커피" aria-pressed="false">텐퍼센트</button>
+            <button type="button" data-cafe-brand="할리스" aria-pressed="false">할리스</button>
+            <button type="button" data-cafe-brand="탐앤탐스" aria-pressed="false">탐앤탐스</button>
+            <button type="button" data-cafe-brand="카페베네" aria-pressed="false">카페베네</button>
+            <button type="button" data-cafe-brand="커피빈" aria-pressed="false">커피빈</button>
+            <button type="button" data-cafe-brand="엔제리너스" aria-pressed="false">엔제리너스</button>
           </div>
           <div id="cafe-search-popover" class="cafe-search-popover" hidden>
             <p id="cafe-search-message" class="cafe-search-message" role="status"></p>

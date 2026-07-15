@@ -411,6 +411,44 @@ CAFE_SEARCH_BRAND_ALIASES: Final = {
     "빽다방": ("빽다방", "paik's coffee", "paiks coffee"),
     "이디야커피": ("이디야커피", "이디야", "ediya coffee", "ediya"),
     "폴바셋": ("폴바셋", "paul bassett"),
+    "더벤티": ("더벤티", "the venti", "theventi"),
+    "매머드커피": (
+        "매머드커피",
+        "매머드 익스프레스",
+        "매머드익스프레스",
+        "매머드",
+        "mammoth coffee",
+        "mammoth express",
+    ),
+    "텐퍼센트커피": (
+        "텐퍼센트커피",
+        "텐퍼센트",
+        "10퍼센트커피",
+        "10%커피",
+        "tenpercent coffee",
+        "ten percent coffee",
+    ),
+    "할리스": ("할리스커피", "할리스", "hollys coffee", "hollys"),
+    "탐앤탐스": (
+        "탐앤탐스커피",
+        "탐앤탐스",
+        "tom n toms",
+        "tom n toms coffee",
+        "tomntoms",
+    ),
+    "카페베네": ("카페베네", "caffe bene", "caffebene"),
+    "커피빈": (
+        "커피빈코리아",
+        "커피빈",
+        "the coffee bean & tea leaf",
+        "coffee bean",
+    ),
+    "엔제리너스": (
+        "엔제리너스커피",
+        "엔제리너스",
+        "angel-in-us",
+        "angelinus",
+    ),
 }
 # The frontend uses canonical Web Mercator tiles at zoom >= 10. Reject wider
 # arbitrary public queries so cache-busting callers cannot force broad DB scans.

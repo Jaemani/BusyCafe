@@ -181,6 +181,14 @@ export function cafeMatchesBrand(name: string, brand: string | null): boolean {
     빽다방: ["빽다방"],
     이디야커피: ["이디야커피", "이디야"],
     폴바셋: ["폴바셋"],
+    더벤티: ["더벤티", "theventi"],
+    매머드커피: ["매머드커피", "매머드익스프레스", "매머드", "mammothcoffee"],
+    텐퍼센트커피: ["텐퍼센트커피", "텐퍼센트", "10퍼센트커피", "10%커피", "tenpercentcoffee"],
+    할리스: ["할리스커피", "할리스", "hollyscoffee", "hollys"],
+    탐앤탐스: ["탐앤탐스커피", "탐앤탐스", "tomntoms", "tomtomcoffee"],
+    카페베네: ["카페베네", "caffebene"],
+    커피빈: ["커피빈코리아", "커피빈", "thecoffeebean&tealeaf", "coffeebean"],
+    엔제리너스: ["엔제리너스커피", "엔제리너스", "angel-in-us", "angelinus"],
   };
   return (aliases[brand] ?? [brand]).some((alias) =>
     normalized.includes(alias.replaceAll(" ", "").toLocaleLowerCase("ko-KR"))

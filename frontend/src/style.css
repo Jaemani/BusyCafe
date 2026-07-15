@@ -103,6 +103,44 @@ h1 {
 .search-status[data-state="error"] { color: #873b37; background: #fae9e7; }
 .search-status[data-state="stale"] { color: #873b37; background: #fae9e7; }
 
+.commute-notice {
+  display: flex;
+  min-width: 0;
+  flex: 1 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin-block: -0.55rem;
+  border: 1px solid #e2bd5f;
+  border-radius: 0.8rem;
+  padding: 0.42rem 0.48rem 0.42rem 0.68rem;
+  color: #573b00;
+  background: #fff1cf;
+  font-size: 0.7rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.commute-notice[hidden] { display: none; }
+.commute-notice p { min-width: 0; margin: 0; }
+
+.commute-notice button {
+  flex: 0 0 auto;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #573b00;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.commute-notice button:hover { background: #302000; }
+.commute-notice button:focus-visible { outline: 3px solid #b57900; outline-offset: 2px; }
+
 .cafe-search {
   position: relative;
   flex: 1 0 100%;
@@ -175,25 +213,47 @@ h1 {
 .cafe-brand-filters::-webkit-scrollbar { display: none; }
 
 .cafe-brand-filters button {
+  --brand-bg: #315b49;
+  --brand-fg: #fff;
   flex: 0 0 auto;
-  border: 1px solid rgb(31 63 49 / 12%);
+  border: 2px solid transparent;
   border-radius: 999px;
   padding: 0.38rem 0.58rem;
-  color: #53655d;
-  background: rgb(247 249 246 / 90%);
+  color: var(--brand-fg);
+  background: var(--brand-bg);
   font-size: 0.66rem;
   font-weight: 760;
   cursor: pointer;
 }
 
-.cafe-brand-filters button:hover,
-.cafe-brand-filters button:focus-visible { background: #e8eee9; }
+.cafe-brand-filters button:hover { filter: brightness(1.12); }
+
+.cafe-brand-filters button:focus-visible {
+  outline: 3px solid #fff;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 5px var(--forest);
+}
 
 .cafe-brand-filters button[aria-pressed="true"] {
-  border-color: var(--forest);
-  color: #fff;
-  background: var(--forest);
+  border-color: #fff;
+  box-shadow: 0 0 0 3px var(--forest);
 }
+
+.cafe-brand-filters button[data-cafe-brand="스타벅스"] { --brand-bg: #00754a; }
+.cafe-brand-filters button[data-cafe-brand="투썸플레이스"] { --brand-bg: #8a1538; }
+.cafe-brand-filters button[data-cafe-brand="메가MGC커피"] { --brand-bg: #ffd400; --brand-fg: #17140a; }
+.cafe-brand-filters button[data-cafe-brand="컴포즈커피"] { --brand-bg: #f4cf00; --brand-fg: #191600; }
+.cafe-brand-filters button[data-cafe-brand="빽다방"] { --brand-bg: #0b4f9c; }
+.cafe-brand-filters button[data-cafe-brand="이디야커피"] { --brand-bg: #003e73; }
+.cafe-brand-filters button[data-cafe-brand="폴바셋"] { --brand-bg: #3b2a22; }
+.cafe-brand-filters button[data-cafe-brand="더벤티"] { --brand-bg: #592c82; }
+.cafe-brand-filters button[data-cafe-brand="매머드커피"] { --brand-bg: #f58220; --brand-fg: #1c1208; }
+.cafe-brand-filters button[data-cafe-brand="텐퍼센트커피"] { --brand-bg: #202020; }
+.cafe-brand-filters button[data-cafe-brand="할리스"] { --brand-bg: #ba0c2f; }
+.cafe-brand-filters button[data-cafe-brand="탐앤탐스"] { --brand-bg: #493126; }
+.cafe-brand-filters button[data-cafe-brand="카페베네"] { --brand-bg: #593a2b; }
+.cafe-brand-filters button[data-cafe-brand="커피빈"] { --brand-bg: #5c2d91; }
+.cafe-brand-filters button[data-cafe-brand="엔제리너스"] { --brand-bg: #702f35; }
 
 .cafe-search-popover {
   position: absolute;
