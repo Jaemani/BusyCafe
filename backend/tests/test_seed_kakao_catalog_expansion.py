@@ -11,6 +11,7 @@ from app.config import PROVIDER_VERIFIED_CAFE_CONFIDENCE
 from app.models import Base, Cafe, CafeProviderPlace
 from app.schemas import KakaoPlace
 from scripts.seed_kakao_catalog_expansion import (
+    KAKAO_LARGE_MOVE_QUARANTINE_REASON,
     KAKAO_SOURCE_MATCH_METHOD,
     KakaoCatalogApplyError,
     ValidatedKakaoSnapshot,
@@ -55,6 +56,43 @@ def session() -> Session:
     with Session(engine) as value:
         yield value
     engine.dispose()
+
+
+def _add_kakao_cafe(
+    session: Session,
+    identifier: str,
+    *,
+    lat: float,
+    lng: float,
+) -> tuple[Cafe, CafeProviderPlace]:
+    cafe = Cafe(
+        origin_provider="kakao",
+        origin_source_id=identifier,
+        source_release="previous",
+        source_confidence=1.0,
+        primary_category="cafe",
+        name=f"이전 {identifier}",
+        lat=lat,
+        lng=lng,
+        road_address=f"서울 종로구 이전로 {identifier}",
+        phone=None,
+        active=True,
+    )
+    session.add(cafe)
+    session.flush()
+    link = CafeProviderPlace(
+        cafe_id=cafe.id,
+        provider="kakao",
+        provider_place_id=identifier,
+        detail_url=f"https://place.map.kakao.com/{identifier}",
+        active=True,
+        match_method=KAKAO_SOURCE_MATCH_METHOD,
+        match_distance_m=0.0,
+        verified_at=datetime(2026, 7, 13, tzinfo=UTC),
+        last_seen_at=datetime(2026, 7, 13, tzinfo=UTC),
+    )
+    session.add(link)
+    return cafe, link
 
 
 def test_dry_run_writes_nothing_then_apply_is_atomic_and_idempotent(
@@ -307,7 +345,7 @@ def test_missing_existing_provider_is_reported_without_deactivation(
     assert link.active is True
 
 
-def test_kakao_origin_refresh_reports_large_move_and_requires_operator_bound(
+def test_kakao_origin_refresh_quarantines_large_move_over_operator_bound(
     session: Session,
 ) -> None:
     cafe = Cafe(
@@ -351,25 +389,53 @@ def test_kakao_origin_refresh_reports_large_move_and_requires_operator_bound(
     assert dry.candidate_count == 0
     assert dry.refresh_eligible_count == 1
     assert dry.refresh_seen_count == 1
-    assert dry.planned_cafe_refresh_count == 1
+    assert dry.planned_cafe_refresh_count == 0
     assert dry.refresh_coordinate_changed_count == 1
     assert dry.refresh_large_move_count == 1
+    assert dry.refresh_large_move_planned_count == 0
+    assert dry.refresh_large_move_applied_count == 0
+    assert dry.refresh_large_move_quarantined_count == 1
+    assert (
+        dry.refresh_large_move_quarantine_reason
+        == KAKAO_LARGE_MOVE_QUARANTINE_REASON
+    )
     assert dry.refresh_large_move_sample[0]["kakao_place_id"] == "900"
+    assert dry.refresh_large_move_sample[0]["quarantined"] is True
+    assert (
+        dry.refresh_large_move_sample[0]["quarantine_reason"]
+        == KAKAO_LARGE_MOVE_QUARANTINE_REASON
+    )
     assert dry.refreshed_cafe_count == 0
     session.refresh(cafe)
     assert cafe.name == "이전 이름"
     assert cafe.lat == 37.55
 
-    with pytest.raises(KakaoCatalogApplyError, match="large coordinate move"):
-        seed_kakao_catalog_expansion(
-            session,
-            snapshot,
-            apply=True,
-            max_expected_candidates=0,
-            max_expected_large_moves=0,
-        )
+    quarantined = seed_kakao_catalog_expansion(
+        session,
+        snapshot,
+        apply=True,
+        max_expected_candidates=0,
+        max_expected_large_moves=0,
+    )
     session.refresh(cafe)
+    session.refresh(link)
+    assert quarantined.mode == "write"
+    assert quarantined.planned_cafe_refresh_count == 0
+    assert quarantined.refreshed_cafe_count == 0
+    assert quarantined.refresh_large_move_applied_count == 0
+    assert quarantined.refresh_large_move_quarantined_count == 1
     assert cafe.name == "이전 이름"
+    assert cafe.lat == 37.55
+    assert cafe.lng == 126.98
+    assert cafe.road_address == "서울 종로구 이전로 900"
+    assert cafe.phone is None
+    assert cafe.source_release == "previous"
+    assert cafe.source_json is None
+    # Suspicious movement freezes both display fields and provider verification.
+    assert link.detail_url == "https://place.map.kakao.com/900"
+    previous_provider_time = datetime(2026, 7, 13, tzinfo=UTC)
+    assert link.last_seen_at.replace(tzinfo=UTC) == previous_provider_time
+    assert link.verified_at.replace(tzinfo=UTC) == previous_provider_time
 
     applied = seed_kakao_catalog_expansion(
         session,
@@ -380,6 +446,12 @@ def test_kakao_origin_refresh_reports_large_move_and_requires_operator_bound(
     )
 
     assert applied.refreshed_cafe_count == 1
+    assert applied.refresh_large_move_planned_count == 1
+    assert applied.refresh_large_move_applied_count == 1
+    assert applied.refresh_large_move_quarantined_count == 0
+    assert applied.refresh_large_move_quarantine_reason is None
+    assert applied.refresh_large_move_sample[0]["quarantined"] is False
+    assert applied.refresh_large_move_sample[0]["quarantine_reason"] is None
     session.refresh(cafe)
     session.refresh(link)
     assert cafe.name == "카페 900"
@@ -400,3 +472,98 @@ def test_kakao_origin_refresh_reports_large_move_and_requires_operator_bound(
         }
     ]
     assert link.last_seen_at.replace(tzinfo=UTC) == GENERATED_AT
+
+
+def test_quarantined_move_does_not_block_normal_refresh_or_new_insert(
+    session: Session,
+) -> None:
+    suspicious, suspicious_link = _add_kakao_cafe(
+        session, "910", lat=37.50, lng=126.90
+    )
+    normal, normal_link = _add_kakao_cafe(
+        session, "911", lat=37.55, lng=127.00
+    )
+    session.commit()
+
+    report = seed_kakao_catalog_expansion(
+        session,
+        _snapshot(
+            _place("910", lng=127.10, lat=37.65),
+            _place("911", lng=127.0001, lat=37.5501),
+            _place("912", lng=127.10, lat=37.70),
+        ),
+        apply=True,
+        max_expected_candidates=1,
+        max_expected_large_moves=0,
+    )
+
+    assert report.refresh_large_move_count == 1
+    assert report.refresh_large_move_quarantined_count == 1
+    assert report.refresh_large_move_applied_count == 0
+    assert report.planned_cafe_refresh_count == 1
+    assert report.refreshed_cafe_count == 1
+    assert report.inserted_cafe_count == 1
+    assert report.inserted_provider_count == 1
+
+    session.refresh(suspicious)
+    session.refresh(suspicious_link)
+    session.refresh(normal)
+    session.refresh(normal_link)
+    assert suspicious.name == "이전 910"
+    assert suspicious.lat == 37.50
+    assert suspicious.lng == 126.90
+    assert suspicious.road_address == "서울 종로구 이전로 910"
+    assert suspicious.phone is None
+    assert suspicious.source_release == "previous"
+    assert suspicious.source_json is None
+    assert suspicious_link.last_seen_at.replace(tzinfo=UTC) == datetime(
+        2026, 7, 13, tzinfo=UTC
+    )
+
+    assert normal.name == "카페 911"
+    assert normal.lat == 37.5501
+    assert normal.lng == 127.0001
+    assert normal.source_release == GENERATED_AT.isoformat()
+    assert normal_link.last_seen_at.replace(tzinfo=UTC) == GENERATED_AT
+
+    inserted = session.scalar(
+        select(Cafe).where(
+            Cafe.origin_provider == "kakao",
+            Cafe.origin_source_id == "912",
+        )
+    )
+    assert inserted is not None
+    assert inserted.name == "카페 912"
+    assert inserted.lat == 37.70
+    assert inserted.lng == 127.10
+
+
+def test_large_move_bound_keeps_batch_all_or_none(session: Session) -> None:
+    first, _ = _add_kakao_cafe(session, "920", lat=37.50, lng=126.90)
+    second, _ = _add_kakao_cafe(session, "921", lat=37.51, lng=126.91)
+    session.commit()
+
+    report = seed_kakao_catalog_expansion(
+        session,
+        _snapshot(
+            _place("920", lng=127.10, lat=37.65),
+            _place("921", lng=127.11, lat=37.66),
+        ),
+        apply=True,
+        max_expected_candidates=0,
+        max_expected_large_moves=1,
+    )
+
+    assert report.refresh_large_move_count == 2
+    assert report.refresh_large_move_planned_count == 0
+    assert report.refresh_large_move_applied_count == 0
+    assert report.refresh_large_move_quarantined_count == 2
+    assert report.refreshed_cafe_count == 0
+    session.refresh(first)
+    session.refresh(second)
+    assert (first.lat, first.lng, first.name) == (37.50, 126.90, "이전 920")
+    assert (second.lat, second.lng, second.name) == (
+        37.51,
+        126.91,
+        "이전 921",
+    )

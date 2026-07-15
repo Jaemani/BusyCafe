@@ -42,6 +42,9 @@ from scripts.cache_kakao_cafes import DEFAULT_CACHE, manifest_path_for
 
 
 KAKAO_SOURCE_MATCH_METHOD = "source_primary"
+KAKAO_LARGE_MOVE_QUARANTINE_REASON = (
+    "large_move_batch_exceeds_allowed_bound"
+)
 
 
 class KakaoCatalogApplyError(RuntimeError):
@@ -79,6 +82,10 @@ class KakaoCatalogApplyReport:
     refreshed_cafe_count: int
     refresh_coordinate_changed_count: int
     refresh_large_move_count: int
+    refresh_large_move_planned_count: int
+    refresh_large_move_applied_count: int
+    refresh_large_move_quarantined_count: int
+    refresh_large_move_quarantine_reason: str | None
     refresh_move_bucket_counts: dict[str, int]
     refresh_changed_field_counts: dict[str, int]
     refresh_large_move_sample: tuple[dict[str, object], ...]
@@ -344,17 +351,37 @@ def seed_kakao_catalog_expansion(
             refresh_targets,
             source_release=snapshot.source_release,
         )
-        if (
-            apply
-            and max_expected_large_moves is not None
-            and refresh_build.report.large_move_count > max_expected_large_moves
-        ):
-            raise KakaoCatalogApplyError(
-                "large coordinate move count "
-                f"{refresh_build.report.large_move_count} exceeds operator bound "
-                f"{max_expected_large_moves} "
-                f"(threshold={KAKAO_CATALOG_REFRESH_LARGE_MOVE_M:g}m)"
-            )
+        large_move_refreshes = tuple(
+            refresh
+            for refresh in refresh_build.refreshes
+            if refresh.movement_m > KAKAO_CATALOG_REFRESH_LARGE_MOVE_M
+        )
+        # Preserve the original all-or-none review meaning of the bound. If a
+        # batch discovers more suspicious moves than the operator authorized,
+        # no arbitrary subset is selected: every large move is quarantined,
+        # while normal refreshes and canonical inserts can still publish.
+        large_move_batch_allowed = (
+            max_expected_large_moves is not None
+            and len(large_move_refreshes) <= max_expected_large_moves
+        )
+        quarantined_large_move_ids = (
+            frozenset()
+            if large_move_batch_allowed
+            else frozenset(refresh.cafe_id for refresh in large_move_refreshes)
+        )
+        applicable_refreshes = tuple(
+            refresh
+            for refresh in refresh_build.refreshes
+            if refresh.cafe_id not in quarantined_large_move_ids
+        )
+        planned_large_move_count = (
+            len(large_move_refreshes) if large_move_batch_allowed else 0
+        )
+        large_move_quarantine_reason = (
+            KAKAO_LARGE_MOVE_QUARANTINE_REASON
+            if quarantined_large_move_ids
+            else None
+        )
         build = build_kakao_expansion(
             snapshot.places,
             canonical,
@@ -385,7 +412,7 @@ def seed_kakao_catalog_expansion(
                     "Kakao candidate collides with an existing origin/provider"
                 )
             _candidate_values(candidate, source_release=snapshot.source_release)
-        for refresh in refresh_build.refreshes:
+        for refresh in applicable_refreshes:
             _candidate_values(
                 _refresh_candidate(refresh),
                 source_release=snapshot.source_release,
@@ -393,7 +420,7 @@ def seed_kakao_catalog_expansion(
 
         inserted_cafes = inserted_providers = refreshed_cafes = 0
         if apply:
-            for refresh in refresh_build.refreshes:
+            for refresh in applicable_refreshes:
                 cafe = cafes_by_id[refresh.cafe_id]
                 values = _candidate_values(
                     _refresh_candidate(refresh),
@@ -409,6 +436,11 @@ def seed_kakao_catalog_expansion(
                     cafe.source_json = values["source_json"]  # type: ignore[assignment]
                 refreshed_cafes += 1
             for cafe_id in refresh_build.seen_cafe_ids:
+                if cafe_id in quarantined_large_move_ids:
+                    # Keep suspicious cafe/provider state frozen. Seeing the
+                    # same ID at a distant coordinate does not renew identity
+                    # verification until that movement is explicitly allowed.
+                    continue
                 provider = kakao_places_by_cafe[cafe_id]
                 provider.detail_url = (
                     f"https://place.map.kakao.com/{provider.provider_place_id}"
@@ -470,12 +502,22 @@ def seed_kakao_catalog_expansion(
             refresh_seen_count=refresh_build.report.seen_target_count,
             refresh_missing_count=refresh_build.report.missing_target_count,
             refresh_rejected_count=refresh_build.report.rejected_target_count,
-            planned_cafe_refresh_count=len(refresh_build.refreshes),
+            planned_cafe_refresh_count=len(applicable_refreshes),
             refreshed_cafe_count=refreshed_cafes,
             refresh_coordinate_changed_count=(
                 refresh_build.report.coordinate_changed_count
             ),
             refresh_large_move_count=refresh_build.report.large_move_count,
+            refresh_large_move_planned_count=planned_large_move_count,
+            refresh_large_move_applied_count=(
+                planned_large_move_count if apply else 0
+            ),
+            refresh_large_move_quarantined_count=len(
+                quarantined_large_move_ids
+            ),
+            refresh_large_move_quarantine_reason=(
+                large_move_quarantine_reason
+            ),
             refresh_move_bucket_counts=refresh_build.report.move_bucket_counts,
             refresh_changed_field_counts=(
                 refresh_build.report.changed_field_counts
@@ -486,6 +528,14 @@ def seed_kakao_catalog_expansion(
                     "kakao_place_id": refresh.kakao_place_id,
                     "name": refresh.name,
                     "movement_m": round(refresh.movement_m, 3),
+                    "quarantined": (
+                        refresh.cafe_id in quarantined_large_move_ids
+                    ),
+                    "quarantine_reason": (
+                        KAKAO_LARGE_MOVE_QUARANTINE_REASON
+                        if refresh.cafe_id in quarantined_large_move_ids
+                        else None
+                    ),
                 }
                 for refresh in sorted(
                     refresh_build.refreshes,
