@@ -241,6 +241,32 @@ SHA-256은 `953e9790e174220eee0d028f1ae393ccd3e5fd88579db32b5b4a60cf2ba13d62`다
   통과해도 공개 v1과 confidence를 바꾸지 않는다. 같은 검사를 여러 날짜 rolling-origin으로
   반복하고, 마지막에 독립 현장 라벨에서 baseline 대비 개선해야 feature 승격이 가능하다.
 
+### 2.6 동일 날짜 관계 실험 v1 무효와 v2 입력계약 사전등록
+
+commit `a30a230` 뒤 첫 상관 실행은 상관을 계산하기 전에 08시 인접
+`(행정동코드, CELL_ID)` universe Jaccard 0.985120719가 고정 gate 0.99에 미달해 중단됐다.
+threshold를 완화하거나 실패 뒤 상관만 꺼내지 않았다. v1은 입력계약 무효로 보존한다.
+
+추가 입력 진단에서 07→08시 원천 행은 10,608→10,605개였고, 행정동-cell pair는 이탈
+81개·진입 78개였다. 반면 bare `CELL_ID`는 8,536→8,535개, 이탈 6개·진입 5개,
+Jaccard 0.998712였다. 예를 들어 `다사43754600`은 07시에 두 행정동 부분행이 있다가 08시에는
+한 부분행만 남았다. 즉 250m geometry가 크게 바뀐 게 아니라 경계 격자의 행정동별 부분행
+존재 여부가 인구 변화와 함께 바뀐다. zone-cell Jaccard를 geometry 완전성 gate로 쓴 것이
+잘못이었다.
+
+상관값을 한 번도 계산하지 않은 상태에서 v2 입력계약을 다음처럼 고정한다.
+
+- geometry gate는 bare `CELL_ID`의 `h-1↔h`, `h↔h+1` Jaccard ≥0.99로 바꾼다.
+  `(행정동코드, CELL_ID)` Jaccard와 이탈·진입 수는 진단값으로만 보존한다.
+- 동별 재고 변화는 두 시각의 zone-cell pair 합집합에서 계산한다. 한 시각에 행이 없으면
+  primary는 0.0으로 두고, masked row와 동일하게 2.0·3.0 민감도도 함께 계산한다. 따라서
+  “누락은 무조건 0” 가정에 결과가 의존하는지 별도로 드러난다.
+- 기존 날짜·시각·행정동 code coverage·Spearman·screening threshold는 바꾸지 않는다.
+  report version만 `v2`로 올리고 masked/absent imputation별 verdict가 달라지거나 시간별 rho
+  range가 0.02를 넘으면 기존 규칙대로 강등한다.
+- 이 변경은 source row 단위 실측에 따른 representation 수정이다. 결과 threshold 조정이
+  아니며 v2도 정확도·인과·독립 검증으로 해석하지 않는다.
+
 ## 3. 요일·공휴일·시간 기준선
 
 단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,
