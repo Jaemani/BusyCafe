@@ -178,6 +178,7 @@ def test_analyzer_reports_cycle_cadence_lag_signal_and_coverage() -> None:
     engine.dispose()
 
     assert report == repeated
+    assert report["schema_version"] == 2
     assert report["cycles"]["status_counts"] == {
         "complete": 2,
         "partial": 1,
@@ -213,12 +214,32 @@ def test_analyzer_reports_cycle_cadence_lag_signal_and_coverage() -> None:
         "no_new_data_failure": 1,
         "pending": 1,
     }
-    assert [item["new_snapshot_count"] for item in signal["cycles"]] == [
-        2,
-        0,
-        1,
-        0,
-        0,
+    assert "cycles" not in signal
+    assert signal["anomalous_terminal_cycles"] == [
+        {
+            "id": 3,
+            "started_at": "2026-07-14T00:20:00Z",
+            "completed_at": "2026-07-14T00:21:00Z",
+            "targets": 2,
+            "saved": 1,
+            "failed": 1,
+            "status": "partial",
+            "duration_seconds": 60.0,
+            "new_snapshot_count": 1,
+            "signal": "new_data",
+        },
+        {
+            "id": 4,
+            "started_at": "2026-07-14T00:25:00Z",
+            "completed_at": "2026-07-14T00:26:00Z",
+            "targets": 2,
+            "saved": 0,
+            "failed": 2,
+            "status": "failed",
+            "duration_seconds": 60.0,
+            "new_snapshot_count": 0,
+            "signal": "no_new_data_failure",
+        },
     ]
     coverage = report["hotspot_coverage"]
     assert coverage["coverage_rate"] == pytest.approx(1)
@@ -287,6 +308,7 @@ def test_analyzer_handles_empty_database_without_dividing_by_zero() -> None:
     engine.dispose()
 
     assert report["cycles"]["complete_rate"] is None
+    assert report["cycle_snapshot_signal"]["anomalous_terminal_cycles"] == []
     assert report["cadence"]["gap_count"] == 1
     assert report["cadence"]["gaps"][0]["kind"] == "empty_window"
     assert report["snapshot_observed_lag_minutes"]["samples"] == 0

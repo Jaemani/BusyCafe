@@ -199,17 +199,21 @@ def analyze_ingest_slo(
     target_total = sum(cycle["targets"] for cycle in terminal)
     saved_total = sum(cycle["saved"] for cycle in terminal)
     durations: list[float] = []
+    duration_by_cycle: dict[int, float | None] = {}
     invalid_durations = 0
     for cycle in terminal:
         completed_at = cycle["completed_at"]
         if completed_at is None:
             invalid_durations += 1
+            duration_by_cycle[cycle["id"]] = None
             continue
         duration = (completed_at - cycle["started_at"]).total_seconds()
         if duration < 0:
             invalid_durations += 1
+            duration_by_cycle[cycle["id"]] = None
             continue
         durations.append(duration)
+        duration_by_cycle[cycle["id"]] = duration
 
     cycle_starts = [cycle["started_at"] for cycle in cycles]
     cadence_intervals_min = [
@@ -270,6 +274,7 @@ def analyze_ingest_slo(
                     break
                 index -= 1
     cycle_signals: list[dict[str, Any]] = []
+    anomalous_terminal_cycles: list[dict[str, Any]] = []
     for cycle in cycles:
         new_count = cycle_inserted_counts[cycle["id"]]
         if new_count > 0:
@@ -288,6 +293,24 @@ def analyze_ingest_slo(
                 "signal": signal,
             }
         )
+        if cycle["status"] not in ("complete", "running"):
+            completed_at = cycle["completed_at"]
+            anomalous_terminal_cycles.append(
+                {
+                    "id": cycle["id"],
+                    "started_at": _iso(cycle["started_at"]),
+                    "completed_at": (
+                        _iso(completed_at) if completed_at is not None else None
+                    ),
+                    "targets": cycle["targets"],
+                    "saved": cycle["saved"],
+                    "failed": cycle["failed"],
+                    "status": cycle["status"],
+                    "duration_seconds": duration_by_cycle[cycle["id"]],
+                    "new_snapshot_count": new_count,
+                    "signal": signal,
+                }
+            )
     signal_counts = Counter(item["signal"] for item in cycle_signals)
 
     seen_hotspots = set(snapshots_per_hotspot)
@@ -304,7 +327,7 @@ def analyze_ingest_slo(
         window_hours * 60.0 / expected_cadence_min
     )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": _iso(checked_at),
         "window": {
             "start": _iso(window_start),
@@ -352,7 +375,7 @@ def analyze_ingest_slo(
             "direct_persisted_insert_counter": False,
             "method": "snapshot_fetched_at_within_cycle_window",
             "signal_counts": dict(sorted(signal_counts.items())),
-            "cycles": cycle_signals,
+            "anomalous_terminal_cycles": anomalous_terminal_cycles,
         },
         "hotspot_coverage": {
             "polled_hotspots": len(polled_hotspots),
