@@ -1,6 +1,9 @@
 name: Analyze production ingest SLO
 
 on:
+  schedule:
+    # Weekly read-only review: Wednesday 04:37 KST (Tuesday 19:37 UTC).
+    - cron: "37 19 * * 2"
   workflow_dispatch:
     inputs:
       window_hours:
@@ -36,5 +39,5 @@ jobs:
       - name: Emit read-only ingest SLO JSON
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          WINDOW_HOURS: ${{ inputs.window_hours }}
+          WINDOW_HOURS: ${{ github.event_name == 'workflow_dispatch' && inputs.window_hours || '168' }}
         run: uv run python scripts/analyze_ingest_slo.py --window-hours "$WINDOW_HOURS"

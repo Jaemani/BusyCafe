@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import (
+    PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION,
     SEOUL_REFRESHMENT_PERMIT_DATASET_ID,
     SEOUL_REFRESHMENT_PERMIT_SERVICE,
 )
@@ -89,65 +90,106 @@ def _cafe(
 
 def test_aggregate_resolution_rules_percentiles_providers_and_filters() -> None:
     candidates = [
-        _permit("p-name", name="Name", address="A", area="1"),
         _permit(
-            "p-phone", name="Different", address="B", area="5", phone="0212345678"
+            "p-name",
+            name="Name",
+            address="서울특별시 종로구 세종대로 1",
+            area="1",
         ),
         _permit(
-            "p-both", name="Both", address="C", area="50", phone="0298765432"
+            "p-phone",
+            name="Different",
+            address="서울특별시 종로구 세종대로 2",
+            area="5",
+            phone="0212345678",
         ),
-        _permit("p-missing", name="Missing", address="D", area="95"),
-        _permit("p-ambiguous", name="Twin", address="E", area="99"),
+        _permit(
+            "p-both",
+            name="Both",
+            address="서울특별시 종로구 세종대로 3, 2층",
+            area="50",
+            phone="0298765432",
+        ),
+        _permit(
+            "p-missing",
+            name="Missing",
+            address="서울특별시 종로구 세종대로 4",
+            area="95",
+        ),
+        _permit(
+            "p-ambiguous",
+            name="Twin",
+            address="서울특별시 종로구 세종대로 5",
+            area="99",
+        ),
         _permit(
             "excluded-category",
             name="Name",
-            address="A",
+            address="서울특별시 종로구 세종대로 1",
             area="500",
             category="다방",
         ),
         _permit(
             "excluded-unit",
             name="Name",
-            address="A",
+            address="서울특별시 종로구 세종대로 1",
             area="600",
             unit="unknown",
         ),
         _permit(
             "excluded-status",
             name="Name",
-            address="A",
+            address="서울특별시 종로구 세종대로 1",
             area="0",
             status="nonpositive",
         ),
     ]
     cafes = [
-        _cafe("c-name", name="Name", address="A", provider="kakao"),
+        _cafe(
+            "c-name",
+            name="Name",
+            address="서울 종로구 세종대로1 (청진동)",
+            provider="kakao",
+        ),
         _cafe(
             "c-phone",
             name="Other",
-            address="B",
+            address="서울특별시 종로구 세종대로 2",
             phone="02-1234-5678",
             provider="overture",
         ),
         _cafe(
             "c-both",
             name="Both",
-            address="C",
+            address="서울시 종로구 세종대로3",
             phone="02-9876-5432",
             provider="kakao",
         ),
-        _cafe("c-twin-1", name="Twin", address="E"),
-        _cafe("c-twin-2", name="Twin", address="E"),
+        _cafe(
+            "c-twin-1",
+            name="Twin",
+            address="서울특별시 종로구 세종대로 5",
+        ),
+        _cafe(
+            "c-twin-2",
+            name="Twin",
+            address="서울특별시 종로구 세종대로 5",
+        ),
     ]
 
     report = build_capacity_coverage(candidates, cafes)
 
     assert report["scope"]["eligible_coffee_permit_count"] == 5
+    assert (
+        report["scope"]["address_match_version"]
+        == PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION
+    )
     assert report["resolution_counts"] == {
         "verified": 3,
         "missing": 1,
         "ambiguous": 1,
     }
+    assert report["reverse_collision_counts"] == {"permits": 0, "cafes": 0}
     assert report["verified_evidence_rule_counts"] == {
         "name_only": 1,
         "phone_only": 1,
@@ -160,21 +202,27 @@ def test_aggregate_resolution_rules_percentiles_providers_and_filters() -> None:
             "grid_nearby": 5,
             "actual_within_distance_gate": 5,
             "exact_normalized_name_within_distance_gate": 3,
-            "exact_normalized_address_within_distance_gate": 4,
+            "exact_normalized_address_within_distance_gate": 2,
+            "exact_structured_address_within_distance_gate": 4,
             "exact_normalized_phone_within_distance_gate": 2,
-            "exact_address_and_name_within_distance_gate": 3,
-            "exact_address_and_phone_within_distance_gate": 2,
+            "exact_normalized_address_and_name_within_distance_gate": 1,
+            "exact_normalized_address_and_phone_within_distance_gate": 1,
             "exact_name_and_phone_within_distance_gate": 1,
+            "exact_structured_address_and_name_within_distance_gate": 3,
+            "exact_structured_address_and_phone_within_distance_gate": 2,
         },
         "pair_counts": {
             "grid_nearby": 25,
             "actual_within_distance_gate": 25,
             "exact_normalized_name_within_distance_gate": 4,
-            "exact_normalized_address_within_distance_gate": 5,
+            "exact_normalized_address_within_distance_gate": 3,
+            "exact_structured_address_within_distance_gate": 5,
             "exact_normalized_phone_within_distance_gate": 2,
-            "exact_address_and_name_within_distance_gate": 4,
-            "exact_address_and_phone_within_distance_gate": 2,
+            "exact_normalized_address_and_name_within_distance_gate": 2,
+            "exact_normalized_address_and_phone_within_distance_gate": 1,
             "exact_name_and_phone_within_distance_gate": 1,
+            "exact_structured_address_and_name_within_distance_gate": 4,
+            "exact_structured_address_and_phone_within_distance_gate": 2,
         },
     }
     assert report["matched_area_m2"] == {
@@ -195,20 +243,66 @@ def test_aggregate_resolution_rules_percentiles_providers_and_filters() -> None:
     }
 
 
+def test_reverse_cafe_collision_abstains_all_and_reports_counts_only() -> None:
+    permits = [
+        _permit(
+            "collision-permit-b",
+            name="Collision Cafe",
+            address="서울특별시 종로구 세종대로 20",
+            area="20",
+        ),
+        _permit(
+            "collision-permit-a",
+            name="Collision Cafe",
+            address="서울특별시 종로구 세종대로 20",
+            area="10",
+        ),
+    ]
+    cafes = [
+        _cafe(
+            "collision-cafe",
+            name="Collision Cafe",
+            address="서울 종로구 세종대로20",
+            provider="kakao",
+        )
+    ]
+
+    forward = build_capacity_coverage(permits, cafes)
+    reverse = build_capacity_coverage(list(reversed(permits)), cafes)
+
+    assert serialize_report(forward) == serialize_report(reverse)
+    assert forward["resolution_counts"] == {
+        "verified": 0,
+        "missing": 0,
+        "ambiguous": 2,
+    }
+    assert forward["reverse_collision_counts"] == {"permits": 2, "cafes": 1}
+    assert forward["matched_area_m2"]["samples"] == 0
+    assert forward["matched_cafe_origin_provider_counts"] == {}
+    serialized = serialize_report(forward).decode("utf-8")
+    for forbidden in (
+        "collision-permit-a",
+        "collision-permit-b",
+        "collision-cafe",
+        "Collision Cafe",
+    ):
+        assert forbidden not in serialized
+
+
 def test_grid_prefilter_keeps_match_across_cell_boundary() -> None:
     longitude = BASE_LNG + 0.00056
     assert 0 < haversine_m(BASE_LAT, BASE_LNG, BASE_LAT, longitude) < 50
     permit = _permit(
         "boundary-permit",
         name="Boundary",
-        address="Boundary address",
+        address="서울특별시 종로구 세종대로 10",
         area="42.90",
         longitude=BASE_LNG,
     )
     cafe = _cafe(
         "boundary-cafe",
         name="Boundary",
-        address="Boundary address",
+        address="서울 종로구 세종대로10 (청진동)",
         longitude=longitude,
     )
 
@@ -221,13 +315,13 @@ def test_same_source_catalog_rows_are_excluded_from_independent_matching() -> No
     permit = _permit(
         "permit-source-row",
         name="Same source cafe",
-        address="Same source address",
+        address="서울특별시 종로구 세종대로 11",
         area="42.9",
     )
     same_source = _cafe(
         "same-source-cafe",
         name="Same source cafe",
-        address="Same source address",
+        address="서울 종로구 세종대로11",
         provider=PERMIT_SOURCE,
     )
 
@@ -250,20 +344,20 @@ def test_same_source_duplicate_cannot_make_independent_match_ambiguous() -> None
     permit = _permit(
         "permit-with-independent-match",
         name="Independent cafe",
-        address="Independent address",
+        address="서울특별시 종로구 세종대로 12",
         area="42.9",
     )
     cafes = [
         _cafe(
             "same-source-copy",
             name="Independent cafe",
-            address="Independent address",
+            address="서울 종로구 세종대로12",
             provider=PERMIT_SOURCE,
         ),
         _cafe(
             "kakao-independent",
             name="Independent cafe",
-            address="Independent address",
+            address="서울시 종로구 세종대로 12, 1층",
             provider="kakao",
         ),
     ]
@@ -277,12 +371,30 @@ def test_same_source_duplicate_cannot_make_independent_match_ambiguous() -> None
 
 def test_report_is_input_order_independent_and_contains_no_source_identity() -> None:
     permits = [
-        _permit("secret-permit-a", name="Secret Cafe A", address="Secret A", area="10"),
-        _permit("secret-permit-b", name="Secret Cafe B", address="Secret B", area="20"),
+        _permit(
+            "secret-permit-a",
+            name="Secret Cafe A",
+            address="서울특별시 종로구 세종대로 13",
+            area="10",
+        ),
+        _permit(
+            "secret-permit-b",
+            name="Secret Cafe B",
+            address="서울특별시 종로구 세종대로 14",
+            area="20",
+        ),
     ]
     cafes = [
-        _cafe("secret-cafe-a", name="Secret Cafe A", address="Secret A"),
-        _cafe("secret-cafe-b", name="Secret Cafe B", address="Secret B"),
+        _cafe(
+            "secret-cafe-a",
+            name="Secret Cafe A",
+            address="서울 종로구 세종대로13",
+        ),
+        _cafe(
+            "secret-cafe-b",
+            name="Secret Cafe B",
+            address="서울 종로구 세종대로14",
+        ),
     ]
 
     left = serialize_report(build_capacity_coverage(permits, cafes))

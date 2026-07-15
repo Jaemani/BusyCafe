@@ -79,6 +79,9 @@ PERMIT_RECONCILE_EXACT_PHONE_MAX_M: Final = 150.0
 # name or phone, so one distance threshold applies to every verified result.
 PERMIT_CAFE_ENTITY_MAX_DISTANCE_M: Final = 50.0
 PERMIT_CAFE_ENTITY_MIN_PHONE_DIGITS: Final = 9
+PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION: Final = (
+    "seoul-road-address-components-v1"
+)
 # Official Seoul major-place master attachments (dataset OA-21285).
 SEOUL_DATAFILE_DOWNLOAD_URL: Final = (
     "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do"

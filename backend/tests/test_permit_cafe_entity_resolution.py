@@ -6,14 +6,18 @@ from math import nan
 import pytest
 
 from app.config import (
+    PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION,
     PERMIT_CAFE_ENTITY_MAX_DISTANCE_M,
     PERMIT_CAFE_ENTITY_MIN_PHONE_DIGITS,
 )
 from app.ingest.permit_cafe_entity_resolution import (
     CafeEntityRecord,
+    PermitCafeCandidateSet,
     PermitEntityRecord,
     normalize_entity_text,
     normalize_phone_digits,
+    parse_seoul_road_address,
+    resolve_permit_candidate_sets,
     resolve_permit_to_cafes,
 )
 
@@ -45,7 +49,7 @@ def cafe(identifier: str = "cafe-1", **overrides: object) -> CafeEntityRecord:
     values: dict[str, object] = {
         "cafe_id": identifier,
         "name": "Ｂｕｓｙ   Café",
-        "address": " 서울특별시 성동구 연무장길 12 ",
+        "address": " 서울 성동구 연무장길12 (성수동2가), 2층 ",
         "phone": "0212345678",
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
@@ -64,15 +68,86 @@ def test_nfkc_normalization_is_exact_and_conservative() -> None:
     assert normalize_phone_digits(" +82 (2) 1234-5678 ") == "82212345678"
 
 
+def test_address_match_contract_version_is_explicit() -> None:
+    assert (
+        PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION
+        == "seoul-road-address-components-v1"
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "서울특별시 성동구 연무장길 １２",
+        "서울시 성동구 연무장길12 (성수동2가, 성수빌딩)",
+        "서울 성동구 연무장길 12, 지상2층 201호",
+        "서울특별시 성동구 연무장길 12 A동 2층",
+    ],
+)
+def test_structured_road_address_ignores_only_post_building_unit_detail(
+    value: str,
+) -> None:
+    parsed = parse_seoul_road_address(value)
+
+    assert parsed is not None
+    assert parsed.city == "서울특별시"
+    assert parsed.district == "성동구"
+    assert parsed.road_name == "연무장길"
+    assert parsed.building_main == 12
+    assert parsed.building_sub is None
+
+
+def test_structured_address_accepts_measured_nested_parenthetical_format() -> None:
+    parsed = parse_seoul_road_address(
+        "서울특별시 종로구 종로 222 (종로5가,(1층))"
+    )
+
+    assert parsed is not None
+    assert parsed.district == "종로구"
+    assert parsed.road_name == "종로"
+    assert parsed.building_main == 222
+
+
+def test_structured_address_keeps_road_digits_and_building_sub_number() -> None:
+    parsed = parse_seoul_road_address("서울 강북구 오패산로3길 12-4, B1층")
+
+    assert parsed is not None
+    assert parsed.road_name == "오패산로3길"
+    assert parsed.building_main == 12
+    assert parsed.building_sub == 4
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        "",
+        "경기도 성남시 분당구 판교역로 12",
+        "서울특별시 서울구 가짜로 12",
+        "서울특별시 성동구 성수동2가 12-4",
+        "서울특별시 성동구 연무장길 (성수동2가) 12",
+        "서울특별시 성동구 연무장길 12 성수빌딩",
+        "서울특별시 성동구 연무장길 12,",
+        "서울특별시 종로구 종로 222 (종로5가,(1층)) unknown",
+        "서울특별시 종로구 종로 222 (종로5가,(1층)",
+        "서울특별시 성동구 연무장길 012",
+        "서울특별시 성동구 연무장길 12-0",
+    ],
+)
+def test_structured_road_address_fails_closed(value: str | None) -> None:
+    assert parse_seoul_road_address(value) is None
+
+
 def test_exact_address_name_and_distance_produce_one_verified_match() -> None:
     result = resolve_permit_to_cafes(permit(phone=None), [cafe(phone=None)])
 
     assert result.status == "verified"
     assert result.verified_cafe_id == "cafe-1"
     assert result.abstained is False
+    assert result.reverse_identity_collision is False
     assert result.strong_candidate_count == 1
     evidence = result.strong_candidates[0]
-    assert evidence.normalized_address_exact is True
+    assert evidence.structured_address_exact is True
     assert evidence.normalized_name_exact is True
     assert evidence.normalized_phone_exact is False
     assert evidence.within_distance_threshold is True
@@ -94,10 +169,16 @@ def test_exact_address_phone_can_verify_when_name_differs() -> None:
     "candidate",
     [
         cafe(address="서울특별시 성동구 다른길 12"),
+        cafe(address="서울특별시 성동구 연무장길 12-1"),
         cafe(latitude=_north(PERMIT_CAFE_ENTITY_MAX_DISTANCE_M + 1)),
         cafe(name="Busy Cafe Annex", phone=None),
     ],
-    ids=["address-mismatch", "too-far", "no-name-or-phone-match"],
+    ids=[
+        "road-mismatch",
+        "building-sub-number-mismatch",
+        "too-far",
+        "no-name-or-phone-match",
+    ],
 )
 def test_any_missing_strong_condition_returns_missing(
     candidate: CafeEntityRecord,
@@ -125,6 +206,7 @@ def test_two_strong_candidates_are_ambiguous_and_abstain_deterministically() -> 
     assert forward.status == "ambiguous"
     assert forward.verified_cafe_id is None
     assert forward.abstained is True
+    assert forward.reverse_identity_collision is False
     assert forward.strong_candidate_count == 2
     assert [item.cafe_id for item in forward.strong_candidates] == [
         "cafe-a",
@@ -133,6 +215,64 @@ def test_two_strong_candidates_are_ambiguous_and_abstain_deterministically() -> 
     assert [item.distance_m for item in forward.strong_candidates] == pytest.approx(
         [10, 20], abs=0.1
     )
+
+
+def test_batch_reverse_collision_abstains_all_permits_deterministically() -> None:
+    shared_cafe = cafe("shared-cafe")
+    candidate_sets = [
+        PermitCafeCandidateSet(
+            permit=permit(permit_id="permit-b"),
+            cafes=(shared_cafe,),
+        ),
+        PermitCafeCandidateSet(
+            permit=permit(permit_id="permit-a"),
+            cafes=(shared_cafe,),
+        ),
+    ]
+
+    forward = resolve_permit_candidate_sets(candidate_sets)
+    reverse = resolve_permit_candidate_sets(list(reversed(candidate_sets)))
+
+    assert forward == reverse
+    assert forward.reverse_collision_permit_count == 2
+    assert forward.reverse_collision_cafe_count == 1
+    assert [item.permit_id for item in forward.resolutions] == [
+        "permit-a",
+        "permit-b",
+    ]
+    assert {item.status for item in forward.resolutions} == {"ambiguous"}
+    assert all(item.abstained for item in forward.resolutions)
+    assert all(item.verified_cafe_id is None for item in forward.resolutions)
+    assert all(item.reverse_identity_collision for item in forward.resolutions)
+    assert all(item.strong_candidate_count == 1 for item in forward.resolutions)
+
+
+def test_batch_preserves_forward_ambiguity_without_reverse_collision() -> None:
+    result = resolve_permit_candidate_sets(
+        [
+            PermitCafeCandidateSet(
+                permit=permit(),
+                cafes=(cafe("cafe-b"), cafe("cafe-a")),
+            )
+        ]
+    )
+
+    assert result.reverse_collision_permit_count == 0
+    assert result.reverse_collision_cafe_count == 0
+    resolution = result.resolutions[0]
+    assert resolution.status == "ambiguous"
+    assert resolution.strong_candidate_count == 2
+    assert resolution.reverse_identity_collision is False
+
+
+def test_batch_duplicate_permit_identity_fails_closed() -> None:
+    with pytest.raises(ValueError, match="duplicate permit_id"):
+        resolve_permit_candidate_sets(
+            [
+                PermitCafeCandidateSet(permit=permit(), cafes=(cafe(),)),
+                PermitCafeCandidateSet(permit=permit(), cafes=()),
+            ]
+        )
 
 
 def test_zero_candidates_is_missing_and_abstains() -> None:

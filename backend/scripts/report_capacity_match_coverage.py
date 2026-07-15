@@ -21,6 +21,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import (
+    PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION,
     PERMIT_CAFE_ENTITY_MAX_DISTANCE_M,
     SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE,
     SEOUL_REFRESHMENT_PERMIT_AREA_UNIT,
@@ -32,10 +33,12 @@ from app.database import create_db_engine
 from app.geo import EARTH_RADIUS_M, haversine_m
 from app.ingest.permit_cafe_entity_resolution import (
     CafeEntityRecord,
+    PermitCafeCandidateSet,
     PermitEntityRecord,
     normalize_entity_text,
     normalize_phone_digits,
-    resolve_permit_to_cafes,
+    parse_seoul_road_address,
+    resolve_permit_candidate_sets,
 )
 from app.ingest.provider_cafe_catalog import PERMIT_SOURCE
 from app.ingest.seoul_refreshment_candidates import PlaceCandidate
@@ -46,7 +49,7 @@ from scripts.cache_refreshment_candidates import (
 )
 
 
-REPORT_VERSION = "v2-production-capacity-match-coverage"
+REPORT_VERSION = "v3-production-capacity-match-coverage"
 INPUT_CONTRACT_VERSION = "oa-16095-place-candidate-area-v1"
 TARGET_CATEGORY = SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE
 AREA_UNIT = SEOUL_REFRESHMENT_PERMIT_AREA_UNIT
@@ -57,10 +60,13 @@ GATE_DIAGNOSTIC_STAGES = (
     "actual_within_distance_gate",
     "exact_normalized_name_within_distance_gate",
     "exact_normalized_address_within_distance_gate",
+    "exact_structured_address_within_distance_gate",
     "exact_normalized_phone_within_distance_gate",
-    "exact_address_and_name_within_distance_gate",
-    "exact_address_and_phone_within_distance_gate",
+    "exact_normalized_address_and_name_within_distance_gate",
+    "exact_normalized_address_and_phone_within_distance_gate",
     "exact_name_and_phone_within_distance_gate",
+    "exact_structured_address_and_name_within_distance_gate",
+    "exact_structured_address_and_phone_within_distance_gate",
 )
 
 
@@ -281,6 +287,8 @@ def build_capacity_coverage(
     max_nearby_cafes_per_permit = 0
     gate_pair_counts: Counter[str] = Counter()
     gate_permit_counts: Counter[str] = Counter()
+    candidate_sets: list[PermitCafeCandidateSet] = []
+    area_by_permit: dict[str, Decimal] = {}
     for candidate, area in eligible:
         cell = _grid_cell(
             candidate.latitude,
@@ -301,6 +309,9 @@ def build_capacity_coverage(
         )
         permit_name = normalize_entity_text(candidate.name)
         permit_address = normalize_entity_text(candidate.road_address)
+        permit_structured_address = parse_seoul_road_address(
+            candidate.road_address
+        )
         permit_phone = _usable_phone(candidate.phone)
         permit_stage_hits: set[str] = set()
         for cafe in nearby:
@@ -318,24 +329,38 @@ def build_capacity_coverage(
             permit_stage_hits.add("actual_within_distance_gate")
             cafe_name = normalize_entity_text(cafe.name)
             cafe_address = normalize_entity_text(cafe.road_address)
+            cafe_structured_address = parse_seoul_road_address(cafe.road_address)
             cafe_phone = _usable_phone(cafe.phone)
             name_exact = permit_name is not None and permit_name == cafe_name
             address_exact = (
                 permit_address is not None and permit_address == cafe_address
             )
+            structured_address_exact = (
+                permit_structured_address is not None
+                and permit_structured_address == cafe_structured_address
+            )
             phone_exact = permit_phone is not None and permit_phone == cafe_phone
             flags = {
                 "exact_normalized_name_within_distance_gate": name_exact,
                 "exact_normalized_address_within_distance_gate": address_exact,
+                "exact_structured_address_within_distance_gate": (
+                    structured_address_exact
+                ),
                 "exact_normalized_phone_within_distance_gate": phone_exact,
-                "exact_address_and_name_within_distance_gate": (
+                "exact_normalized_address_and_name_within_distance_gate": (
                     address_exact and name_exact
                 ),
-                "exact_address_and_phone_within_distance_gate": (
+                "exact_normalized_address_and_phone_within_distance_gate": (
                     address_exact and phone_exact
                 ),
                 "exact_name_and_phone_within_distance_gate": (
                     name_exact and phone_exact
+                ),
+                "exact_structured_address_and_name_within_distance_gate": (
+                    structured_address_exact and name_exact
+                ),
+                "exact_structured_address_and_phone_within_distance_gate": (
+                    structured_address_exact and phone_exact
                 ),
             }
             for stage, matched in flags.items():
@@ -344,31 +369,37 @@ def build_capacity_coverage(
                     permit_stage_hits.add(stage)
         for stage in permit_stage_hits:
             gate_permit_counts[stage] += 1
-        resolution = resolve_permit_to_cafes(
-            PermitEntityRecord(
-                permit_id=candidate.source_id,
-                name=candidate.name,
-                address=candidate.road_address,
-                phone=_usable_phone(candidate.phone),
-                latitude=candidate.latitude,
-                longitude=candidate.longitude,
-                coordinate_unit="wgs84_degrees",
-                coordinate_unit_verified=True,
-            ),
-            tuple(
-                CafeEntityRecord(
-                    cafe_id=cafe.cafe_id,
-                    name=cafe.name,
-                    address=cafe.road_address,
-                    phone=_usable_phone(cafe.phone),
-                    latitude=cafe.latitude,
-                    longitude=cafe.longitude,
+        candidate_sets.append(
+            PermitCafeCandidateSet(
+                permit=PermitEntityRecord(
+                    permit_id=candidate.source_id,
+                    name=candidate.name,
+                    address=candidate.road_address,
+                    phone=_usable_phone(candidate.phone),
+                    latitude=candidate.latitude,
+                    longitude=candidate.longitude,
                     coordinate_unit="wgs84_degrees",
                     coordinate_unit_verified=True,
-                )
-                for cafe in nearby
-            ),
+                ),
+                cafes=tuple(
+                    CafeEntityRecord(
+                        cafe_id=cafe.cafe_id,
+                        name=cafe.name,
+                        address=cafe.road_address,
+                        phone=_usable_phone(cafe.phone),
+                        latitude=cafe.latitude,
+                        longitude=cafe.longitude,
+                        coordinate_unit="wgs84_degrees",
+                        coordinate_unit_verified=True,
+                    )
+                    for cafe in nearby
+                ),
+            )
         )
+        area_by_permit[candidate.source_id] = area
+
+    batch_resolution = resolve_permit_candidate_sets(candidate_sets)
+    for resolution in batch_resolution.resolutions:
         statuses[resolution.status] += 1
         if resolution.status != "verified":
             continue
@@ -381,7 +412,7 @@ def build_capacity_coverage(
             else "phone_only"
         )
         evidence_rules[rule] += 1
-        matched_areas.append(area)
+        matched_areas.append(area_by_permit[resolution.permit_id])
         if resolution.verified_cafe_id is None:
             raise CapacityCoverageError("verified resolution has no cafe")
         provider_counts[provider_by_id[resolution.verified_cafe_id]] += 1
@@ -412,6 +443,7 @@ def build_capacity_coverage(
             "same_source_origin_provider": PERMIT_SOURCE,
             "independent_source_required": True,
             "max_distance_m": PERMIT_CAFE_ENTITY_MAX_DISTANCE_M,
+            "address_match_version": PERMIT_CAFE_ENTITY_ADDRESS_MATCH_VERSION,
             "required_category": TARGET_CATEGORY,
             "required_area_status": "eligible",
             "required_area_unit": AREA_UNIT,
@@ -422,6 +454,10 @@ def build_capacity_coverage(
         "resolution_counts": {
             status: statuses[status]
             for status in ("verified", "missing", "ambiguous")
+        },
+        "reverse_collision_counts": {
+            "permits": batch_resolution.reverse_collision_permit_count,
+            "cafes": batch_resolution.reverse_collision_cafe_count,
         },
         "verified_evidence_rule_counts": {
             rule: evidence_rules[rule]
