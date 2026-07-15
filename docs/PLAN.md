@@ -427,7 +427,7 @@ DoD:
 
 - [x] 선택한 Overture release의 고신뢰 서울 cache 4,933건 적재; release/hash/건수가 `VERIFICATION.md`에 기록됨
 - [x] Kakao CE7 서울 complete sweep 33,243건, unresolved 0건과 좌표 계약이 검증됨
-- [ ] Kakao-first recall 정책 적용 뒤 활성 카페 수, 신규·갱신·큰 좌표 이동 수와 검색 표본을 production에서 검증함
+- [x] Kakao-first recall 정책 적용 뒤 활성 카페 수, 신규·갱신·큰 좌표 이동 수와 검색 표본을 production에서 검증함
 - [ ] 무작위 50곳의 이름·좌표·주소를 원본과 spot check하고, 카페가 아닌 분류/서울 밖 좌표는 격리됨
 - [ ] 재실행과 동일 release 재시도는 멱등이며, 실패/부분 release가 기존 cache를 비우지 않음
 - [ ] provider ID 없는 카페에서 Naver/Kakao/Google 링크가 숨겨지고, 있는 링크는 해당 provider direct detail URL만 사용함

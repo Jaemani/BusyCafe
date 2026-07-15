@@ -180,9 +180,11 @@ saved=121, failed=0이어야 하고 complete cycle age는 25분을 넘지 않아
 CE7 complete snapshot을 다시 수집한다. 사용자 검색과 지도 API는 이 작업 중에도 기존
 PostgreSQL 원장만 읽는다.
 
-자동 실행은 신규 candidate 최대 2,000곳, 250m 초과 좌표 이동 0건으로 고정한다. 어느
-상한이든 넘으면 DB mutation 전에 실패하며 운영자가 dry-run JSON과 manifest를 검토한 뒤
-manual dispatch에서 새 상한과 `APPLY_KAKAO_CATALOG` 확인문을 명시해야 한다. incomplete
+자동 실행은 신규 candidate 최대 2,000곳, 250m 초과 좌표 이동 허용 0건으로 고정한다.
+candidate 상한을 넘으면 DB mutation 전에 실패한다. 큰 이동 발견 수가 허용 상한을 넘으면
+그 배치의 큰 이동 전부를 격리하고 cafe와 provider 검증 상태를 동결하되, 정상 갱신과 신규
+삽입은 계속한다. 큰 이동을 승인하려면 dry-run JSON과 표본을 검토한 뒤 manual dispatch에서
+발견 수 전체를 포함하는 상한과 `APPLY_KAKAO_CATALOG` 확인문을 명시해야 한다. incomplete
 sweep, schema head 불일치, 서울 주소·bbox 실패도 적용을 차단한다.
 
 성공 순서는 complete sweep → schema 확인 → dry-run → 단일 transaction apply → 전체
@@ -193,6 +195,12 @@ cache는 artifact로 공개하지 않는다. 한 번의 complete snapshot에서 
 첫 실측 complete sweep은 3,794 API 호출을 사용했다. 호출량과 Kakao 앱 쿼터, 정책 변경을
 주간 점검에 포함한다. 상업화 전 사용 범위 확인 조건은 ADR-0014와
 `LICENSE_ATTRIBUTION_AUDIT.md`를 따른다.
+
+2026-07-15 production에서 cafe/provider 약 1.98만 곳을 ORM으로 갱신한 apply는 35분 15초가
+걸렸다. 사용자 읽기는 중단되지 않았지만 weekly maintenance로는 과도하다. bulk update와
+batch progress 로그를 적용하기 전까지 90분 job 상한을 줄이지 않고, 실행 중 강제 취소하지
+않는다. 최적화 뒤에는 같은 production 규모의 step duration을 다시 측정해 이 기록을
+대체하지 말고 후속 기록으로 남긴다.
 
 ## Supabase 보안과 사용량
 

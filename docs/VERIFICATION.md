@@ -1225,3 +1225,50 @@
 - 판정: **PASS(코드·fixture·로컬 gate)**. PostgreSQL production migration, Kakao refresh
   dry-run/apply, score materialize, 공개 검색·브랜드·좌표 표본과 최종 활성 카페 수는 배포
   뒤 별도 기록하기 전까지 PASS로 주장하지 않는다.
+
+## 2026-07-15 — Kakao-first 검색·원장 production 승격
+
+- 기준 구현:
+  - 검색·UI·Kakao-first 원장 commit `3cc82b4`
+  - production 사전 기록 commit `55d6fbf`
+  - 큰 좌표 이동 격리 commit `9d34118`
+  - CI run `29384841814`, `29385873423` PASS. 후자는 실제 PostgreSQL migration 적용과
+    schema smoke, backend pytest, frontend typecheck/build를 모두 통과했다.
+  - production migration run `29384901413` PASS, revision `20260715_0009`
+  - Vercel deployment `busy-cafe-6l8j29dhw-jaemanis-projects.vercel.app`을
+    `busy-cafe.vercel.app` alias로 승격했다.
+- 첫 apply run `29384993264`:
+  - complete Kakao snapshot 33,229곳, API 3,797회, unresolved 0
+  - 신규 후보 566곳은 상한 2,000 이내였지만 기존 identity의 250m 초과 이동 24곳이
+    허용 상한 0을 넘어 apply가 DB mutation 전에 중단됐다.
+  - 활성 카페는 29,917곳 그대로였고 안전 실패로 판정했다. 정상 행까지 함께 막은 정책
+    결손은 INC-2026-016으로 기록하고 큰 이동 격리 방식으로 수정했다.
+- 성공한 apply run `29385929508`:
+  - complete Kakao snapshot 33,230곳, API 3,797회, unresolved 0,
+    complete leaf 1,882개, split cell 627개
+  - dry-run/apply의 candidate ID SHA-256은
+    `1672822e9fc0cb58c3f988698f833e56a64b4ef3985e29be18cdc91be125f86a`로 동일
+  - 기존 Kakao refresh eligible/seen/missing/rejected = 19,826/19,802/24/5
+  - 정상 refresh 계획/적용 = 19,778/19,778
+  - 250m 초과 이동 발견/계획/적용/격리 = 24/0/0/24. 격리 사유는
+    `large_move_batch_exceeds_allowed_bound`; cafe와 provider 검증 상태를 동결했다.
+  - conflict 총 596건 중 blocking 40, advisory 556. 신규 cafe/provider 566/566 적용
+  - score materialize 성공. 활성 카페 29,917→30,483
+  - step duration: sweep 12분 57초, dry-run 12초, apply 35분 15초, materialize 39초.
+    apply 시간은 사용자 요청 경로 장애를 만들지 않았지만 weekly 작업으로 과도해 bulk
+    update와 batch progress log를 후속 운영 과제로 남겼다.
+- 공개 API 표본:
+  - `/api/health`: live, cafes_count 30,483, 최근 complete cycle 121/121/0
+  - `루트비커피 성수점`(cafe 29971): 서울 성동구 주소, `[lng, lat]`가 서울 bbox 안,
+    Kakao source release `2026-07-15T03:24:42.491325+00:00`, direct detail URL
+    `https://place.map.kakao.com/1189682256`, `v1-idw-point` score/level 존재
+  - 신규 표본 `스타벅스 을지로경기빌딩점`, `공차 잠실지하상가점`,
+    `메가MGC커피 잠실지하상가점`도 검색되고 사전 계산 level이 반환됨
+  - 스타벅스 브랜드 결과 50건의 좌표가 모두 `SEOUL_BBOX` 안임을 확인
+  - 동일 서울 검색 5회 응답 0.364~0.379초, warm 브랜드 CDN 요청 5회
+    0.032~0.041초. 단일 cold/DB busy 표본 4.170초도 관측했으므로 이를 p95 주장으로
+    일반화하지 않고 분포 측정 과제로 남긴다.
+- 로컬 회귀: backend `755 passed, 2 skipped`, compileall과 `git diff --check` PASS.
+- 판정: **PASS** — 이름·주소 검색, 7개 브랜드 필터, Kakao direct detail link, Kakao-first
+  누락 회복, 좌표 안전 격리, score 사전 계산이 production에서 확인됐다. 큰 이동 격리 24곳
+  원본 대조와 apply bulk 최적화는 미완 후속 작업이다.
