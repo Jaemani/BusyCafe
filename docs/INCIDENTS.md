@@ -592,3 +592,42 @@ stale가 맞다. 화면에 색상을 보이게 만들 목적으로 임계값을 
 stale 경고는 설명만으로 충분하지 않다. 현재성을 잃은 관측은 현재값을 생성하는 모든
 API와 시각 표현에서 기계적으로 무효화해야 한다. 수집 가용성과 시간대별 모델 정확도는
 별도 문제이므로, 이 안전 수정으로 정확도가 개선됐다고 주장하지 않는다.
+
+## INC-2026-015 — Kakao 대량 원장 적용이 commit 뒤 취소됨
+
+- 상태: Resolved
+- 심각도: SEV-3
+- 시작/감지/해결: 2026-07-14
+- 작성자: Codex
+- 관련 GitHub Actions run: `29332078493`
+
+### 요약
+
+Kakao 서울 CE7 원장 후보 19,451곳을 production에 적용하는 작업이 DB commit 뒤에도
+수분 동안 끝나지 않아 취소됐다. commit은 이미 완료돼 활성 카페 수가 10,466곳에서
+29,917곳으로 늘었지만, workflow의 후속 score materialize와 정상 완료 보고는 실행되지
+않았다. 다음 materialize 전까지 새 카페는 혼잡 점수가 없어 회색으로 보일 수 있었다.
+
+### 근본 원인과 영향
+
+ORM session의 기본 `expire_on_commit` 때문에 commit 뒤 보고서를 만들 때 방금 삽입한
+수천 개 객체의 속성을 다시 읽었다. 이 과정이 개별 DB refresh를 대량으로 발생시켜 실제
+쓰기보다 긴 post-commit read 구간을 만들었다. 하나의 단계 안에 원자적 DB commit과 느린
+보고서 생성이 함께 있어 GitHub Actions 화면의 `cancelled` 상태만으로 rollback 여부를
+판단하기도 어려웠다.
+
+원장 행과 provider identity는 commit돼 유실되지 않았고 이후 score materialize로 회복됐다.
+다만 작업 상태와 실제 DB 상태가 달랐고, 후속 단계가 건너뛰어진 운영 불확실성이 있었다.
+
+### 대응과 재발 방지
+
+- [x] commit 전에 보고서에 필요한 scalar 값을 모두 복사해 post-commit ORM refresh 제거
+- [x] 대량 삽입은 cafe batch flush와 provider batch flush를 사용하고 행별 원격 refresh 금지
+- [x] 회귀 테스트에서 commit 뒤 ORM 객체를 다시 읽지 않아도 보고서가 완성되는지 확인
+- [x] 원장 apply 뒤 `materialize_scores.py`를 별도 단계로 유지
+- [x] workflow가 dry-run/apply JSON 보고서를 artifact로 보존하도록 변경
+- [x] `python | tee`에 `pipefail`을 적용해 Python 실패가 성공으로 가려지지 않게 함
+- [x] production health의 활성 카페 수와 후속 viewport 점수 존재를 확인
+
+관련 수정은 commit `6cc9ffd`에 반영했다. 이후 원장 갱신은 candidate 수와 250m 초과 좌표
+이동 수에 명시적 상한을 두며, complete Kakao snapshot만 적용한다.

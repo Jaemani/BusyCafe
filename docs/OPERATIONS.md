@@ -174,6 +174,26 @@ saved=121, failed=0이어야 하고 complete cycle age는 25분을 넘지 않아
 - migration head와 서비스 model version
 - 서울 API schema parse failure와 secret-bearing 로그가 없는지
 
+## Kakao 카페 원장 refresh
+
+`.github/workflows/apply-kakao-catalog-production.yml`은 매주 화요일 03:23 KST에 서울
+CE7 complete snapshot을 다시 수집한다. 사용자 검색과 지도 API는 이 작업 중에도 기존
+PostgreSQL 원장만 읽는다.
+
+자동 실행은 신규 candidate 최대 2,000곳, 250m 초과 좌표 이동 0건으로 고정한다. 어느
+상한이든 넘으면 DB mutation 전에 실패하며 운영자가 dry-run JSON과 manifest를 검토한 뒤
+manual dispatch에서 새 상한과 `APPLY_KAKAO_CATALOG` 확인문을 명시해야 한다. incomplete
+sweep, schema head 불일치, 서울 주소·bbox 실패도 적용을 차단한다.
+
+성공 순서는 complete sweep → schema 확인 → dry-run → 단일 transaction apply → 전체
+score materialize다. manifest와 dry/apply report는 30일 artifact로 보존하지만 raw Kakao
+cache는 artifact로 공개하지 않는다. 한 번의 complete snapshot에서 보이지 않은 Place ID는
+보고만 하고 자동 비활성화하지 않는다.
+
+첫 실측 complete sweep은 3,794 API 호출을 사용했다. 호출량과 Kakao 앱 쿼터, 정책 변경을
+주간 점검에 포함한다. 상업화 전 사용 범위 확인 조건은 ADR-0014와
+`LICENSE_ATTRIBUTION_AUDIT.md`를 따른다.
+
 ## Supabase 보안과 사용량
 
 브라우저는 Supabase Data API를 사용하지 않는다. 애플리케이션 public table과

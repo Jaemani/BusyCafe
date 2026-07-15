@@ -15,7 +15,8 @@
 ## 현재 제공하는 기능
 
 - MapLibre/OpenFreeMap 기반 서울 지도와 카페 클러스터
-- Overture Places에서 선별한 서울 카페 원장
+- Kakao Local CE7 complete snapshot을 우선으로 한 서울 카페 원장과 Overture fallback
+- 카페명·주소 전역 검색과 주요 프랜차이즈 필터
 - 서울시 주요 장소 121개의 혼잡도 수집 파이프라인
 - 거리, 데이터 신선도와 기여 핫스팟 수를 반영한 결정적 IDW 점수
 - 카페별 주변 혼잡도, coverage, 신뢰도와 근거 핫스팟 표시
@@ -68,7 +69,7 @@ npm run build
 
 ```text
 서울 실시간 도시데이터 ──> 분리 ingest worker ──> snapshot 저장소
-Overture 카페 원장 ──────────────────────────────> PostgreSQL/SQLite
+Kakao CE7 원장 + Overture fallback ───────────────> PostgreSQL/SQLite
                                                    │
 브라우저(MapLibre) <── FastAPI cache-only API <────┘
 ```

@@ -1180,3 +1180,48 @@
     production JS에서 간결한 혼잡·근거·provider 문구가 포함된 것을 확인
 - 판정: **PASS(배포 포함)**. 기존 MapLibre attribution control은 삭제·강제 숨김 없이
   유지했다. 모바일에서 실제 패널의 줄바꿈과 스크롤 체감 확인은 HUMAN 수동 점검으로 남긴다.
+
+## 2026-07-15 — Kakao-first 서울 카페 원장과 검색 사전 검증
+
+- 구현 기준 커밋: `3cc82b4`
+- 제품 결정: ADR-0014로 Overture 단독 원장을 대체했다. MapLibre/OpenFreeMap과
+  cache-first 읽기 경로는 유지하고, Kakao Local CE7 complete snapshot을 서울 recall의
+  우선 근거로 사용한다.
+- 실측 원장:
+  - refresh run `29330994394`: Kakao CE7 33,243곳, API 3,794회, unresolved 0,
+    `complete=true`
+  - 최초 apply run `29332078493`: dry-run 신규 19,451곳, production 활성 카페는
+    10,466곳에서 29,917곳으로 증가. apply 단계는 commit 뒤 취소돼 INC-2026-015로 기록
+  - 보존된 complete cache 기준 peer collision 986곳은 좌표·전화번호 공유를 이유로 양쪽을
+    차단하던 false-negative 후보였다. 정책 변경 뒤 peer collision은 advisory이고 기존
+    canonical strong collision만 blocking이다
+- 좌표·존재 안전 계약:
+  - Kakao `x=longitude`, `y=latitude`를 fixture와 회귀 테스트로 고정
+  - 서울 주소와 `SEOUL_BBOX`를 동시에 통과한 장소만 신규·refresh 대상으로 사용
+  - Kakao-origin은 source-primary Place ID로 갱신하고, 다른 origin은 이름+전화,
+    이름+주소 등 독립 exact 신호가 2개 이상인 경우만 display field 갱신
+  - 250m 초과 좌표 이동은 dry-run 분포·상위 표본과 `--max-large-moves` 명시 상한을
+    통과해야 하며 한 번의 미관측은 자동 폐업으로 처리하지 않음
+- 검색 계약:
+  - `/api/cafes/search`는 활성 서울 DB cache에서 이름·주소를 검색하고 provider API를
+    호출하지 않음
+  - 2~80자, 기본 20건·최대 50건, SQL wildcard literal 처리, 7개 브랜드 alias allowlist
+  - PostgreSQL `pg_trgm` partial GIN index를 migration `20260715_0009`로 설치하고 SQLite는
+    기능 호환을 위해 no-op
+  - 자유 검색은 `private, max-age=30`, 고정 brand-only 요청만 shared cache 사용
+- 사용자 UI:
+  - 300ms debounce, 2글자 guard, 빈 결과·오류 상태와 모바일 결과 panel
+  - 결과 선택 이동 좌표는 `[longitude, latitude]`; 선택 뒤 기존 상세·Kakao direct link 사용
+  - 브랜드 필터는 현재 viewport 마커에도 즉시 적용
+  - analytics에는 검색어·카페 ID·주소·좌표를 보내지 않고 결과 수 bucket과 검색 mode만 허용
+- Kakao 운영정책 확인: 2026-07-15 공식 운영정책에서 사용자 경험 개선 목적 cache를
+  허용하되 최신 상태 미유지를 금지하는 조항과, 정보 복제·출판·검색 디렉터리 입력의
+  사전 승낙 조항을 함께 확인했다. raw 응답 재배포는 하지 않으며 상업화 전 명시적 사용
+  확인은 `[HUMAN]`으로 남긴다.
+- 로컬 자동 검증:
+  - backend `753 passed, 2 skipped`, mypy와 compileall PASS
+  - frontend Vitest `11 passed`, TypeScript와 production build PASS
+  - Alembic offline SQL과 workflow YAML parse, `git diff --check` PASS
+- 판정: **PASS(코드·fixture·로컬 gate)**. PostgreSQL production migration, Kakao refresh
+  dry-run/apply, score materialize, 공개 검색·브랜드·좌표 표본과 최종 활성 카페 수는 배포
+  뒤 별도 기록하기 전까지 PASS로 주장하지 않는다.

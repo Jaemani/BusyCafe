@@ -3,7 +3,9 @@
 - 상태: Accepted
 - 결정일: 2026-07-11
 - 관련 계획: `docs/PLAN.md` v1.4, Phase 2, Phase 4, Phase 5
-- 대체 관계: Kakao Maps/Local 기반 지도·CE7 카페 seed 초안을 제품 경로에서 대체한다. Phase 0 Kakao 실응답 fixture와 도메인 활성화 기록은 legacy 증거로 유지한다.
+- 대체 관계: Kakao Maps 기반 지도 초안을 MapLibre로 대체한 결정은 현재도 유효하다.
+  Overture 단독 카페 원장과 Kakao 운영 제외 결정은 2026-07-15 ADR-0014가 대체했다.
+  Phase 0 Kakao 실응답 fixture는 parser·좌표 회귀 근거로 유지한다.
 
 ## 배경
 

@@ -1,4 +1,4 @@
-# cafe-crowd — 도시 활동도 맵과 카페 레이어 개발 계획서 (v2.0)
+# cafe-crowd — 도시 활동도 맵과 카페 레이어 개발 계획서 (v2.1)
 
 > **한 줄 정의**: 서울의 현재 지역 혼잡 추정을 근거와 함께 지도에 표시하고 카페를 첫
 > 탐색 레이어로 제공하는 준실시간 서비스. 평소 대비 활동도는 shadow 검증 뒤 별도 승격한다.
@@ -52,6 +52,12 @@
 > canonical detail만 허용하고, Naver ID가 없을 때에는 주소+카페명 검색임을 명시한
 > `네이버맵 검색` fallback만 별도 허용한다. 광고는 정확도·운영·사용량 gate 전까지
 > 금지하고 후원부터 제한적으로 검토한다.
+
+> **v2.1 (2026-07-15)**: 사용자가 방문하려는 카페를 찾지 못하는 문제를 최우선 제품
+> 실패로 보고 서울 장소 원장을 Kakao-first recall 정책으로 전환했다(ADR-0014). 완전
+> CE7 snapshot은 요청 경로 밖에서 수집·검증·캐시하고, Overture와 서울 인허가는 fallback과
+> 보조 검증으로 유지한다. 이름·주소 전역 검색, 주요 브랜드 필터, Kakao 좌표·상세 필드
+> refresh와 좌표 이동 gate를 추가한다.
 
 ---
 
@@ -114,7 +120,8 @@
 | 소스 | 용도 | 갱신 주기 | 접근 방식 | Phase |
 |---|---|---|---|---|
 | 서울 실시간 도시데이터 (열린데이터광장) | 핫스팟별 실시간 인구 혼잡도 + 12h 예측 | 인구 5분 / 상권 10분 | REST API, 인증키 | P0~P1 |
-| Overture Maps Places | 카페 POI 원장(이름·좌표·주소·전화·GERS ID) | 월간 릴리스 | GeoParquet 서울 bbox ingest → PostgreSQL 캐시 | P2 |
+| Kakao Local CE7 | 서울 카페 발견·존재·이름·좌표의 우선 원장 | 주기적 complete snapshot | 분할 수집·검증 → PostgreSQL 캐시 | P2 |
+| Overture Maps Places | 카페 POI fallback·provenance(GERS ID) | 월간 릴리스 | GeoParquet 서울 bbox ingest → PostgreSQL 캐시 | P2 |
 | 서울시 지방행정 인허가(휴게음식점) | 영업상태·폐업 보정 | 일/파일 갱신 | 공공데이터포털 → 서버 캐시 | P2 보정 |
 | OpenFreeMap | 지도 베이스맵 | 제공자 갱신 주기 | MapLibre vector style | P5 |
 | 서울시 주요 장소(핫스팟) 마스터 | 핫스팟 코드·명칭·WGS84 영역 | 정적 | 열린데이터광장 OA-21285 첨부 파일 | P1 |
@@ -136,21 +143,23 @@
 - 호출 단위 [VERIFIED 2026-07-11]: 공식 OA-21285 설명에 따라 **장소 1곳당 1콜**, 일괄 호출 불가. 장소명 또는 장소코드 중 하나로 호출한다.
 - **호출 제한 [VERIFIED 2026-07-11, HUMAN 포털 확인]**: 열린데이터광장 OpenAPI는 1회 호출당 최대 1,000건이며 호출 횟수 제한은 없다. `citydata_ppltn`은 공식적으로 장소 1곳씩 호출하므로 1,000건 행 제한의 영향이 없다. 서울 전역 지도 UX에 맞춰 공식 마스터 **121개 전부**를 5분마다 폴링한다. 예상량은 121 × 288 = **34,848콜/일**이다. 단일 worker는 주기 겹침을 금지하고, cycle duration·성공/실패 수·마지막 완전 cycle 시각을 기록한다.
 
-### 2.2 Overture Places 캐시 원장
+### 2.2 Overture Places fallback 원장
 
-- **제품 원장**: Overture Places의 릴리스별 GeoParquet에서 `SEOUL_BBOX`로 후보를 제한하고, 카페 분류·좌표·필수 GERS ID를 검증한 레코드만 PostgreSQL에 upsert한다. `overture_id`, release, confidence, category와 원본 `sources`를 보존하고 로컬 extract SHA-256은 ingest 보고서와 `VERIFICATION.md`에 기록한다.
+- **fallback 원장**: Overture Places의 릴리스별 GeoParquet에서 `SEOUL_BBOX`로 후보를 제한하고, 카페 분류·좌표·필수 GERS ID를 검증한 레코드만 PostgreSQL에 upsert한다. `overture_id`, release, confidence, category와 원본 `sources`를 보존하고 로컬 extract SHA-256은 ingest 보고서와 `VERIFICATION.md`에 기록한다. Kakao에 없는 장소와 공급자 provenance를 보완하지만 서울 recall의 우선 정본은 ADR-0014를 따른다.
 - **갱신 방식**: 지도 이동이나 사용자 요청 때 Overture/외부 POI API를 호출하지 않는다. 월간 릴리스 ingest와 인허가 보정은 별도 job으로 실행하고, API는 캐시된 `cafes`/`cafe_scores`만 bbox 조회한다. 실패한 release는 현재 검증된 캐시를 계속 제공하며, 부분 파일이나 검증 실패 결과로 원장을 비우지 않는다.
 - **정합성 경계**: Overture의 영업 상태가 비어 있거나 오래될 수 있으므로 서울시 휴게음식점 인허가 데이터로 후속 보정한다. 이름·좌표 유사도만으로 타 공급자 레코드와 병합하거나 ID를 만들어내지 않는다.
 - **공급자 상세 링크**: `external_links_json`에는 공급자가 제공하거나 합법적 계약/공식 API로 검증된 canonical detail URL만 저장한다. API는 HTTPS·provider host·detail path를 allowlist로 재검증한다. Naver direct ID가 없으면 별도 `naver_search` 필드에 주소+이름 검색 URL을 생성할 수 있으며 UI는 이를 `네이버맵 검색`으로 표시한다. 이 fallback은 canonical identity나 직접 상세 링크로 저장하지 않는다.
 
-### 2.3 Kakao Local API — legacy 검증 기록, 제품 경로 아님
+### 2.3 Kakao Local API — 서울 recall 우선 원장
 
-- 다음 내용은 Phase 0에서 실제 응답과 키 활성화 상태를 검증한 **역사적 증거**다. MapLibre/OpenFreeMap 지도에 Kakao Local 결과를 표시·캐시·원장화하는 제품 기능에는 사용하지 않는다. 새 기능은 이 API를 호출하지 않으며 `KAKAO_*` 환경 변수나 JavaScript 키 등록을 요구하지 않는다.
+- ADR-0014에 따라 Kakao Local CE7을 서울 카페 발견과 최신 장소 필드의 우선 근거로 사용한다. API 호출은 운영 refresh에만 허용하고 사용자 검색·지도 요청은 PostgreSQL cache만 읽는다. raw 응답을 공개 데이터셋으로 재배포하지 않으며, 정책 조건과 중단 기준은 ADR-0014가 소유한다.
 - 카테고리 검색 [VERIFIED 2026-07-11]: `GET https://dapi.kakao.com/v2/local/search/category.json`
   - 헤더: `Authorization: KakaoAK {REST_KEY}`
   - 파라미터: `category_group_code=CE7`, `x`(경도), `y`(위도), `radius`(m, 최대 20000), `page`, `size`(≤15)
 - 응답 구조 [VERIFIED 2026-07-11]: root `meta` + `documents[]`. `meta`는 `total_count`, `pageable_count`, `is_end`, `same_name`; document는 `id`, `place_name`, `category_*`, 주소, 전화, `x`, `y`, `place_url`, `distance`를 포함했다.
-- **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 이 한계와 비-Kakao 지도 표시/장기 저장 정책 불확실성 때문에 CE7 재귀 분할 수집안은 **채택하지 않았다**. 과거 fixture·검증 코드는 회귀 및 기록 목적 외 제품 실행 경로에서 사용하지 않는다.
+- **핵심 제약 [VERIFIED 2026-07-11]**: 광화문 반경 1km CE7 검색에서 `total_count=761`, `pageable_count=45`; size 15 기준 3페이지에 `is_end=true`를 확인했다. 따라서 서울 bbox를 재귀 분할하고 모든 leaf가 완료된 snapshot만 게시한다.
+- **전체 수집 [VERIFIED 2026-07-15]**: 서울 bbox complete sweep은 3,794 API 호출로 33,243개 고유 Place ID를 반환했고 unresolved cell은 0개였다. `x=longitude`, `y=latitude`, 서울 주소와 `SEOUL_BBOX`를 모두 검증한다.
+- 서로 다른 Kakao Place ID끼리의 좌표·전화번호 충돌은 advisory로 기록하고, 기존 canonical과 강하게 충돌할 때만 신규 행을 차단한다. 기존 Kakao identity의 장소 필드 갱신은 dry-run 이동 거리 보고와 명시적 large-move 상한을 통과해야 한다.
 
 ### 2.4 서울시 주요 121장소 마스터
 
@@ -347,6 +356,8 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 
 - `GET /api/cafes?bbox={minLng},{minLat},{maxLng},{maxLat}&min_conf=0`
   → cached 원장만 bbox filter해 `[{id, name, lat, lng, road_address, source_label, level, score, confidence, confidence_tier, coverage, evidence: {hotspot_name, distance_m, observed_at}, external_links: {naver?, kakao?, google?}}]`. 요청 처리 중 외부 POI 호출은 금지한다.
+- `GET /api/cafes/search?q={name_or_address}&brand={allowlisted_brand}&limit=20`
+  → 활성 서울 cache만 대상으로 이름·주소를 검색한다. 최소 2자, 최대 80자, 최대 50건이며 요청 중 외부 provider를 호출하지 않는다.
 - `GET /api/cafes/{id}`
   → 위 필드 전체 + `contributors[]` + `trend_12h[]`(기준 핫스팟의 스냅샷 시계열) + `forecast_1h`(FCST에서 추출). `external_links`는 검증된 direct detail link만 포함하고 누락 provider 키는 `null`이다.
 - `GET /api/hotspots` → 폴링 대상 핫스팟 현재 상태 (디버그 오버레이용)
@@ -371,11 +382,11 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 
 1. [HUMAN] 서울열린데이터광장 인증키 발급 → `.env`의 `SEOUL_API_KEY`
 2. 레포 스캐폴딩(§4.3 구조), `.env.example`, `config.py` 뼈대
-   - 카카오 키/도메인 등록은 P0에 수행한 legacy API 검증의 전제였으며, 현 제품 경로의 요구사항은 아니다.
+   - 운영 Kakao 원장 refresh에는 서버 전용 `KAKAO_REST_KEY`가 필요하다. JavaScript 키는 MapLibre 제품 런타임에서 사용하지 않는다.
 3. `scripts/verify_apis.py` 작성·실행:
    - citydata 실호출 1건(예: `광화문광장`) → 응답 원본을 `fixtures/citydata_sample.json` 저장
    - `[VERIFY]` 항목 전부 확정: 엔드포인트, 필드명, 혼잡도 라벨 문자열 4종, FCST 구조, `AREA_NM` 정확 표기
-   - 카카오 CE7 fixture는 legacy 응답 검증용으로 보존하되, 제품 seed·지도에서 사용하지 않음
+   - 카카오 CE7 fixture로 parser와 `x=longitude`, `y=latitude` 좌표 계약을 고정
    - 121개 장소 마스터 파일 확보 경로 확인(열린데이터광장 내 장소 목록) 및 다운로드
    - 호출 정책 확인 → 현재 121 × 288 = 34,848콜/일 및 non-overlapping worker 정책 확정
 4. fixtures 기반 pydantic 외부 API 모델(`schemas.py`) 확정
@@ -405,15 +416,18 @@ DoD:
 
 작업:
 
-1. `seed_cafes.py --download`: 지정한 Overture release를 서울 bbox·카페 category·confidence threshold로 제한해 immutable local GeoParquet cache를 만든다. 기존 파일은 덮어쓰지 않는다.
-2. `overture_id`로 멱등 upsert하고 release·confidence·category·sources를 보존한다. 빈 extract는 적용을 거부하고, 새 release에서 사라진 레코드는 soft deactivate한다. dry-run이 기본이다.
-3. ingest 보고서는 release, SHA-256, 입력/신규/갱신/유지/비활성 수를 출력한다.
-4. 서울시 휴게음식점 인허가 보정은 후속 P2 작업이다. 이름/좌표 fuzzy match는 provider ID나 외부 상세 링크 생성에 사용하지 않는다.
-5. `external_links_json`은 검증된 canonical detail URL만 허용하며 API가 provider별 host/path를 다시 검증한다.
+1. Kakao CE7 서울 bbox를 45건 제한 이하 leaf로 재귀 분할하고 complete snapshot만 원자적으로 게시한다. `x=longitude`, `y=latitude`, 서울 주소와 서울 bbox를 모두 검증한다.
+2. 신규 Kakao Place ID는 recall-first 규칙으로 canonical candidate를 만든다. peer collision은 advisory, 기존 canonical collision은 blocking으로 분리한다.
+3. 활성 Kakao identity의 이름·좌표·주소·전화번호를 최신 snapshot으로 갱신한다. dry-run에서 변경 필드와 좌표 이동 분포를 출력하고 큰 이동은 명시적 HUMAN 상한 없이는 적용하지 않는다.
+4. `seed_cafes.py --download`는 Overture fallback cache를 만들고 GERS ID·release·confidence·sources와 extract SHA-256을 보존한다. 서울 인허가는 보조 검증으로 유지한다.
+5. 한 번의 Kakao 미관측으로 폐업 처리하지 않는다. 외부 상세 링크는 검증된 provider ID와 canonical detail URL만 허용한다.
+6. 원장 적용 뒤 전체 `cafe_scores`를 다시 materialize한다.
 
 DoD:
 
 - [x] 선택한 Overture release의 고신뢰 서울 cache 4,933건 적재; release/hash/건수가 `VERIFICATION.md`에 기록됨
+- [x] Kakao CE7 서울 complete sweep 33,243건, unresolved 0건과 좌표 계약이 검증됨
+- [ ] Kakao-first recall 정책 적용 뒤 활성 카페 수, 신규·갱신·큰 좌표 이동 수와 검색 표본을 production에서 검증함
 - [ ] 무작위 50곳의 이름·좌표·주소를 원본과 spot check하고, 카페가 아닌 분류/서울 밖 좌표는 격리됨
 - [ ] 재실행과 동일 release 재시도는 멱등이며, 실패/부분 release가 기존 cache를 비우지 않음
 - [ ] provider ID 없는 카페에서 Naver/Kakao/Google 링크가 숨겨지고, 있는 링크는 해당 provider direct detail URL만 사용함

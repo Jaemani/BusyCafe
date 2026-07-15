@@ -6,6 +6,16 @@
 
 ### Added
 
+- 카페명·주소 전역 검색과 스타벅스·투썸·메가MGC·컴포즈·빽다방·이디야·폴바셋
+  필터. 검색은 PostgreSQL cache만 읽고 exact→prefix→부분 일치 순으로 정렬하며,
+  PostgreSQL `pg_trgm` index와 2~80자·최대 50건 제한을 적용
+- 검색 결과 선택 시 `[longitude, latitude]` 순서로 지도를 이동하고 기존 카페 상세 패널을
+  여는 모바일 검색 패널. 검색어·카페 ID·좌표를 보내지 않는 저카디널리티 검색 측정 추가
+- Kakao identity가 확실한 기존 cafe의 이름·좌표·주소·전화번호를 complete snapshot에서
+  갱신하는 dry-run 우선 도구. 좌표 이동 분포와 250m 초과 표본을 보고하고 명시적 운영자
+  상한 없이는 적용하지 않음
+- 주 1회 Kakao CE7 complete refresh. 자동 실행은 신규 2,000곳, 250m 초과 이동 0건을
+  고정 상한으로 사용하고 초과 시 적용 전 실패하며, 원장 적용 뒤 점수를 미리 재계산
 - 사용자용 `/about.html`: 주변 혼잡도 산정 경계, 데이터 지연, 카페 원장 구성과
   서울시·Overture·Kakao·OpenFreeMap/OpenStreetMap 이용조건을 한 화면에 정리
 - Supabase public table RLS와 `anon`/`authenticated` table·sequence grant 차단. 서버의
@@ -84,6 +94,9 @@
 
 ### Changed
 
+- 서울 카페 원장을 Kakao-first recall 정책으로 전환. 서로 다른 유효 Kakao Place ID의
+  좌표·전화번호 충돌은 advisory로 남기고 기존 canonical cafe와 강하게 충돌할 때만 신규
+  생성을 차단한다. Overture와 서울 인허가는 fallback·보조 검증으로 유지
 - 카페 상세의 release timestamp·숫자형 원장 품질·중복 `참고용` 문구를 사용자용 표현으로
   축약. 혼잡도, 관측 지점·거리, 경계 여부와 데이터 나이를 각각 한 번만 표시하고 원본
   metadata와 상세 라이선스는 API와 `/about.html`에 보존
@@ -115,6 +128,11 @@
 
 ### Fixed
 
+- Kakao 대량 원장 적용이 DB commit 뒤 ORM 객체를 행별로 다시 읽어 workflow가 취소되고
+  후속 score materialize가 건너뛰어질 수 있던 문제. commit 전 보고값 고정, batch flush,
+  `pipefail`과 JSON apply report로 재발 방지
+- 카카오 좌표를 뒤집거나 서울 주소지만 서울 bbox 밖인 장소를 적재할 수 있는 경로를
+  `x=longitude`, `y=latitude`, 서울 주소와 bbox 동시 검증으로 차단
 - production 수집 중단 뒤 전날 오후 혼잡값이 다음 날 새벽에도 현재값처럼 보이던 문제.
   API 요청 시점에 개별 관측 freshness를 판정해 120분 초과, 관측 시각 누락 또는 과도한
   미래 시각이면 level·score·confidence를 숨긴다. 25~120분 구간도 confidence와 예측은

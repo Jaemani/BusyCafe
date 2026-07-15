@@ -45,7 +45,7 @@
 
 - [ADR-0001: PostgreSQL을 기본 데이터베이스로 사용](adr/ADR-0001-primary-database.md) — 2026-07-11, Accepted
 - [ADR-0002: 공식 핫스팟 폴리곤에서 대표 좌표 산출](adr/ADR-0002-hotspot-location.md) — 2026-07-11, Accepted
-- [ADR-0003: MapLibre/OpenFreeMap 지도와 Overture 캐시 원장](adr/ADR-0003-maplibre-overture-catalog.md) — 2026-07-11, Accepted
+- [ADR-0003: MapLibre/OpenFreeMap 지도와 Overture 캐시 원장](adr/ADR-0003-maplibre-overture-catalog.md) — 2026-07-11, 지도 결정 Accepted; 원장 결정은 ADR-0014가 대체
 - [ADR-0004: 121개 전체 폴링과 cache-first 읽기 경로](adr/ADR-0004-seoulwide-polling-cache.md) — 2026-07-11, Accepted
 - [ADR-0005: 관리형 PostgreSQL과 분리 worker 기반 실시간 운영](adr/ADR-0005-live-production-runtime.md) — 2026-07-11, Accepted
 - [ADR-0006: 세 개 제품 트랙과 유니버설 혼잡 데이터 계약](adr/ADR-0006-universal-expansion-tracks.md) — 2026-07-11, Accepted
@@ -56,21 +56,22 @@
 - [ADR-0011: 도시 활동도를 코어로 두고 카페를 첫 overlay로 사용](adr/ADR-0011-urban-activity-core-cafe-overlay.md) — 2026-07-13, Accepted
 - [ADR-0012: Supabase가 production poll과 monitor workflow를 예약 실행](adr/ADR-0012-supabase-dispatched-production-scheduler.md) — 2026-07-15, Accepted
 - [ADR-0013: 검증 전에는 광고하지 않고 후원부터 제한적으로 도입](adr/ADR-0013-validation-first-monetization.md) — 2026-07-15, Accepted
+- [ADR-0014: 서울 카페 원장은 Kakao-first recall 정책을 사용](adr/ADR-0014-kakao-first-seoul-catalog.md) — 2026-07-15, Accepted
 
 ## 현재 제품 경로 요약
 
 | 영역 | 채택 | 제외/제약 |
 |---|---|---|
 | 지도 | MapLibre GL + OpenFreeMap | Kakao Maps SDK는 제품 런타임에서 로드하지 않음 |
-| 카페 원장 | Overture Places release를 PostgreSQL에 cache, 서울 인허가로 보정 | viewport마다 외부 POI 검색 금지 |
+| 카페 원장 | Kakao Local CE7 complete snapshot을 recall 우선 원장으로 cache, Overture·서울 인허가로 보정 | viewport마다 외부 POI 검색 금지; Kakao 정책 조건은 ADR-0014 참조 |
 | 혼잡도 | 서울 공식 121개 장소, Supabase가 dispatch하는 5분 non-overlapping polling | 과거 `≤12곳`·10분 범위는 legacy 결정 |
 | 외부 매장 링크 | 검증된 ID는 canonical direct, Naver ID가 없으면 주소+이름 `네이버맵 검색`을 별도 표시 | 좌표 검색·스크레이핑·추측 ID 금지; fallback을 직접 상세로 표현 금지 |
 | 제품 모드 | 카페 찾기·지역 밀집도·데이터 커버리지 | 데이터 없는 영역의 임의 보간 금지 |
 | 제품 코어 | 도시 활동도 surface + 카페 첫 overlay | 지역 활동도를 매장 좌석 점유율로 표현 금지 |
 | 지역 확장 | 부산·Melbourne fixture 뒤 실제 최소 교집합만 계약 승격 | 선행 범용화·도시명 기반 코어 분기 금지 |
 
-Kakao Local의 실응답 fixture와 키/도메인 활성화 기록은 Phase 0의 역사적 검증 증거다.
-ADR-0003가 대체한 제품 POI 경로로 해석하지 않는다.
+Kakao Local의 Phase 0 실응답 fixture와 키 검증은 ADR-0014의 parser·좌표 회귀 근거로
+재사용한다. Kakao Maps JavaScript SDK와 도메인 등록은 현 MapLibre 제품 런타임에 필요 없다.
 
 ## 초기 결정 후보
 
