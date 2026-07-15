@@ -10,6 +10,10 @@
   유입은 도착시각, 유출은 출발시각으로 정렬하고 목적별 비율·순유입·행정구역 중심점 간
   합성 방향·방향 강도·좌표 coverage를 결정적으로 산출한다. dry-run 기본, 원자 게시,
   원본·경계 SHA와 버전을 보존하며 공개 API·DB·지도에는 아직 반영하지 않음
+- OA-22300 화요일 4주의 scalar·목적·방향 반복성을 결과 확인 전 고정한 threshold로
+  분리 판정하는 offline evaluator. 어린이날·토요일·일요일은 기술통계에만 쓰고, 입력
+  source/artifact SHA와 pair별 지표를 결정적 report로 보존한다. 결과는 scalar
+  `conditional`, 목적 `stable`, 방향 `usable`이며 정확도 주장·공개 승격은 금지
 - 카페명·주소 전역 검색과 스타벅스·투썸·메가MGC·컴포즈·빽다방·이디야·폴바셋
   필터. 검색은 PostgreSQL cache만 읽고 exact→prefix→부분 일치 순으로 정렬하며,
   PostgreSQL `pg_trgm` index와 2~80자·최대 50건 제한을 적용

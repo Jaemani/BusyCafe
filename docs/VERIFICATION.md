@@ -1396,3 +1396,80 @@ uv run python scripts/build_purpose_od_shadow.py \
 아니다. 여러 주의 같은 요일·공휴일·시간대를 만든 뒤 생활인구 단독 대비 citydata/현장
 라벨의 rolling-origin 개선을 확인할 때만 shadow feature로 채택한다. 공개 v1은 변경하지
 않는다.
+
+## 2026-07-15 — 수도권 생활이동 OA-22300 다일 반복성 pilot
+
+### 사전등록과 입력 완전성
+
+- 결과 확인 전 일반 화요일 `2026-06-09/16/23/30`, 08·14·18시, 서울 행정동 427개와
+  scalar·목적·방향별 threshold를
+  [`2026-07-13-historical-baseline-and-prior-art.md`](research/2026-07-13-historical-baseline-and-prior-art.md)에
+  고정했다. 어린이날 `05-05`, 토요일 `06-27`, 일요일 `06-28`은 유형별 반복 표본이
+  1일뿐이므로 verdict에서 제외하고 기술통계에만 사용했다.
+- 7개 ZIP은 공식 OA-22300 endpoint에서 받은 뒤 파일명·Content-Length·ZIP integrity·내부
+  기준일을 확인했다. 모든 artifact는 원본 전체를 엄격 파싱했고 centroid 코드·행·추정인구
+  coverage 1.0, 관측 코드 657/657 exact match, 누락 origin/destination 0이었다.
+
+| 날짜 | 역할 | 원본 행 | 08·14·18시 선택 행 | shadow SHA-256 |
+|---|---|---:|---:|---|
+| 2026-05-05 | 기술통계 | 5,192,049 | 1,682,899 | `bb02e86e…a4fb1` |
+| 2026-06-09 | 화요일 | 6,503,644 | 2,435,638 | `d3f32015…4f38` |
+| 2026-06-16 | 화요일 | 6,474,893 | 2,422,887 | `6024284e…ca02` |
+| 2026-06-23 | 화요일 | 6,480,200 | 2,415,896 | `8314ff6a…e70` |
+| 2026-06-27 | 기술통계 | 5,999,425 | 2,000,062 | `020ac759…9549` |
+| 2026-06-28 | 기술통계 | 5,172,806 | 1,684,956 | `3845647d…31ed` |
+| 2026-06-30 | 화요일 | 6,414,571 | 2,392,689 | `e7ea3320…8451` |
+
+전체 source/artifact SHA는 결정적 report의 `inputs`에 보존했다. 3개 신규 화요일 artifact는
+dry-run/apply/final file SHA가 각각 일치했고 실행은 회당 약 71~74초, max RSS 약
+221~225MiB였다. 세 기술통계 artifact도 같은 검증을 통과했으며 회당 약 56~66초,
+max RSS 약 225MiB였다.
+
+### 실행과 결과
+
+기준 구현 commit은 `6cdd106`이다. 외부인 재현 명령은 로컬 전용 wrapper 없이 다음 형태다.
+
+```bash
+cd backend
+uv run python scripts/run_purpose_od_stability.py \
+  --weekly-artifact data/od/purpose_od_shadow_20260609_h08_h14_h18.json \
+  --weekly-artifact data/od/purpose_od_shadow_20260616_h08_h14_h18.json \
+  --weekly-artifact data/od/purpose_od_shadow_20260623_h08_h14_h18.json \
+  --weekly-artifact data/od/purpose_od_shadow_20260630_h08_h14_h18.json \
+  --descriptive-artifact data/od/purpose_od_shadow_20260505_h08_h14_h18.json \
+  --descriptive-artifact data/od/purpose_od_shadow_20260627_h08_h14_h18.json \
+  --descriptive-artifact data/od/purpose_od_shadow_20260628_h08_h14_h18.json \
+  --output ../docs/research/artifacts/purpose-od-stability-20260609-20260630.json
+```
+
+- dry-run과 apply report SHA-256 동일:
+  `39cbe77ce4f6eed592bbaa69f18515c9f342cad5b2cce4860ff0b32b2e7cc32c`
+- scalar: **conditional**. net Spearman median/minimum 0.96955/0.59424,
+  inbound median 0.99465, outbound median 0.99512, 상·하위 10% Jaccard median
+  0.62264/0.82979. full-support의 net minimum 0.60을 사전 기준대로 통과하지 못했다.
+- 14시 net Spearman은 세 pair에서 0.69302, 0.65048, 0.59424였고 상위 10% Jaccard는
+  0.43333, 0.34375, 0.30303이었다. 결과 뒤 threshold를 바꾸지 않았다.
+- 목적: **stable**. 동일 요일·시각 pair의 Jensen–Shannon distance median/P90은
+  0.00717/0.01899였다. 목적 7 `기타`가 최대 60.37%여서 카페 수요로 해석하지 않는다.
+- 방향: **usable as challenger**. 모든 pair×hour에서 eligible 비율 minimum 34.89%,
+  각도차 median maximum 6.11°, 각도차 P90 maximum 14.70°, 45° 이내 비율 minimum
+  100%, strength 차이 median maximum 0.0312였다. 실제 도로 궤적 정확도 주장은 금지한다.
+- decision: scalar prior 후보 false, 목적·방향 feature 후보 true. 정확도 주장과 공개 모델
+  승격은 false이며 API·DB·frontend·production v1은 변경하지 않았다.
+
+### 구현 검증과 near miss
+
+첫 실결과를 읽기 전 코드 검토에서 사전등록의 “모든 pair” 방향 조건 중 두 항목을 pair
+통계의 중앙값으로 잘못 합친 구현을 발견했다. pair 통계의 maximum으로 수정하고 중간 한
+pair만 실패하는 회귀 테스트를 추가한 뒤 real-data report를 처음 생성했다. 상세는
+INC-2026-018에 기록했다.
+
+- backend: `828 passed, 2 skipped`; 대상 mypy PASS; app/scripts/tests compileall PASS
+- frontend: TypeScript PASS, production build PASS. 기존 500kB chunk 경고만 존재하며 이번
+  offline 변경과 무관하다.
+- `git diff --check` PASS
+
+판정: **PASS(repeatability pilot only)**. OD의 동일 화요일 목적 구성과 거친 합성 방향은
+반복됐지만, 한낮 순유입 순위는 불안정했고 실제 활동도·보행 혼잡·카페 좌석 정확도는 아직
+검증하지 않았다. 다음 gate는 OA-22784와 같은 `2026-06-30` 비교, 이후 7월 OA-22300과
+동일 날짜 citydata 비교, 마지막으로 Phase 6 현장 라벨에서 생활인구 단독 대비 개선 확인이다.
