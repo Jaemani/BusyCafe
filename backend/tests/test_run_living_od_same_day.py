@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -166,9 +167,9 @@ def test_screening_metrics_masking_and_fixed_alignment(tmp_path: Path) -> None:
     assert [item["code_coverage"] for item in result["coverage"]] == [1.0] * 3
     assert [
         item["minimum_jaccard"]
-        for item in result["zone_cell_universe_stability"]
+        for item in result["cell_universe_stability"]
     ] == [1.0] * 3
-    primary = result["correlations_by_imputation"]["2"]
+    primary = result["correlations_by_variant"]["mask2_absent0"]
     assert primary["verdict"] == "screening"
     assert [
         item["spearman_rho"]
@@ -206,7 +207,7 @@ def test_imputation_sensitivity_is_separate_and_degrades_verdict(tmp_path: Path)
     assert result["decision"]["verdict"] == "conditional"
     hour_9 = next(
         item
-        for item in result["living_population_by_imputation"]["2"]
+        for item in result["living_population_by_mask_imputation"]["2"]
         if item["hour"] == 9
     )
     assert hour_9["masked_rows"] > PURPOSE_OD_SEOUL_ZONE_COUNT
@@ -233,6 +234,40 @@ def test_same_cell_may_have_distinct_administrative_zone_rows(
     source = result["inputs"]["living_population"]
     assert source["unique_cells"] == PURPOSE_OD_SEOUL_ZONE_COUNT - 1
     assert source["unique_zone_cell_pairs"] == PURPOSE_OD_SEOUL_ZONE_COUNT
+
+
+def test_absent_zone_cell_imputation_uses_pair_union() -> None:
+    partitions = {
+        ("zone", "a", 8): same_day._LivingBucket(known_total=Decimal("10"), rows=1),
+        ("zone", "b", 8): same_day._LivingBucket(known_total=Decimal("5"), rows=1),
+        ("zone", "b", 9): same_day._LivingBucket(known_total=Decimal("7"), rows=1),
+    }
+    cells = {
+        ("zone", 8): {"a", "b"},
+        ("zone", 9): {"b"},
+    }
+
+    zero = same_day._paired_zone_stocks(
+        codes=["zone"],
+        left_hour=8,
+        right_hour=9,
+        mask_imputation=2.0,
+        absence_imputation=0.0,
+        partitions=partitions,
+        cells_by_zone_hour=cells,
+    )
+    three = same_day._paired_zone_stocks(
+        codes=["zone"],
+        left_hour=8,
+        right_hour=9,
+        mask_imputation=2.0,
+        absence_imputation=3.0,
+        partitions=partitions,
+        cells_by_zone_hour=cells,
+    )
+
+    assert zero == ([15.0], [7.0], 2, 0, 1)
+    assert three == ([15.0], [10.0], 2, 0, 1)
 
 
 def test_od_hours_must_share_exact_zone_universe(tmp_path: Path) -> None:

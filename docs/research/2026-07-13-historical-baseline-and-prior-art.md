@@ -262,8 +262,9 @@ Jaccard 0.998712였다. 예를 들어 `다사43754600`은 07시에 두 행정동
   primary는 0.0으로 두고, masked row와 동일하게 2.0·3.0 민감도도 함께 계산한다. 따라서
   “누락은 무조건 0” 가정에 결과가 의존하는지 별도로 드러난다.
 - 기존 날짜·시각·행정동 code coverage·Spearman·screening threshold는 바꾸지 않는다.
-  report version만 `v2`로 올리고 masked/absent imputation별 verdict가 달라지거나 시간별 rho
-  range가 0.02를 넘으면 기존 규칙대로 강등한다.
+  report version만 `v2`로 올린다. primary는 `masked=2, absent=0`이고, 한 요인씩만 바꾸는
+  `masked=0/3, absent=0`과 `masked=2, absent=2/3`의 총 5개 variant를 고정한다. variant별
+  verdict가 달라지거나 시간별 rho range가 0.02를 넘으면 기존 규칙대로 강등한다.
 - 이 변경은 source row 단위 실측에 따른 representation 수정이다. 결과 threshold 조정이
   아니며 v2도 정확도·인과·독립 검증으로 해석하지 않는다.
 

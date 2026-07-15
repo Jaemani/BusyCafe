@@ -31,17 +31,19 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import (  # noqa: E402
+    LIVING_OD_SAME_DAY_ABSENCE_IMPUTATIONS,
+    LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN,
     LIVING_OD_SAME_DAY_CODE_COVERAGE_MIN,
     LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN,
     LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN,
     LIVING_OD_SAME_DAY_DATE,
     LIVING_OD_SAME_DAY_HOURS,
     LIVING_OD_SAME_DAY_IMPUTATION_RHO_RANGE_MAX,
-    LIVING_OD_SAME_DAY_IMPUTATIONS,
-    LIVING_OD_SAME_DAY_PRIMARY_IMPUTATION,
+    LIVING_OD_SAME_DAY_MASK_IMPUTATIONS,
+    LIVING_OD_SAME_DAY_PRIMARY_ABSENCE_IMPUTATION,
+    LIVING_OD_SAME_DAY_PRIMARY_MASK_IMPUTATION,
     LIVING_OD_SAME_DAY_REPORT_VERSION,
     LIVING_OD_SAME_DAY_SCREENING_MEDIAN_MIN,
-    LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN,
     LIVING_POPULATION_HASH_CHUNK_BYTES,
     PURPOSE_OD_SEOUL_ZONE_COUNT,
     PURPOSE_OD_SHADOW_MODEL_VERSION,
@@ -145,6 +147,32 @@ def _number(value: object, *, field: str, minimum: float | None = None) -> float
 
 def _imputation_key(value: float) -> str:
     return str(int(value)) if value.is_integer() else f"{value:g}"
+
+
+def _variant_key(mask_imputation: float, absence_imputation: float) -> str:
+    return (
+        f"mask{_imputation_key(mask_imputation)}_"
+        f"absent{_imputation_key(absence_imputation)}"
+    )
+
+
+def _imputation_variants() -> tuple[tuple[float, float], ...]:
+    primary = (
+        LIVING_OD_SAME_DAY_PRIMARY_MASK_IMPUTATION,
+        LIVING_OD_SAME_DAY_PRIMARY_ABSENCE_IMPUTATION,
+    )
+    variants = [primary]
+    variants.extend(
+        (mask, LIVING_OD_SAME_DAY_PRIMARY_ABSENCE_IMPUTATION)
+        for mask in LIVING_OD_SAME_DAY_MASK_IMPUTATIONS
+        if mask != LIVING_OD_SAME_DAY_PRIMARY_MASK_IMPUTATION
+    )
+    variants.extend(
+        (LIVING_OD_SAME_DAY_PRIMARY_MASK_IMPUTATION, absence)
+        for absence in LIVING_OD_SAME_DAY_ABSENCE_IMPUTATIONS
+        if absence != LIVING_OD_SAME_DAY_PRIMARY_ABSENCE_IMPUTATION
+    )
+    return tuple(variants)
 
 
 def _load_od_artifact(path: Path) -> _OdArtifact:
@@ -316,6 +344,46 @@ def _round_optional(value: float | None) -> float | None:
     return None if value is None else round(float(value), 9)
 
 
+def _paired_zone_stocks(
+    *,
+    codes: Sequence[str],
+    left_hour: int,
+    right_hour: int,
+    mask_imputation: float,
+    absence_imputation: float,
+    partitions: dict[tuple[str, str, int], _LivingBucket],
+    cells_by_zone_hour: dict[tuple[str, int], set[str]],
+) -> tuple[list[float], list[float], int, int, int]:
+    left_values: list[float] = []
+    right_values: list[float] = []
+    left_absent = 0
+    right_absent = 0
+    union_pairs = 0
+    for code in codes:
+        cells = cells_by_zone_hour[(code, left_hour)] | cells_by_zone_hour[
+            (code, right_hour)
+        ]
+        union_pairs += len(cells)
+        left_total = 0.0
+        right_total = 0.0
+        for cell_id in cells:
+            left = partitions.get((code, cell_id, left_hour))
+            right = partitions.get((code, cell_id, right_hour))
+            if left is None:
+                left_absent += 1
+                left_total += absence_imputation
+            else:
+                left_total += left.value(mask_imputation)
+            if right is None:
+                right_absent += 1
+                right_total += absence_imputation
+            else:
+                right_total += right.value(mask_imputation)
+        left_values.append(left_total)
+        right_values.append(right_total)
+    return left_values, right_values, union_pairs, left_absent, right_absent
+
+
 def _preflight(
     living_population_path: Path,
     purpose_od_path: Path,
@@ -360,11 +428,14 @@ def run_living_od_same_day(
         for adjacent in (hour - 1, hour, hour + 1)
     }
     buckets: dict[tuple[str, int], _LivingBucket] = defaultdict(_LivingBucket)
+    partitions: dict[tuple[str, str, int], _LivingBucket] = {}
     seen: set[tuple[date, int, str, str]] = set()
     source_rows = 0
     cell_ids: set[str] = set()
+    cell_ids_by_hour: dict[int, set[str]] = defaultdict(set)
     zone_cell_pairs: set[tuple[str, str]] = set()
     zone_cell_pairs_by_hour: dict[int, set[tuple[str, str]]] = defaultdict(set)
+    cells_by_zone_hour: dict[tuple[str, int], set[str]] = defaultdict(set)
     all_codes: set[str] = set()
     for record in iter_living_population_csv(living_path):
         source_rows += 1
@@ -387,19 +458,29 @@ def run_living_od_same_day(
             )
         seen.add(identity)
         cell_ids.add(record.cell_id)
+        cell_ids_by_hour[record.hour].add(record.cell_id)
         zone_cell = (record.administrative_dong_code, record.cell_id)
         zone_cell_pairs.add(zone_cell)
         zone_cell_pairs_by_hour[record.hour].add(zone_cell)
+        cells_by_zone_hour[(record.administrative_dong_code, record.hour)].add(
+            record.cell_id
+        )
         all_codes.add(record.administrative_dong_code)
         if record.hour not in needed_hours:
             continue
         bucket = buckets[(record.administrative_dong_code, record.hour)]
         bucket.rows += 1
+        partition = _LivingBucket(rows=1)
         if record.total_population_masked:
             bucket.masked_rows += 1
+            partition.masked_rows = 1
         else:
             assert record.total_population is not None
             bucket.known_total += record.total_population
+            partition.known_total = record.total_population
+        partitions[
+            (record.administrative_dong_code, record.cell_id, record.hour)
+        ] = partition
     if source_rows == 0:
         raise LivingOdSameDayError("living population input contains no rows")
 
@@ -435,42 +516,70 @@ def run_living_od_same_day(
             )
         comparison_codes[hour] = exact
 
+    cell_universe_rows: list[dict[str, Any]] = []
     zone_cell_universe_rows: list[dict[str, Any]] = []
     for hour in LIVING_OD_SAME_DAY_HOURS:
-        comparisons: dict[str, float] = {}
+        cell_comparisons: dict[str, dict[str, Any]] = {}
+        zone_cell_comparisons: dict[str, dict[str, Any]] = {}
         for label, left_hour, right_hour in (
             ("previous_to_current", hour - 1, hour),
             ("current_to_next", hour, hour + 1),
         ):
-            left = zone_cell_pairs_by_hour[left_hour]
-            right = zone_cell_pairs_by_hour[right_hour]
-            union = left | right
-            jaccard = len(left & right) / len(union) if union else 0.0
-            comparisons[label] = jaccard
-        minimum = min(comparisons.values())
+            for target, left, right in (
+                (
+                    cell_comparisons,
+                    cell_ids_by_hour[left_hour],
+                    cell_ids_by_hour[right_hour],
+                ),
+                (
+                    zone_cell_comparisons,
+                    zone_cell_pairs_by_hour[left_hour],
+                    zone_cell_pairs_by_hour[right_hour],
+                ),
+            ):
+                union = left | right
+                intersection = left & right
+                target[label] = {
+                    "left": len(left),
+                    "right": len(right),
+                    "intersection": len(intersection),
+                    "union": len(union),
+                    "left_only": len(left - right),
+                    "right_only": len(right - left),
+                    "jaccard": round(
+                        len(intersection) / len(union) if union else 0.0,
+                        9,
+                    ),
+                }
+        cell_minimum = min(
+            item["jaccard"] for item in cell_comparisons.values()
+        )
+        zone_cell_minimum = min(
+            item["jaccard"] for item in zone_cell_comparisons.values()
+        )
+        cell_universe_rows.append(
+            {
+                "hour": hour,
+                "comparisons": cell_comparisons,
+                "minimum_jaccard": round(cell_minimum, 9),
+            }
+        )
         zone_cell_universe_rows.append(
             {
                 "hour": hour,
-                "previous_to_current_jaccard": round(
-                    comparisons["previous_to_current"], 9
-                ),
-                "current_to_next_jaccard": round(
-                    comparisons["current_to_next"], 9
-                ),
-                "minimum_jaccard": round(minimum, 9),
+                "comparisons": zone_cell_comparisons,
+                "minimum_jaccard": round(zone_cell_minimum, 9),
             }
         )
-        if minimum < LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN:
+        if cell_minimum < LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN:
             raise LivingOdSameDayError(
-                f"hour {hour} adjacent cell-universe Jaccard {minimum:.9f} is below "
-                f"{LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN:.2f}"
+                f"hour {hour} adjacent bare-cell Jaccard {cell_minimum:.9f} is below "
+                f"{LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN:.2f}"
             )
 
     living_summaries: dict[str, list[dict[str, Any]]] = {}
-    correlation_by_imputation: dict[str, dict[str, Any]] = {}
-    raw_primary_rhos: dict[float, list[float | None]] = {}
-    for imputation in LIVING_OD_SAME_DAY_IMPUTATIONS:
-        key = _imputation_key(imputation)
+    for mask_imputation in LIVING_OD_SAME_DAY_MASK_IMPUTATIONS:
+        key = _imputation_key(mask_imputation)
         hour_summaries: list[dict[str, Any]] = []
         for hour in sorted(needed_hours):
             hour_buckets = [
@@ -484,7 +593,10 @@ def run_living_od_same_day(
                 {
                     "hour": hour,
                     "total_population": round(
-                        math.fsum(bucket.value(imputation) for bucket in hour_buckets),
+                        math.fsum(
+                            bucket.value(mask_imputation)
+                            for bucket in hour_buckets
+                        ),
                         6,
                     ),
                     "rows": rows,
@@ -496,6 +608,11 @@ def run_living_od_same_day(
             )
         living_summaries[key] = hour_summaries
 
+    variants = _imputation_variants()
+    correlation_by_variant: dict[str, dict[str, Any]] = {}
+    raw_primary_rhos: dict[str, list[float | None]] = {}
+    for mask_imputation, absence_imputation in variants:
+        key = _variant_key(mask_imputation, absence_imputation)
         primary: list[dict[str, Any]] = []
         previous_delta: list[dict[str, Any]] = []
         gross_stock: list[dict[str, Any]] = []
@@ -503,12 +620,38 @@ def run_living_od_same_day(
         for hour in LIVING_OD_SAME_DAY_HOURS:
             codes = comparison_codes[hour]
             movements = [od.movements[(code, hour)] for code in codes]
-            stock_previous = [
-                buckets[(code, hour - 1)].value(imputation) for code in codes
-            ]
-            stock = [buckets[(code, hour)].value(imputation) for code in codes]
-            stock_next = [
-                buckets[(code, hour + 1)].value(imputation) for code in codes
+            (
+                stock,
+                stock_next,
+                primary_union,
+                primary_left_absent,
+                primary_right_absent,
+            ) = _paired_zone_stocks(
+                codes=codes,
+                left_hour=hour,
+                right_hour=hour + 1,
+                mask_imputation=mask_imputation,
+                absence_imputation=absence_imputation,
+                partitions=partitions,
+                cells_by_zone_hour=cells_by_zone_hour,
+            )
+            (
+                stock_previous,
+                previous_stock,
+                previous_union,
+                previous_left_absent,
+                previous_right_absent,
+            ) = _paired_zone_stocks(
+                codes=codes,
+                left_hour=hour - 1,
+                right_hour=hour,
+                mask_imputation=mask_imputation,
+                absence_imputation=absence_imputation,
+                partitions=partitions,
+                cells_by_zone_hour=cells_by_zone_hour,
+            )
+            published_stock = [
+                buckets[(code, hour)].value(mask_imputation) for code in codes
             ]
             net = [movement.net for movement in movements]
             gross = [movement.inbound + movement.outbound for movement in movements]
@@ -518,21 +661,44 @@ def run_living_od_same_day(
             )
             previous_rho = _spearman(
                 net,
-                [right - left for left, right in zip(stock_previous, stock, strict=True)],
+                [
+                    right - left
+                    for left, right in zip(
+                        stock_previous, previous_stock, strict=True
+                    )
+                ],
             )
-            gross_rho = _spearman(gross, stock)
+            gross_rho = _spearman(gross, published_stock)
             primary_rhos.append(primary_rho)
             primary.append(
-                {"hour": hour, "n": len(codes), "spearman_rho": _round_optional(primary_rho)}
+                {
+                    "hour": hour,
+                    "n": len(codes),
+                    "spearman_rho": _round_optional(primary_rho),
+                    "zone_cell_union": primary_union,
+                    "left_absent_imputed": primary_left_absent,
+                    "right_absent_imputed": primary_right_absent,
+                }
             )
             previous_delta.append(
-                {"hour": hour, "n": len(codes), "spearman_rho": _round_optional(previous_rho)}
+                {
+                    "hour": hour,
+                    "n": len(codes),
+                    "spearman_rho": _round_optional(previous_rho),
+                    "zone_cell_union": previous_union,
+                    "left_absent_imputed": previous_left_absent,
+                    "right_absent_imputed": previous_right_absent,
+                }
             )
             gross_stock.append(
                 {"hour": hour, "n": len(codes), "spearman_rho": _round_optional(gross_rho)}
             )
-        raw_primary_rhos[imputation] = primary_rhos
-        correlation_by_imputation[key] = {
+        raw_primary_rhos[key] = primary_rhos
+        correlation_by_variant[key] = {
+            "imputation": {
+                "masked_row": mask_imputation,
+                "absent_zone_cell_row": absence_imputation,
+            },
             "verdict": _verdict(primary_rhos),
             "primary_net_vs_next_stock_delta": primary,
             "secondary_net_vs_previous_stock_delta": previous_delta,
@@ -542,7 +708,7 @@ def run_living_od_same_day(
     sensitivity_hours: list[dict[str, Any]] = []
     any_range_exceeded = False
     for index, hour in enumerate(LIVING_OD_SAME_DAY_HOURS):
-        values = [raw_primary_rhos[value][index] for value in LIVING_OD_SAME_DAY_IMPUTATIONS]
+        values = [raw_primary_rhos[key][index] for key in raw_primary_rhos]
         rho_range = (
             max(value for value in values if value is not None)
             - min(value for value in values if value is not None)
@@ -557,31 +723,30 @@ def run_living_od_same_day(
         sensitivity_hours.append(
             {
                 "hour": hour,
-                "rho_by_imputation": {
-                    _imputation_key(value): _round_optional(raw_primary_rhos[value][index])
-                    for value in LIVING_OD_SAME_DAY_IMPUTATIONS
+                "rho_by_variant": {
+                    key: _round_optional(raw_primary_rhos[key][index])
+                    for key in raw_primary_rhos
                 },
                 "rho_range": _round_optional(rho_range),
                 "range_exceeded": exceeded,
             }
         )
     verdicts = {
-        _imputation_key(value): correlation_by_imputation[_imputation_key(value)][
-            "verdict"
-        ]
-        for value in LIVING_OD_SAME_DAY_IMPUTATIONS
+        key: correlation_by_variant[key]["verdict"]
+        for key in correlation_by_variant
     }
     verdict_changed = len(set(verdicts.values())) > 1
     imputation_sensitive = any_range_exceeded or verdict_changed
-    primary_key = _imputation_key(LIVING_OD_SAME_DAY_PRIMARY_IMPUTATION)
-    base_verdict: Verdict = correlation_by_imputation[primary_key]["verdict"]
+    primary_key = _variant_key(
+        LIVING_OD_SAME_DAY_PRIMARY_MASK_IMPUTATION,
+        LIVING_OD_SAME_DAY_PRIMARY_ABSENCE_IMPUTATION,
+    )
+    base_verdict: Verdict = correlation_by_variant[primary_key]["verdict"]
     final_verdict = _degrade(base_verdict) if imputation_sensitive else base_verdict
 
     thresholds = {
         "code_coverage_min": LIVING_OD_SAME_DAY_CODE_COVERAGE_MIN,
-        "zone_cell_universe_jaccard_min": (
-            LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN
-        ),
+        "cell_universe_jaccard_min": LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN,
         "screening_median_min": LIVING_OD_SAME_DAY_SCREENING_MEDIAN_MIN,
         "conditional_median_min": LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN,
         "conditional_positive_min": LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN,
@@ -621,12 +786,13 @@ def run_living_od_same_day(
             },
         },
         "coverage": coverage_rows,
+        "cell_universe_stability": cell_universe_rows,
         "zone_cell_universe_stability": zone_cell_universe_rows,
-        "living_population_by_imputation": living_summaries,
-        "correlations_by_imputation": correlation_by_imputation,
+        "living_population_by_mask_imputation": living_summaries,
+        "correlations_by_variant": correlation_by_variant,
         "imputation_sensitivity": {
-            "primary_imputation": primary_key,
-            "verdict_by_imputation": verdicts,
+            "primary_variant": primary_key,
+            "verdict_by_variant": verdicts,
             "hours": sensitivity_hours,
             "verdict_changed": verdict_changed,
             "imputation_sensitive": imputation_sensitive,
@@ -642,6 +808,7 @@ def run_living_od_same_day(
         "limitations": [
             "one-day cross-section is not predictive or causal evidence",
             "OA-22784 and OA-22300 are telecom-derived estimates with possible shared bias",
+            "absent zone-cell rows use pre-registered zero/two/three sensitivity",
             "rolling-origin repetition and independent field labels remain required",
         ],
     }
