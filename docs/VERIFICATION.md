@@ -1087,3 +1087,43 @@
     오타 URL은 HTTP 404다.
 - 현재 판정: 코드·문서·자동 회귀와 production read 경로는 PASS. Analytics dashboard의
   첫 pageview와 egress 2차 최적화의 연속 production poll timing은 추가 확인한다.
+
+### Egress 2차 최적화 연속 production 성능 gate
+
+- 대상 커밋: `65358c3`
+- 선행 CI: GitHub Actions run `29381047818`, backend 732 tests와 PostgreSQL migration,
+  frontend typecheck/build PASS
+- production poll 결과:
+
+  | Run | 저장/대상 | 실패 | materialize | 전체 |
+  |---|---:|---:|---:|---:|
+  | `29381246607` | 121/121 | 0 | 26.841초 | 65.922초 |
+  | `29381448386` | 121/121 | 0 | 27.957초 | 61.019초 |
+  | `29381650031` | 121/121 | 0 | 24.933초 | 55.729초 |
+
+- materialize p50은 26.841초, 최대는 27.957초다. 사전 고정한 회귀 상한인 p50
+  28.54초, 최대 30.73초를 모두 통과했다.
+- 변경 전 production p50 27.177초 대비 p50은 약 1.24% 짧아졌다. 세 cycle 모두
+  `status=complete`, `saved=121`, `failed=0`이므로 속도를 위해 수집 완전성을 낮추지 않았다.
+- 판정: **PASS**. 기존 `hotspot_serving_states`의 큰 JSON을 읽지 않는 2차 egress
+  최적화를 유지한다.
+
+### 잔여 materialize egress와 추가 최적화 보류
+
+- 최소 column projection을 기준으로 한 DB→worker 원시 전송 추정은 cycle당 다음과 같다.
+  이 값은 wire protocol과 압축을 포함한 Supabase 청구 실측이 아니며 dashboard가 최종
+  판정 기준이다.
+  - 12시간 hotspot history 약 0.7~0.9MB
+  - 활성 카페 29,917곳의 ID·좌표 약 1.7~1.9MB
+  - 기존 cafe score ID 약 0.4~0.5MB
+  - 최신 hotspot forecast와 기타 약 0.2MB
+- 합계 추정은 약 3.2~3.6MB/cycle이다. 5분 cadence를 단순 환산하면 약
+  0.92~1.04GB/day, 27.6~31.1GB/30일이며 public API cache miss egress는 포함하지 않는다.
+- 현재 큰 SELECT는 Python score가 실제로 사용하는 최소 컬럼만 읽는다. 더 줄이려면
+  PostgreSQL upsert, DB 내부 trend 집계 또는 전체 SQL scoring이 필요하다. 이 변경은
+  Python 결정성과 DB CPU/API 경합에 영향을 줄 수 있어 즉시 production에 적용하지 않는다.
+- 다음 최적화는 Python 결과를 oracle로 한 shadow parity, 동일 fixture의 허용 오차 비교,
+  세 cycle timing과 public API p95 회귀 gate를 통과한 뒤에만 승격한다.
+- 후속 확인: 최적화 뒤 24시간 Supabase Egress 증가량과 Analytics 첫 production pageview는
+  `[HUMAN]` dashboard 확인이 필요하다. 결제 주기 누적값 7.306GB 자체는 최적화 뒤에도
+  즉시 줄어들지 않는다.

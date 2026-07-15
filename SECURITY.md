@@ -29,10 +29,24 @@
 - analytics에는 장소·검색어·정확한 위치와 URL query/fragment를 보내지 않는다.
 - 오류 응답과 인증 header가 있는 응답은 public cache 대상으로 만들지 않는다.
 
+현재 남은 중요 hardening gap은 DB 역할 분리다. Vercel read API, ingest worker와 migration이
+같은 owner급 연결을 쓰면 애플리케이션 취약점이나 credential 유출이 DB write·DDL 권한으로
+확대될 수 있다. 공개 홍보 전 `web_readonly`(필요 SELECT만),
+`ingest_writer`(정해진 DML만), `migration_owner` 역할과 connection URL을 분리하고 각 경로의
+권한 회귀 테스트를 통과시킨다. 분리 전에는 서버 credential 유출을 production write 권한
+유출로 간주해 즉시 교체하고 DB 무결성을 점검한다.
+
+단일 요청의 0.5도 bbox와 5천 건 상한은 대량 scan만 막으며 요청률이나 임의
+`data_version` cache-bust를 막지 않는다. 대규모 홍보 전에 canonical query 검증,
+Vercel rate limit/WAF, 함수·DB 비용 alert와 읽기 API kill switch를 실제 production에서
+검증한다. 이 방어가 없을 때 트래픽 1,000명을 안전하게 수용한다고 주장하지 않는다.
+
 ## Known operational risks
 
 - 고카디널 query와 `data_version` 남용은 CDN cache를 우회해 DB 비용을 만들 수 있다.
 - serverless cold instance가 동시에 DB에 연결하면 connection fan-out이 생길 수 있다.
+- poll과 freshness monitor가 같은 Supabase scheduler·GitHub PAT·Actions 경로를 공유하므로
+  해당 경로 전체 장애에서는 둘 다 침묵할 수 있다.
 - 사용자 피드백 저장을 도입하면 봇·중복·위치 재식별과 보존 기간 문제가 새로 생긴다.
 - OpenFreeMap, 서울 API, Vercel, GitHub Actions와 Supabase 장애는 애플리케이션 밖의
   공급망 위험이다. 오래된 관측은 현재값으로 표시하지 않는다.
