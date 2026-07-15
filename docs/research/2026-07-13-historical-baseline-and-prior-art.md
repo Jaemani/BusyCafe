@@ -296,6 +296,30 @@ SHA-256은 `f65313105d2aa62d8991d2a1d16737d994f60f20ceeba60cba665b0940e716f7`다
 `public_promotion_allowed`는 모두 `false`를 유지한다. 다음 단계는 06-09/16/23 화요일을
 held-out 반복으로 사용하고 06-27/28 주말은 기술통계로만 보는 다일 동일날짜 검증이다.
 
+### 2.7 다일 동일 날짜 held-out 반복 사전등록
+
+`2026-06-30` 결과를 본 뒤 같은 월파일과 이미 만든 OD artifact에서 아직 상관을 보지 않은
+날짜를 고정한다. 새 threshold를 만들지 않고 v2 single-day 계약과 screening/conditional
+경계를 그대로 재사용한다.
+
+- confirmatory held-out: 일반 화요일 `2026-06-09`, `06-16`, `06-23`. `06-30`은 discovery로
+  report에 보존하지만 held-out verdict에서 제외한다.
+- descriptive only: 토요일 `06-27`, 일요일 `06-28`. 각 유형 1일뿐이라 주말 일반화나
+  weekday verdict에 넣지 않는다.
+- 각 날짜는 같은 08·14·18시, exact 427 행정동, bare-cell Jaccard ≥0.99, primary
+  `net(h)` ↔ `LP(h+1)-LP(h)`, 5개 mask/absence variant를 그대로 쓴다. pair input gate가
+  실패하면 해당 날짜를 임의 제외하지 않고 전체 held-out 판정을 무효 처리한다.
+- `supported`: held-out 3일 모두 single-day `screening`, primary 9개 rho median ≥0.30,
+  minimum >0. `conditional`: 3일 중 2일 이상 `conditional` 이상, pooled median ≥0.20,
+  9개 중 7개 이상 양수. 그 외 `not_supported`다. 어느 날짜든 imputation-sensitive면 최종
+  verdict를 한 단계 강등한다.
+- 결과는 날짜별 rho·secondary 정렬·gross sanity check와 source/report SHA를 결정적으로
+  보존한다. 같은 월파일에서 여러 날짜를 꺼내므로 source release 독립 표본이라고 표현하지
+  않는다.
+- 통과해도 `historical_feature_candidate`, 정확도 주장, public promotion은 false다. 이 실험은
+  통신계열 두 source의 반복 가능한 시간관계를 볼 뿐이며, 이후 다른 월 rolling-origin과
+  Phase 6 독립 현장 라벨 개선이 필요하다.
+
 ## 3. 요일·공휴일·시간 기준선
 
 단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,
