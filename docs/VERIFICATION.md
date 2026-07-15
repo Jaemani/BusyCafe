@@ -1544,3 +1544,66 @@ SHA-256 `f65313105d2aa62d8991d2a1d16737d994f60f20ceeba60cba665b0940e716f7`.
 DB, frontend, confidence는 변경하지 않았다. `historical_feature_candidate=false`를 유지한다.
 다음은 06-09/16/23 held-out 화요일 반복과 06-27/28 주말 기술통계이며, compactor의 행정동
 부분행·부분 마스킹 schema는 INC-2026-019 미완 조치로 별도 해결한다.
+
+## 2026-07-15 — OA-22784 ↔ OA-22300 held-out 화요일 반복
+
+### 명령과 입력 역할
+
+사전등록 뒤 다음 명령으로 같은 single-day v2 evaluator를 역할별로 반복했다.
+
+```bash
+cd backend
+uv run python scripts/run_living_od_repeats.py \
+  --pair held_out 2026-06-09 data/living_population/250_LOCAL_RESD_20260609.csv data/od/purpose_od_shadow_20260609_h08_h14_h18.json \
+  --pair held_out 2026-06-16 data/living_population/250_LOCAL_RESD_20260616.csv data/od/purpose_od_shadow_20260616_h08_h14_h18.json \
+  --pair held_out 2026-06-23 data/living_population/250_LOCAL_RESD_20260623.csv data/od/purpose_od_shadow_20260623_h08_h14_h18.json \
+  --pair descriptive_only 2026-06-27 data/living_population/250_LOCAL_RESD_20260627.csv data/od/purpose_od_shadow_20260627_h08_h14_h18.json \
+  --pair descriptive_only 2026-06-28 data/living_population/250_LOCAL_RESD_20260628.csv data/od/purpose_od_shadow_20260628_h08_h14_h18.json \
+  --pair discovery 2026-06-30 data/living_population/250_LOCAL_RESD_20260630.csv data/od/purpose_od_shadow_20260630_h08_h14_h18.json \
+  --output ../docs/research/artifacts/living-od-held-out-repeats-202606.json \
+  --apply
+```
+
+- `held_out`: 결과를 보지 않고 고정한 일반 화요일 `06-09/16/23`만 confirmatory verdict에
+  사용했다.
+- `descriptive_only`: 토요일 `06-27`, 일요일 `06-28`은 유형별 하루라 수치만 보존하고
+  verdict에서 제외했다.
+- `discovery`: 계약을 만든 `06-30` 결과는 report에 보존하되 held-out 판정에서 제외했다.
+- OA-22784 CSV는 해당 날짜의 생활인구 재고, OA-22300 artifact는 같은 날짜의 행정동
+  순유입이다. 08·14·18시, exact 서울 행정동 427개, primary
+  `net(h)` ↔ `LP(h+1)-LP(h)`, 사전등록한 5개 mask/absence variant를 그대로 사용했다.
+
+결정적 report는
+[`research/artifacts/living-od-held-out-repeats-202606.json`](research/artifacts/living-od-held-out-repeats-202606.json),
+82,775 bytes, SHA-256
+`2ba2485e74572076d7839d86cc82ade457aa8ef245c29b49866fa868443e6ea9`다.
+
+### 핵심 수치와 판정
+
+| held-out 날짜 | 08시 rho | 14시 rho | 18시 rho | single-day verdict |
+|---|---:|---:|---:|---|
+| 2026-06-09 | 0.933321 | 0.645739 | 0.894579 | screening |
+| 2026-06-16 | 0.944993 | 0.646217 | 0.906342 | screening |
+| 2026-06-23 | 0.929796 | 0.637114 | 0.896220 | screening |
+
+- primary rho 9/9가 정의되고 모두 양수였다. pooled median은 0.896220, minimum은
+  0.637114이며, 세 날짜 모두 single-day `screening`이어서 사전등록한 최종 verdict는
+  **supported**다.
+- 모든 pair·시각의 exact code coverage는 427/427였다. 전체 bare-cell Jaccard minimum은
+  0.997775, held-out imputation rho range maximum은 0.000347로
+  `imputation_sensitive=false`였다.
+- 토요일 primary rho는 0.785102/0.583985/0.671233, 일요일은
+  0.771764/0.612807/0.756499였지만 기술통계일 뿐 주말 일반화 근거가 아니다.
+- dry-run과 `--apply`의 report SHA가 모두 `2ba2485e…e6ea9`로 일치했다. 독립 재계산에서도
+  report 안의 6개 pair SHA가 각 pair payload와 모두 일치했다.
+- 코드 회귀: backend **846 passed, 2 skipped**, 대상 4파일 mypy와 app/scripts/tests
+  compileall PASS. frontend TypeScript와 production build PASS. 기존 500kB chunk warning과
+  Starlette/httpx deprecation warning 1건만 유지됐고 `git diff --check`도 PASS했다.
+
+판정: **PASS(held-out cross-source repeatability only)**. 같은 월의 일반 화요일에서 OD
+순유입과 다음 시간 생활인구 재고 변화의 행정동 순위 관계가 반복됐다. 그러나 날짜들이 같은
+OA-22784 월 릴리스에 속해 독립 source release가 아니고, OA-22784와 OA-22300 모두
+통신계열 추정치라 공통 편향 가능성이 있다. 이는 실제 활동도·보행 혼잡·카페 좌석 정확도나
+독립 ground truth가 아니다. 다른 월 rolling-origin과 Phase 6 현장 라벨 전에는
+`historical_feature_candidate=false`, 정확도 주장·공개 promotion=false이며 public v1 API,
+DB, frontend, confidence는 변경하지 않는다.

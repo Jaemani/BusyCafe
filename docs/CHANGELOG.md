@@ -17,6 +17,9 @@
 - 같은 `2026-06-30`의 OA-22784 생활인구 재고 변화와 OA-22300 순유입을 exact 행정동
   코드로 비교하는 offline screen. 경계 격자의 행정동별 부분행·bare-cell universe·마스킹과
   미게시 행 민감도를 분리하고 결과는 `screening`이지만 정확도 주장·공개 승격은 금지
+- 사전등록한 일반 화요일 3일의 OA-22784 재고 변화와 OA-22300 순유입 관계를 held-out
+  반복한 offline report. 9개 rho가 모두 양수여서 verdict는 `supported`지만 같은 월 릴리스·
+  통신계열 공통 편향 한계가 있어 카페 정확도·ground truth·공개 v1 변경 근거로 쓰지 않음
 - 카페명·주소 전역 검색과 스타벅스·투썸·메가MGC·컴포즈·빽다방·이디야·폴바셋
   필터. 검색은 PostgreSQL cache만 읽고 exact→prefix→부분 일치 순으로 정렬하며,
   PostgreSQL `pg_trgm` index와 2~80자·최대 50건 제한을 적용

@@ -320,6 +320,32 @@ held-out 반복으로 사용하고 06-27/28 주말은 기술통계로만 보는 
   통신계열 두 source의 반복 가능한 시간관계를 볼 뿐이며, 이후 다른 월 rolling-origin과
   Phase 6 독립 현장 라벨 개선이 필요하다.
 
+#### 사전등록 후 held-out 결과
+
+결정적 report는
+[`living-od-held-out-repeats-202606.json`](artifacts/living-od-held-out-repeats-202606.json)이며,
+SHA-256은 `2ba2485e74572076d7839d86cc82ade457aa8ef245c29b49866fa868443e6ea9`다.
+결과를 보기 전에 고정한 primary `net(h)` ↔ `LP(h+1)-LP(h)`의 held-out 결과는 다음과 같다.
+
+| held-out 날짜 | 08시 rho | 14시 rho | 18시 rho | single-day verdict |
+|---|---:|---:|---:|---|
+| 2026-06-09 | 0.933321 | 0.645739 | 0.894579 | screening |
+| 2026-06-16 | 0.944993 | 0.646217 | 0.906342 | screening |
+| 2026-06-23 | 0.929796 | 0.637114 | 0.896220 | screening |
+
+- 9개 rho는 모두 정의되고 양수였으며 pooled median 0.896220, minimum 0.637114였다. 세 날짜
+  모두 `screening`이어서 사전등록한 최종 verdict는 **supported**다.
+- 모든 날짜·시각의 exact code coverage는 427/427, 전체 pair의 bare-cell Jaccard minimum은
+  0.997775였다. held-out sensitivity variant의 rho range maximum은 0.000347로
+  `imputation_sensitive=false`였다.
+- 기술통계 전용 토요일 `06-27`의 rho는 0.785102/0.583985/0.671233, 일요일 `06-28`은
+  0.771764/0.612807/0.756499였다. 유형별 하루뿐이므로 주말 일반화와 verdict에는 넣지 않았다.
+- 이는 두 통신계열 추정치 사이의 동일 날짜 행정동 횡단면 관계가 같은 월의 일반 화요일에
+  반복됐다는 뜻뿐이다. 같은 OA-22784 월 릴리스의 날짜들은 독립 릴리스가 아니며, 실제 활동도·
+  보행 혼잡·카페 좌석 정확도나 독립 ground truth를 검증하지 않았다. 따라서
+  `historical_feature_candidate`, `accuracy_claim_allowed`, `public_promotion_allowed`는 모두
+  `false`이고 공개 `v1-idw-point`는 변경하지 않는다.
+
 ## 3. 요일·공휴일·시간 기준선
 
 단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,
