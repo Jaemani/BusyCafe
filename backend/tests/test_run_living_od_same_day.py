@@ -80,6 +80,7 @@ def _living_csv(
     duplicate: bool = False,
     wrong_date: bool = False,
     sensitive_hour: int | None = None,
+    shared_cell: bool = False,
 ) -> Path:
     omitted = omit or set()
     rows: list[str] = []
@@ -110,8 +111,9 @@ def _living_csv(
             else:
                 total = f"{stock + net:.6f}"
             observed_date = "20260629" if wrong_date and not rows else "20260630"
+            cell_id = _cell(0) if shared_cell and index == 1 else _cell(index)
             rows.append(
-                f"{observed_date},{hour:02d},{_zone(index)},{_cell(index)},{total}"
+                f"{observed_date},{hour:02d},{_zone(index)},{cell_id},{total}"
             )
             if target_hour == sensitive_hour and index % 2:
                 variant_total = "*" if hour == target_hour + 1 else "0"
@@ -163,7 +165,8 @@ def test_screening_metrics_masking_and_fixed_alignment(tmp_path: Path) -> None:
     assert result["scope"]["iid_p_values"] is None
     assert [item["code_coverage"] for item in result["coverage"]] == [1.0] * 3
     assert [
-        item["minimum_jaccard"] for item in result["cell_universe_stability"]
+        item["minimum_jaccard"]
+        for item in result["zone_cell_universe_stability"]
     ] == [1.0] * 3
     primary = result["correlations_by_imputation"]["2"]
     assert primary["verdict"] == "screening"
@@ -219,6 +222,19 @@ def test_coverage_below_fixed_threshold_fails_closed(tmp_path: Path) -> None:
         _run(tmp_path, living=living, purpose=purpose)
 
 
+def test_same_cell_may_have_distinct_administrative_zone_rows(
+    tmp_path: Path,
+) -> None:
+    living = _living_csv(tmp_path / "living.csv", shared_cell=True)
+    purpose = _artifact(tmp_path / "purpose.json")
+
+    result = _run(tmp_path, living=living, purpose=purpose).report
+
+    source = result["inputs"]["living_population"]
+    assert source["unique_cells"] == PURPOSE_OD_SEOUL_ZONE_COUNT - 1
+    assert source["unique_zone_cell_pairs"] == PURPOSE_OD_SEOUL_ZONE_COUNT
+
+
 def test_od_hours_must_share_exact_zone_universe(tmp_path: Path) -> None:
     living = _living_csv(tmp_path / "living.csv")
     purpose = _artifact(tmp_path / "purpose.json")
@@ -238,7 +254,7 @@ def test_od_hours_must_share_exact_zone_universe(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("duplicate", "wrong_date", "message"),
     [
-        (True, False, "duplicate living-population date/hour/cell"),
+        (True, False, "duplicate living-population date/hour/zone/cell"),
         (False, True, "outside fixed date"),
     ],
 )

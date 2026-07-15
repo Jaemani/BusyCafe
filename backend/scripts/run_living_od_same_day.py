@@ -31,7 +31,6 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import (  # noqa: E402
-    LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN,
     LIVING_OD_SAME_DAY_CODE_COVERAGE_MIN,
     LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN,
     LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN,
@@ -42,6 +41,7 @@ from app.config import (  # noqa: E402
     LIVING_OD_SAME_DAY_PRIMARY_IMPUTATION,
     LIVING_OD_SAME_DAY_REPORT_VERSION,
     LIVING_OD_SAME_DAY_SCREENING_MEDIAN_MIN,
+    LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN,
     LIVING_POPULATION_HASH_CHUNK_BYTES,
     PURPOSE_OD_SEOUL_ZONE_COUNT,
     PURPOSE_OD_SHADOW_MODEL_VERSION,
@@ -360,11 +360,11 @@ def run_living_od_same_day(
         for adjacent in (hour - 1, hour, hour + 1)
     }
     buckets: dict[tuple[str, int], _LivingBucket] = defaultdict(_LivingBucket)
-    seen: set[tuple[date, int, str]] = set()
+    seen: set[tuple[date, int, str, str]] = set()
     source_rows = 0
     cell_ids: set[str] = set()
-    cell_ids_by_hour: dict[int, set[str]] = defaultdict(set)
-    cell_zone_by_id: dict[str, str] = {}
+    zone_cell_pairs: set[tuple[str, str]] = set()
+    zone_cell_pairs_by_hour: dict[int, set[tuple[str, str]]] = defaultdict(set)
     all_codes: set[str] = set()
     for record in iter_living_population_csv(living_path):
         source_rows += 1
@@ -373,24 +373,23 @@ def run_living_od_same_day(
                 "living population input contains row outside fixed date: "
                 f"{record.observed_date.isoformat()}"
             )
-        identity = (record.observed_date, record.hour, record.cell_id)
+        identity = (
+            record.observed_date,
+            record.hour,
+            record.administrative_dong_code,
+            record.cell_id,
+        )
         if identity in seen:
             raise LivingOdSameDayError(
-                "duplicate living-population date/hour/cell: "
+                "duplicate living-population date/hour/zone/cell: "
                 f"{record.observed_date.isoformat()} {record.hour:02d} "
-                f"{record.cell_id}"
+                f"{record.administrative_dong_code} {record.cell_id}"
             )
         seen.add(identity)
-        prior_zone = cell_zone_by_id.setdefault(
-            record.cell_id, record.administrative_dong_code
-        )
-        if prior_zone != record.administrative_dong_code:
-            raise LivingOdSameDayError(
-                "living-population cell changed administrative zone: "
-                f"{record.cell_id} {prior_zone}->{record.administrative_dong_code}"
-            )
         cell_ids.add(record.cell_id)
-        cell_ids_by_hour[record.hour].add(record.cell_id)
+        zone_cell = (record.administrative_dong_code, record.cell_id)
+        zone_cell_pairs.add(zone_cell)
+        zone_cell_pairs_by_hour[record.hour].add(zone_cell)
         all_codes.add(record.administrative_dong_code)
         if record.hour not in needed_hours:
             continue
@@ -436,20 +435,20 @@ def run_living_od_same_day(
             )
         comparison_codes[hour] = exact
 
-    cell_universe_rows: list[dict[str, Any]] = []
+    zone_cell_universe_rows: list[dict[str, Any]] = []
     for hour in LIVING_OD_SAME_DAY_HOURS:
         comparisons: dict[str, float] = {}
         for label, left_hour, right_hour in (
             ("previous_to_current", hour - 1, hour),
             ("current_to_next", hour, hour + 1),
         ):
-            left = cell_ids_by_hour[left_hour]
-            right = cell_ids_by_hour[right_hour]
+            left = zone_cell_pairs_by_hour[left_hour]
+            right = zone_cell_pairs_by_hour[right_hour]
             union = left | right
             jaccard = len(left & right) / len(union) if union else 0.0
             comparisons[label] = jaccard
         minimum = min(comparisons.values())
-        cell_universe_rows.append(
+        zone_cell_universe_rows.append(
             {
                 "hour": hour,
                 "previous_to_current_jaccard": round(
@@ -461,10 +460,10 @@ def run_living_od_same_day(
                 "minimum_jaccard": round(minimum, 9),
             }
         )
-        if minimum < LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN:
+        if minimum < LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN:
             raise LivingOdSameDayError(
                 f"hour {hour} adjacent cell-universe Jaccard {minimum:.9f} is below "
-                f"{LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN:.2f}"
+                f"{LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN:.2f}"
             )
 
     living_summaries: dict[str, list[dict[str, Any]]] = {}
@@ -580,7 +579,9 @@ def run_living_od_same_day(
 
     thresholds = {
         "code_coverage_min": LIVING_OD_SAME_DAY_CODE_COVERAGE_MIN,
-        "cell_universe_jaccard_min": LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN,
+        "zone_cell_universe_jaccard_min": (
+            LIVING_OD_SAME_DAY_ZONE_CELL_UNIVERSE_JACCARD_MIN
+        ),
         "screening_median_min": LIVING_OD_SAME_DAY_SCREENING_MEDIAN_MIN,
         "conditional_median_min": LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN,
         "conditional_positive_min": LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN,
@@ -608,6 +609,7 @@ def run_living_od_same_day(
                 "encoding": "cp949",
                 "source_rows": source_rows,
                 "unique_cells": len(cell_ids),
+                "unique_zone_cell_pairs": len(zone_cell_pairs),
                 "administrative_zone_codes": len(all_codes),
             },
             "purpose_od_artifact": {
@@ -619,7 +621,7 @@ def run_living_od_same_day(
             },
         },
         "coverage": coverage_rows,
-        "cell_universe_stability": cell_universe_rows,
+        "zone_cell_universe_stability": zone_cell_universe_rows,
         "living_population_by_imputation": living_summaries,
         "correlations_by_imputation": correlation_by_imputation,
         "imputation_sensitivity": {
