@@ -1894,10 +1894,11 @@ DB 부하와 사용자의 지도 조작 예측 가능성을 함께 측정한 뒤
 카페베네 21건, 엔제리너스 44건이 확인됐다. 이는 문자열 검색 recall 표본이며 본사 가맹점
 목록이나 영업 상태 검증 건수로 해석하지 않는다.
 
-15개 chip은 각각 하나의 flat background와 흰색 또는 짙은 전경색만 사용한다. WCAG 상대
-휘도 공식으로 base 상태를 계산한 최소 명암비는 스타벅스 chip의 5.764:1이었고 나머지도
-그 이상이었다. hover는 동일 색의 밝기만 조정하고, 선택과 keyboard focus는 배경색을
-바꾸지 않고 border·outline으로 표시한다.
+15개 chip은 각각 하나의 flat background와 흰색 또는 짙은 전경색만 사용한다. `5b90eb1`에서
+초기 팔레트의 채도를 낮춘 뒤 WCAG 상대 휘도 공식으로 base 상태를 다시 계산한 최소
+명암비는 스타벅스 chip의 4.838:1이었고 나머지도 그 이상이었다. hover는 색을 밝히지 않고
+1px 위로 이동한다. 선택과 keyboard focus는 외부 shadow·outline 대신 border와 inset ring을
+사용해 가로 스크롤 container의 overflow에 잘리지 않는다.
 
 출퇴근시간 안내는 `Asia/Seoul` 기준 일반 평일 07:00 이상 10:00 미만, 17:00 이상
 20:00 미만에 페이지를 초기화할 때마다 표시한다. 닫힘 상태를 local/session storage에
@@ -1911,7 +1912,7 @@ DB 부하와 사용자의 지도 조작 예측 가능성을 함께 측정한 뒤
 - `cd frontend && npm run typecheck`: passed
 - `cd frontend && npm run build`: passed, gzip JavaScript 296.68kB
 - `cd backend && uv run pytest -q`: passed, 2 skipped
-- 15개 base chip contrast 계산: minimum 5.764:1
+- 15개 softened base chip contrast 계산: minimum 4.838:1
 - `git diff --check`: passed
 
 판정: **PASS(UI schedule and filter contract), PROVISIONAL(annual calendar maintenance)**.
