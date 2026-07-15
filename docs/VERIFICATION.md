@@ -1370,6 +1370,9 @@ uv run python scripts/build_purpose_od_shadow.py \
   streaming accumulator로 바꿔 입력 순서 독립성과 bounded aggregate state를 함께 유지했다.
 - 전체 backend 회귀는 `821 passed, 2 skipped`, 대상 모듈 mypy·compileall과
   `git diff --check` 모두 PASS했다.
+- 기준 커밋 `d5a49cf`의 GitHub Actions CI run `29392020000`에서 frontend
+  typecheck/build, backend pytest·compileall, 실제 PostgreSQL migration·schema smoke가
+  모두 PASS했다.
 
 서울 행정동 합계와 대표 표본은 다음과 같았다. `cnt` 추정치이므로 반올림한 탐색값이다.
 
