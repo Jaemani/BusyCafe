@@ -215,6 +215,7 @@ h1 {
 .cafe-brand-filters button {
   --brand-bg: #315b49;
   --brand-fg: #fff;
+  --brand-ring: rgb(255 255 255 / 88%);
   flex: 0 0 auto;
   border: 2px solid transparent;
   border-radius: 999px;
@@ -226,34 +227,39 @@ h1 {
   cursor: pointer;
 }
 
-.cafe-brand-filters button:hover { filter: brightness(1.12); }
+.cafe-brand-filters button:hover { transform: translateY(-1px); }
 
 .cafe-brand-filters button:focus-visible {
-  outline: 3px solid #fff;
-  outline-offset: 1px;
-  box-shadow: 0 0 0 5px var(--forest);
+  outline: 0;
+  box-shadow: inset 0 0 0 3px var(--brand-ring);
 }
 
 .cafe-brand-filters button[aria-pressed="true"] {
-  border-color: #fff;
-  box-shadow: 0 0 0 3px var(--forest);
+  border-color: var(--brand-ring);
+  box-shadow: inset 0 0 0 1px var(--brand-ring);
+  font-weight: 850;
+  transform: translateY(-1px);
 }
 
-.cafe-brand-filters button[data-cafe-brand="스타벅스"] { --brand-bg: #00754a; }
-.cafe-brand-filters button[data-cafe-brand="투썸플레이스"] { --brand-bg: #8a1538; }
-.cafe-brand-filters button[data-cafe-brand="메가MGC커피"] { --brand-bg: #ffd400; --brand-fg: #17140a; }
-.cafe-brand-filters button[data-cafe-brand="컴포즈커피"] { --brand-bg: #f4cf00; --brand-fg: #191600; }
-.cafe-brand-filters button[data-cafe-brand="빽다방"] { --brand-bg: #0b4f9c; }
-.cafe-brand-filters button[data-cafe-brand="이디야커피"] { --brand-bg: #003e73; }
-.cafe-brand-filters button[data-cafe-brand="폴바셋"] { --brand-bg: #3b2a22; }
-.cafe-brand-filters button[data-cafe-brand="더벤티"] { --brand-bg: #592c82; }
-.cafe-brand-filters button[data-cafe-brand="매머드커피"] { --brand-bg: #f58220; --brand-fg: #1c1208; }
-.cafe-brand-filters button[data-cafe-brand="텐퍼센트커피"] { --brand-bg: #202020; }
-.cafe-brand-filters button[data-cafe-brand="할리스"] { --brand-bg: #ba0c2f; }
-.cafe-brand-filters button[data-cafe-brand="탐앤탐스"] { --brand-bg: #493126; }
-.cafe-brand-filters button[data-cafe-brand="카페베네"] { --brand-bg: #593a2b; }
-.cafe-brand-filters button[data-cafe-brand="커피빈"] { --brand-bg: #5c2d91; }
-.cafe-brand-filters button[data-cafe-brand="엔제리너스"] { --brand-bg: #702f35; }
+.cafe-brand-filters button[aria-pressed="true"]:focus-visible {
+  box-shadow: inset 0 0 0 3px var(--brand-ring);
+}
+
+.cafe-brand-filters button[data-cafe-brand="스타벅스"] { --brand-bg: #2f7f64; }
+.cafe-brand-filters button[data-cafe-brand="투썸플레이스"] { --brand-bg: #9a3f59; }
+.cafe-brand-filters button[data-cafe-brand="메가MGC커피"] { --brand-bg: #f2d75c; --brand-fg: #17140a; --brand-ring: rgb(57 49 8 / 78%); }
+.cafe-brand-filters button[data-cafe-brand="컴포즈커피"] { --brand-bg: #e7cc55; --brand-fg: #191600; --brand-ring: rgb(57 49 8 / 78%); }
+.cafe-brand-filters button[data-cafe-brand="빽다방"] { --brand-bg: #3b679b; }
+.cafe-brand-filters button[data-cafe-brand="이디야커피"] { --brand-bg: #315e82; }
+.cafe-brand-filters button[data-cafe-brand="폴바셋"] { --brand-bg: #604a3f; }
+.cafe-brand-filters button[data-cafe-brand="더벤티"] { --brand-bg: #73538f; }
+.cafe-brand-filters button[data-cafe-brand="매머드커피"] { --brand-bg: #e8a15e; --brand-fg: #1c1208; --brand-ring: rgb(76 44 13 / 76%); }
+.cafe-brand-filters button[data-cafe-brand="텐퍼센트커피"] { --brand-bg: #555; }
+.cafe-brand-filters button[data-cafe-brand="할리스"] { --brand-bg: #b5485f; }
+.cafe-brand-filters button[data-cafe-brand="탐앤탐스"] { --brand-bg: #685247; }
+.cafe-brand-filters button[data-cafe-brand="카페베네"] { --brand-bg: #765647; }
+.cafe-brand-filters button[data-cafe-brand="커피빈"] { --brand-bg: #73539a; }
+.cafe-brand-filters button[data-cafe-brand="엔제리너스"] { --brand-bg: #86545a; }
 
 .cafe-search-popover {
   position: absolute;
