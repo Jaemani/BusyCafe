@@ -1,7 +1,7 @@
-# cafe-crowd — 도시 활동도 맵과 카페 레이어 개발 계획서 (v1.9)
+# cafe-crowd — 도시 활동도 맵과 카페 레이어 개발 계획서 (v2.0)
 
-> **한 줄 정의**: 서울의 현재·평소 대비 도시 활동도를 근거와 함께 지도 surface로 보여주고,
-> 카페를 첫 번째 탐색·추천 레이어로 제공하는 준실시간 서비스.
+> **한 줄 정의**: 서울의 현재 지역 혼잡 추정을 근거와 함께 지도에 표시하고 카페를 첫
+> 탐색 레이어로 제공하는 준실시간 서비스. 평소 대비 활동도는 shadow 검증 뒤 별도 승격한다.
 
 > **v1.1 (2026-07-11)**: 운영 저장소를 PostgreSQL로 확정하고 ingest worker를 API
 > 프로세스에서 분리했다. uncovered NULL 규칙과 timezone-aware 시각 저장을 DDL에
@@ -47,6 +47,12 @@
 > surface로 확정했다(ADR-0011). 카페는 첫 overlay로 유지하며 지역 활동도와 매장 내부
 > 좌석 점유를 분리한다. 공개 v1은 Phase 6와 activity-shadow 승격 gate 전까지 유지한다.
 
+> **v2.0 (2026-07-15)**: Supabase `pg_cron`이 5분마다 production poll workflow를
+> dispatch하는 운영 경로를 ADR-0012로 확정했다. verified provider ID가 있는 링크는
+> canonical detail만 허용하고, Naver ID가 없을 때에는 주소+카페명 검색임을 명시한
+> `네이버맵 검색` fallback만 별도 허용한다. 광고는 정확도·운영·사용량 gate 전까지
+> 금지하고 후원부터 제한적으로 검토한다.
+
 ---
 
 ## 0. 이 문서의 사용법 (에이전트 필독)
@@ -87,7 +93,11 @@
 
 - **지역/지도 UX**: 사용자는 서울 전역을 일반 지도처럼 자유롭게 이동한다. 지도는 MapLibre GL + OpenFreeMap으로 렌더링하고, 카페는 서버의 검증·캐시된 원장에서 viewport bbox로 읽는다. 실시간 혼잡도는 121개 공식 핫스팟 coverage 안에서만 제공하고 나머지는 회색 `uncovered`로 정직하게 표시한다.
 - **사용자 플로우**: 지도 열기 → 카페 마커의 4단계 색상으로 주변 혼잡도 확인 → 마커 클릭 → 근거 패널(기준 핫스팟, 거리, 레벨, 갱신 시각, 12시간 추이, 1시간 뒤 예측).
-- **장소 확인 링크**: 상세 패널은 해당 공급자의 검증된 장소 식별자가 있는 경우에만 그 공급자의 **직접 상세 페이지** 링크를 보인다. 공급자 ID가 없으면 링크를 숨긴다. 이름·좌표를 넣은 검색 URL, 스크레이핑, 브라우저 자동화로 링크를 만들지 않는다.
+- **장소 확인 링크**: 검증된 provider ID가 있으면 해당 공급자의 **직접 상세 페이지**만
+  보인다. Naver ID가 없을 때에는 캐시된 주소+카페명을 넘기는 `네이버맵 검색`을 직접
+  상세와 구분해 표시할 수 있다. 이 fallback은 장소 동일성을 주장하지 않으며 좌표,
+  스크레이핑, 브라우저 자동화나 추측 ID를 사용하지 않는다. Kakao/Google은 검증된 direct
+  ID가 없으면 숨긴다.
 
 ### 1.4 채택된 제품 방향과 현재 공개 경로
 
@@ -124,14 +134,14 @@
   - `PPLTN_TIME` — 데이터 기준 시각
   - `FCST_YN`, `FCST_PPLTN[]` — 실측 응답에 12개 예측 레코드. 각 레코드는 `FCST_TIME`, `FCST_CONGEST_LVL`, `FCST_PPLTN_MIN`, `FCST_PPLTN_MAX`
 - 호출 단위 [VERIFIED 2026-07-11]: 공식 OA-21285 설명에 따라 **장소 1곳당 1콜**, 일괄 호출 불가. 장소명 또는 장소코드 중 하나로 호출한다.
-- **호출 제한 [VERIFIED 2026-07-11, HUMAN 포털 확인]**: 열린데이터광장 OpenAPI는 1회 호출당 최대 1,000건이며 호출 횟수 제한은 없다. `citydata_ppltn`은 공식적으로 장소 1곳씩 호출하므로 1,000건 행 제한의 영향이 없다. 서울 전역 지도 UX에 맞춰 공식 마스터 **121개 전부**를 10분마다 폴링한다. 예상량은 121 × 144 = **17,424콜/일**이다. 단일 worker는 주기 겹침을 금지하고, cycle duration·성공/실패 수·마지막 완전 cycle 시각을 기록한다.
+- **호출 제한 [VERIFIED 2026-07-11, HUMAN 포털 확인]**: 열린데이터광장 OpenAPI는 1회 호출당 최대 1,000건이며 호출 횟수 제한은 없다. `citydata_ppltn`은 공식적으로 장소 1곳씩 호출하므로 1,000건 행 제한의 영향이 없다. 서울 전역 지도 UX에 맞춰 공식 마스터 **121개 전부**를 5분마다 폴링한다. 예상량은 121 × 288 = **34,848콜/일**이다. 단일 worker는 주기 겹침을 금지하고, cycle duration·성공/실패 수·마지막 완전 cycle 시각을 기록한다.
 
 ### 2.2 Overture Places 캐시 원장
 
 - **제품 원장**: Overture Places의 릴리스별 GeoParquet에서 `SEOUL_BBOX`로 후보를 제한하고, 카페 분류·좌표·필수 GERS ID를 검증한 레코드만 PostgreSQL에 upsert한다. `overture_id`, release, confidence, category와 원본 `sources`를 보존하고 로컬 extract SHA-256은 ingest 보고서와 `VERIFICATION.md`에 기록한다.
 - **갱신 방식**: 지도 이동이나 사용자 요청 때 Overture/외부 POI API를 호출하지 않는다. 월간 릴리스 ingest와 인허가 보정은 별도 job으로 실행하고, API는 캐시된 `cafes`/`cafe_scores`만 bbox 조회한다. 실패한 release는 현재 검증된 캐시를 계속 제공하며, 부분 파일이나 검증 실패 결과로 원장을 비우지 않는다.
 - **정합성 경계**: Overture의 영업 상태가 비어 있거나 오래될 수 있으므로 서울시 휴게음식점 인허가 데이터로 후속 보정한다. 이름·좌표 유사도만으로 타 공급자 레코드와 병합하거나 ID를 만들어내지 않는다.
-- **공급자 상세 링크**: `external_links_json`에는 공급자가 제공하거나 합법적 계약/공식 API로 검증된 canonical detail URL만 저장한다. Naver/Kakao/Google 각각의 ID가 없으면 해당 버튼은 없다. API는 HTTPS·provider host·detail path를 allowlist로 재검증하며 검색 URL은 제거한다.
+- **공급자 상세 링크**: `external_links_json`에는 공급자가 제공하거나 합법적 계약/공식 API로 검증된 canonical detail URL만 저장한다. API는 HTTPS·provider host·detail path를 allowlist로 재검증한다. Naver direct ID가 없으면 별도 `naver_search` 필드에 주소+이름 검색 URL을 생성할 수 있으며 UI는 이를 `네이버맵 검색`으로 표시한다. 이 fallback은 canonical identity나 직접 상세 링크로 저장하지 않는다.
 
 ### 2.3 Kakao Local API — legacy 검증 기록, 제품 경로 아님
 
@@ -171,7 +181,7 @@
 ### 4.1 컴포넌트 흐름
 
 ```text
-[single congestion worker: 10분 non-overlapping cycle]
+[Supabase-dispatched worker: 5분 non-overlapping cycle]
   ingest/poller ──> 서울 citydata API (공식 121개, 장소별 1콜)
        │ 파싱/대상 불일치 시 hotspot_parse_failures에 raw 저장 + 경고 로그
        ▼
@@ -321,7 +331,7 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
 
 | 상수 | 기본값 | 의미 |
 |---|---|---|
-| `POLL_INTERVAL_MIN` | 10 | 121개 전체 폴링 주기(분). 주기 겹침 금지 |
+| `POLL_INTERVAL_MIN` | 5 | 121개 전체 폴링 주기(분). 주기 겹침 금지 |
 | `OFFICIAL_HOTSPOT_COUNT` / `MAX_POLLED_HOTSPOTS` | 121 / 121 | 공식 마스터 전체만 폴링 |
 | `SEOUL_BBOX` | `(126.76, 37.41, 127.20, 37.72)` | Overture bulk ingest의 전세계 오조회 방지용 guard; 행정경계 정밀 필터는 P2 검증 |
 | `R_MAX_M` | 1500 | 이웃 탐색 최대 반경 |
@@ -367,7 +377,7 @@ primary hotspot/distance, contributors evidence를 모두 NULL 처리한다.
    - `[VERIFY]` 항목 전부 확정: 엔드포인트, 필드명, 혼잡도 라벨 문자열 4종, FCST 구조, `AREA_NM` 정확 표기
    - 카카오 CE7 fixture는 legacy 응답 검증용으로 보존하되, 제품 seed·지도에서 사용하지 않음
    - 121개 장소 마스터 파일 확보 경로 확인(열린데이터광장 내 장소 목록) 및 다운로드
-   - 호출 정책 확인 → 121 × 144 = 17,424콜/일 및 non-overlapping worker 정책 확정
+   - 호출 정책 확인 → 현재 121 × 288 = 34,848콜/일 및 non-overlapping worker 정책 확정
 4. fixtures 기반 pydantic 외부 API 모델(`schemas.py`) 확정
 
 DoD:
@@ -389,7 +399,7 @@ DoD:
 
 - [ ] 로컬에서 1시간 무인 구동 → 121개 대상 각각 스냅샷 ≥5개 적재
 - [ ] 잘못된 응답(fixture 변조) 주입 시 크래시 없이 스킵·로깅
-- [ ] 121개 전체 cycle이 10분 안에 완료되고, 일일 예상 17,424콜과 호출 정책을 `VERIFICATION.md`에 기록
+- [x] 121개 전체 cycle이 5분 안에 완료되고, 일일 예상 34,848콜과 호출 정책을 `VERIFICATION.md`에 기록
 
 ### Phase 2 — 카페 시드
 
@@ -523,10 +533,10 @@ DoD:
 
 | 리스크 | 영향 | 대응 |
 |---|---|---|
-| 121개 폴링 cycle 지연 또는 정책 변경 | 혼잡도 stale/부분 갱신 | 현재 호출 횟수 제한 없음 확인. 121 × 144 = 17,424콜/일과 cycle duration·실패 수를 기록하고 cycle overlap을 금지한다. 정책 변경 또는 10분 초과 시 concurrency/backoff·주기를 config/ADR로 조정한다. |
+| 121개 폴링 cycle 지연 또는 정책 변경 | 혼잡도 stale/부분 갱신 | 현재 호출 횟수 제한 없음 확인. 121 × 288 = 34,848콜/일과 cycle duration·실패 수를 기록하고 cycle overlap을 금지한다. 정책 변경 또는 5분 초과 시 concurrency/backoff·주기를 config/ADR로 조정한다. |
 | citydata 스키마 변경 | 파싱 실패 | pydantic strict 파싱 + 실패 시 raw_json 보존, 알림 로그. 문서 갱신 절차(§0) |
 | POI 원장 stale·오분류·부분 release | 잘못된 카페/위치 또는 목록 소실 | versioned Overture cache, source hash, 서울 bbox·분류 검증, quarantine, release atomicity를 적용한다. 인허가 보정과 표본 검수 전에는 원본 release를 active로 승격하지 않는다. |
-| provider 이름 검색 링크 오매칭 | 사용자가 다른 매장 상세를 봄 | 검색 URL 금지. 검증된 provider ID/canonical direct URL이 없으면 버튼을 숨긴다. |
+| provider 이름 검색 링크 오매칭 | 사용자가 다른 매장을 선택함 | direct 링크는 검증된 provider ID만 허용한다. Naver fallback은 주소+이름 검색임을 라벨로 명시하고 동일성을 주장하지 않는다. 좌표·추측 ID·스크레이핑은 금지한다. |
 | 핫스팟 신호와 골목 카페 괴리 (역 앞은 붐비는데 골목은 한산) | 추정 오차 | 이것이 P6 검증의 존재 이유. 거리 구간별 분해로 정량화, R/COVERED 튜닝, 한계는 confidence로 표현 |
 | 데이터 지연/장애 | 낡은 값 표시 | freshness 감쇠 + STALE 배지. 절대 마지막 값을 "현재"처럼 위장하지 않음 |
 | 폐업 카페 표시 | 신뢰 하락 | P2 인허가 cache 보정과 release별 soft deactivate를 적용하고, 미확정은 원장 출처/갱신 시각을 표시한다. |

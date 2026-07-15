@@ -20,7 +20,7 @@ jobs:
   poll:
     environment: Production
     runs-on: ubuntu-latest
-    # Keep the whole job below the 10-minute schedule while reserving one
+    # Keep the whole job below the 5-minute schedule while reserving one
     # minute for the worker's interrupt cleanup and runner teardown.
     timeout-minutes: 9
     defaults:

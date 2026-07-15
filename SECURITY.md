@@ -23,7 +23,9 @@
 - 외부 API key와 DB URL은 Vercel/GitHub/Supabase Vault의 secret으로만 저장한다.
 - public API는 읽기 전용이며 GET만 허용한다. 넓은 bbox와 5천 건 초과 viewport를
   fail-closed 처리한다.
-- 외부 장소 링크는 허용된 HTTPS provider host와 canonical detail path만 반환한다.
+- 외부 직접 장소 링크는 허용된 HTTPS provider host와 canonical detail path만 반환한다.
+  Naver ID가 없을 때의 주소+이름 검색 fallback은 별도 필드와 `네이버맵 검색` 라벨로만
+  제공하며 canonical identity로 취급하지 않는다.
 - analytics에는 장소·검색어·정확한 위치와 URL query/fragment를 보내지 않는다.
 - 오류 응답과 인증 header가 있는 응답은 public cache 대상으로 만들지 않는다.
 

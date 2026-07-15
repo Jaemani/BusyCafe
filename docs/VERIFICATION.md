@@ -50,9 +50,10 @@
 - 지도: MapLibre GL + OpenFreeMap. Kakao Maps SDK는 제품 런타임 의존성이 아니다.
 - 카페: Overture Places의 versioned 서울 cache와 인허가 보정. viewport 요청에서 외부
   POI API를 호출하지 않는다.
-- 혼잡도: 공식 121개 장소 전부를 10분마다 폴링한다. 목표량은 17,424콜/일이다.
-- 외부 매장 링크: 검증된 provider ID/canonical direct detail URL이 있을 때만 보인다.
-  이름·좌표 검색 링크나 추측 매칭은 금지한다.
+- 혼잡도: 공식 121개 장소 전부를 Supabase-dispatched worker가 5분마다 폴링한다.
+  목표량은 34,848콜/일이며 current scheduler 결정은 ADR-0012가 소유한다.
+- 외부 매장 링크: 검증된 provider ID가 있으면 canonical direct detail을 보인다. Naver ID가
+  없으면 주소+이름 fallback을 `네이버맵 검색`으로 구분하며 좌표·추측 ID는 사용하지 않는다.
 
 아래의 `≤12곳`, `10곳`, `1,440/1,728콜/일`, Kakao 지도/CE7 seed 관련 기록은 당시
 실제 호출·코드·인시던트를 보존하는 **legacy 역사 기록**이다. 삭제하거나 실측 사실을
@@ -1063,13 +1064,26 @@
   - ADR-0013에 따라 정확도와 사용량 gate 전에는 광고하지 않는다. 후원은 확인된 URL을
     받은 뒤 정보 영역 텍스트 링크 한 개만 허용하며, 향후 스폰서도 점수·색·순위를
     변경할 수 없다.
-  - 사용자가 Vercel Web Analytics를 enable했지만 재배포 전
-    `/_vercel/insights/script.js`는 HTTP 404였다. dashboard toggle이 아니라 script HTTP
-    200과 첫 pageview를 활성 gate로 고정했다.
+  - 사용자가 Vercel Web Analytics를 enable한 직후 기존 배포의
+    `/_vercel/insights/script.js`는 HTTP 404였다. commit `bd3d9ee` 재배포 뒤 immutable
+    deployment와 정식 alias에서 HTTP 200 JavaScript를 확인했다. dashboard toggle이 아니라
+    script HTTP 200과 첫 pageview를 활성 gate로 고정했으며 첫 dashboard pageview 확인은
+    `[HUMAN]`으로 남긴다.
 - 로컬 검증:
   - backend `731 passed, 1 skipped`, compileall PASS
   - frontend `4 passed`, typecheck와 production build PASS
   - JSON config와 `git diff --check` PASS
-- 배포 전 판정: 코드·문서·자동 회귀는 PASS. Analytics endpoint, security header,
-  privacy page와 egress 2차 최적화의 production timing은 새 격리 배포와 연속 poll에서
-  추가 확인한다.
+- production 배포 검증:
+  - CI run `29381047818` PASS. Vercel immutable deployment
+    `busy-cafe-pe3dkgbpw-jaemanis-projects.vercel.app`에서 commit `bd3d9ee`, Ready 상태를
+    확인한 뒤 `busy-cafe.vercel.app` alias를 전환했다.
+  - root, `/privacy.html`, health, summary와 detail은 HTTP 200이었다. Analytics script도
+    HTTP 200이며, 0.5도 초과 bbox는 의도대로 HTTP 422였다.
+  - root/privacy/API에 HSTS, `nosniff`, frame deny, `no-referrer`와 Permissions Policy가
+    적용됐다. Vercel 관리 Analytics asset에는 app header가 적용되지 않지만 자체
+    cross-origin resource policy와 장기 cache가 있어 정상으로 판정했다.
+  - `budy-cafe.vercel.app`이 단순 alias가 아니라 project domain에 남아 새 배포마다 자동
+    재연결되는 원인을 확인했다. project domain에서 제거했고 정식 URL은 HTTP 200,
+    오타 URL은 HTTP 404다.
+- 현재 판정: 코드·문서·자동 회귀와 production read 경로는 PASS. Analytics dashboard의
+  첫 pageview와 egress 2차 최적화의 연속 production poll timing은 추가 확인한다.
