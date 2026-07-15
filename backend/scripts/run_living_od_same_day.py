@@ -175,7 +175,7 @@ def _imputation_variants() -> tuple[tuple[float, float], ...]:
     return tuple(variants)
 
 
-def _load_od_artifact(path: Path) -> _OdArtifact:
+def _load_od_artifact(path: Path, *, target_date: date) -> _OdArtifact:
     resolved = path.resolve()
     if not resolved.is_file():
         raise LivingOdSameDayError(f"purpose OD artifact does not exist: {resolved}")
@@ -193,9 +193,10 @@ def _load_od_artifact(path: Path) -> _OdArtifact:
         raise LivingOdSameDayError("purpose OD artifact must remain shadow-only")
 
     target = _dict(root.get("target"), field="target")
-    if target.get("date") != LIVING_OD_SAME_DAY_DATE:
+    target_date_text = target_date.isoformat()
+    if target.get("date") != target_date_text:
         raise LivingOdSameDayError(
-            f"purpose OD target.date must equal {LIVING_OD_SAME_DAY_DATE}"
+            f"purpose OD target.date must equal {target_date_text}"
         )
     if target.get("timezone") != "Asia/Seoul":
         raise LivingOdSameDayError("purpose OD timezone must equal Asia/Seoul")
@@ -416,12 +417,15 @@ def run_living_od_same_day(
     purpose_od_path: Path,
     output_path: Path,
     apply: bool = False,
+    target_date: date | None = None,
 ) -> SameDayResult:
     living_path, purpose_path, output, part = _preflight(
         living_population_path, purpose_od_path, output_path
     )
-    target_date = date.fromisoformat(LIVING_OD_SAME_DAY_DATE)
-    od = _load_od_artifact(purpose_path)
+    selected_date = target_date or date.fromisoformat(LIVING_OD_SAME_DAY_DATE)
+    if not isinstance(selected_date, date):
+        raise LivingOdSameDayError("target_date must be a date")
+    od = _load_od_artifact(purpose_path, target_date=selected_date)
     needed_hours = {
         adjacent
         for hour in LIVING_OD_SAME_DAY_HOURS
@@ -439,7 +443,7 @@ def run_living_od_same_day(
     all_codes: set[str] = set()
     for record in iter_living_population_csv(living_path):
         source_rows += 1
-        if record.observed_date != target_date:
+        if record.observed_date != selected_date:
             raise LivingOdSameDayError(
                 "living population input contains row outside fixed date: "
                 f"{record.observed_date.isoformat()}"
@@ -757,7 +761,7 @@ def run_living_od_same_day(
         "scope": {
             "claim": "same-day cross-source relationship screen; not accuracy or causality",
             "public_model_effect": "none; offline shadow only",
-            "date": LIVING_OD_SAME_DAY_DATE,
+            "date": selected_date.isoformat(),
             "hours": list(LIVING_OD_SAME_DAY_HOURS),
             "zone_kind": SEOUL_ZONE_KIND,
             "fixed_od_zone_count": PURPOSE_OD_SEOUL_ZONE_COUNT,

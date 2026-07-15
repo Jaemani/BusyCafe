@@ -132,6 +132,24 @@ LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN: Final = 0.20
 LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN: Final = 2
 LIVING_OD_SAME_DAY_IMPUTATION_RHO_RANGE_MAX: Final = 0.02
 
+# Held-out repetition of the same-day v2 relationship screen.  Discovery and
+# single-weekend dates remain visible but cannot enter the confirmatory gate.
+LIVING_OD_REPEATS_REPORT_VERSION: Final = "v1-living-od-held-out-repeats"
+LIVING_OD_REPEATS_HELD_OUT_DATES: Final = (
+    "2026-06-09",
+    "2026-06-16",
+    "2026-06-23",
+)
+LIVING_OD_REPEATS_DISCOVERY_DATE: Final = "2026-06-30"
+LIVING_OD_REPEATS_DESCRIPTIVE_DATES: Final = (
+    "2026-06-27",
+    "2026-06-28",
+)
+LIVING_OD_REPEATS_SUPPORTED_POOLED_MEDIAN_MIN: Final = 0.30
+LIVING_OD_REPEATS_CONDITIONAL_DAY_MIN: Final = 2
+LIVING_OD_REPEATS_CONDITIONAL_POOLED_MEDIAN_MIN: Final = 0.20
+LIVING_OD_REPEATS_CONDITIONAL_POSITIVE_RHO_MIN: Final = 7
+
 # Kakao Local is an offline catalog-enrichment source. It is never called from
 # the map request path. Sweep tuning lives here so completeness/cost changes
 # are explicit and testable.
