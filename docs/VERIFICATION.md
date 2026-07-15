@@ -1775,6 +1775,10 @@ HUMAN precision sample과 전역 1:1 충돌 검증 전에는 capacity를 공개 
   [`29402225836`](https://github.com/Jaemani/BusyCafe/actions/runs/29402225836)은 terminal 72,
   complete 70, failed 1, partial 1로 complete rate 97.2222%, target 성공률 98.5882%,
   coverage 121/121이었다. 개선 방향은 보이지만 99% 목표는 아직 통과하지 못했다.
+- commit `29b55db` 배포 후 성수 0.04°×0.025° bbox를 동일 URL로 연속 조회한
+  공개 API 표본은 첫 응답 654ms, 두 번째 43ms였다. 두 응답은 HTTP 200,
+  gzip 전송량 약 49.6kB였고 후속 header에서 `x-vercel-cache: HIT`, `age: 6`,
+  `cache-control: public, max-age=30`을 확인했다. 이는 단일 표본이며 p95 주장이 아니다.
 
 판정: **FAIL(99% production SLO)**. 원인 확정 전 concurrency나 retry를 늘리지 않는다.
 연속 7일 창이 쌓였을 때 다시 측정하고, 그때도 99%에 미달하면 서울 리전의
