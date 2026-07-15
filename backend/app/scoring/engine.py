@@ -348,7 +348,11 @@ def materialize_all(
         )
     existing_states = {
         state.hotspot_id: state
-        for state in session.scalars(select(HotspotServingState))
+        for state in session.scalars(
+            select(HotspotServingState).options(
+                load_only(HotspotServingState.hotspot_id, raiseload=True)
+            )
+        )
     }
     for hotspot_id, history in history_by_hotspot_id.items():
         latest_observed_at, _latest_level = history[-1]

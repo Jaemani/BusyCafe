@@ -274,7 +274,7 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
                 "observed_at": (NOW - timedelta(minutes=10)).isoformat(),
                 "level": 4,
             },
-            {"observed_at": NOW.isoformat(), "level": 3}
+            {"observed_at": NOW.isoformat(), "level": 3},
         ]
         assert serving_state.forecast_1h_json == {
             "FCST_TIME": "2026-07-11 19:00",
@@ -299,7 +299,32 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         assert "hotspot_snapshots.forecast_json" not in history_selects[0]
         assert len(latest_selects) == 1
         assert "hotspot_snapshots.forecast_json" in latest_selects[0]
+        state_selects = [
+            statement
+            for statement in selected_statements
+            if "from hotspot_serving_states" in statement
+        ]
+        assert len(state_selects) == 1
+        assert "hotspot_serving_states.hotspot_id" in state_selects[0]
+        assert "hotspot_serving_states.computed_at" not in state_selects[0]
+        assert "hotspot_serving_states.observed_at" not in state_selects[0]
+        assert "hotspot_serving_states.trend_12h_json" not in state_selects[0]
+        assert "hotspot_serving_states.forecast_1h_json" not in state_selects[0]
         assert score_update_batches == [True]
+    with Session(engine) as verification_session:
+        persisted_state = verification_session.scalar(select(HotspotServingState))
+        assert persisted_state is not None
+        assert persisted_state.trend_12h_json == [
+            {
+                "observed_at": (NOW - timedelta(minutes=10)).isoformat(),
+                "level": 4,
+            },
+            {"observed_at": NOW.isoformat(), "level": 3},
+        ]
+        assert persisted_state.forecast_1h_json == {
+            "FCST_TIME": "2026-07-11 19:00",
+            "FCST_CONGEST_LVL": "보통",
+        }
     engine.dispose()
 
 

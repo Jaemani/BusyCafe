@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, load_only, raiseload, selectinload
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
+    MAX_BBOX_SPAN_DEG,
     MAX_CAFES_PER_VIEWPORT,
     NAVER_MAP_SEARCH_BASE_URL,
     OVERTURE_RELEASE,
@@ -185,6 +186,11 @@ def _parse_bbox(value: str) -> tuple[float, float, float, float]:
     min_lng, min_lat, max_lng, max_lat = parsed
     if not (-180 <= min_lng <= max_lng <= 180 and -90 <= min_lat <= max_lat <= 90):
         raise HTTPException(status_code=422, detail="bbox coordinates are invalid")
+    if (
+        max_lng - min_lng > MAX_BBOX_SPAN_DEG
+        or max_lat - min_lat > MAX_BBOX_SPAN_DEG
+    ):
+        raise HTTPException(status_code=422, detail="bbox span is too large")
     return min_lng, min_lat, max_lng, max_lat
 
 

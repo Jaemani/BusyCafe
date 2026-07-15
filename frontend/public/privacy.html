@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index,follow" />
+    <title>개인정보·운영 안내 · Busy Cafe</title>
+    <style>
+      :root {
+        color: #20231f;
+        background: #f4f1e9;
+        font-family: Pretendard, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        line-height: 1.65;
+      }
+      body { margin: 0; }
+      main {
+        width: min(720px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 56px 0 80px;
+      }
+      a { color: #315f46; }
+      h1 { margin: 0 0 8px; font-size: clamp(2rem, 7vw, 3.5rem); }
+      h2 { margin-top: 40px; font-size: 1.25rem; }
+      p, li { color: #42473f; }
+      .lede { font-size: 1.08rem; color: #20231f; }
+      .notice {
+        padding: 18px 20px;
+        border: 1px solid #c7c2b5;
+        border-radius: 16px;
+        background: #fffdf7;
+      }
+      .back { display: inline-block; margin-bottom: 32px; }
+      footer { margin-top: 56px; color: #72766e; font-size: 0.9rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back" href="/">← 지도로 돌아가기</a>
+      <h1>개인정보·운영 안내</h1>
+      <p class="lede">
+        Busy Cafe는 카페 좌석 점유율이 아니라 서울시 관측을 공간적으로 연결한
+        <strong>주변 지역 혼잡도 추정</strong>을 제공합니다.
+      </p>
+
+      <section class="notice" aria-label="중요 안내">
+        <strong>현재 표시값은 추정치입니다.</strong>
+        매장 내부의 좌석, 대기 인원 또는 영업 상태를 직접 측정하지 않습니다.
+        방문 전 상세 근거와 갱신 시각을 확인하고 외부 지도에서 장소 정보를 다시
+        확인해 주세요.
+      </section>
+
+      <h2>수집하는 정보</h2>
+      <p>
+        계정, 이름, 이메일, 전화번호를 받지 않습니다. 서비스 품질을 확인하기 위해
+        Vercel Web Analytics의 익명 페이지 조회 통계를 사용할 수 있습니다. 분석 이벤트에는
+        카페명, 카페 ID, 검색어, 전화번호, 정확한 위치 좌표를 넣지 않으며 URL의 query와
+        fragment도 제거합니다. 현재 플랜에서 지원하지 않는 행동 이벤트와 혼잡 피드백은
+        전송하지 않습니다.
+      </p>
+
+      <h2>내 위치 기능</h2>
+      <p>
+        내 위치는 브라우저 권한을 허용한 경우에만 사용합니다. Busy Cafe는 정확한 좌표를
+        사용자 프로필이나 별도 위치 기록으로 저장하지 않습니다. 다만 지도를 이동하면
+        고정된 지도 타일 경계의 카페 조회와 베이스맵 요청이 발생하므로, Vercel과 지도
+        제공자의 일반 접속 로그에는 대략적인 조회 지역과 네트워크 정보가 처리될 수
+        있습니다.
+      </p>
+
+      <h2>외부 서비스</h2>
+      <p>
+        카페 상세 확인을 위해 네이버지도, 카카오맵, Google 지도 링크를 제공합니다.
+        링크를 누른 뒤에는 각 서비스의 개인정보 처리방침과 이용약관이 적용됩니다.
+        베이스맵은 OpenFreeMap/OpenStreetMap 계열 데이터를 사용합니다.
+      </p>
+
+      <h2>보관과 삭제</h2>
+      <p>
+        Busy Cafe 애플리케이션은 개인 계정이나 개별 사용자 행동 프로필을 보관하지
+        않습니다. 인프라 제공자가 처리하는 접속·분석 데이터의 보관 기간과 삭제 방식은
+        해당 제공자의 정책과 프로젝트 플랜을 따릅니다. 분석 기능을 변경하거나 사용자
+        피드백 저장을 도입할 때에는 이 안내를 먼저 갱신합니다.
+      </p>
+
+      <h2>문의·장소 정정·보안 제보</h2>
+      <p>
+        장소 누락·폐업·잘못된 위치와 제품 문의는
+        <a href="https://github.com/Jaemani/BusyCafe/issues/new" rel="noopener noreferrer">GitHub 이슈</a>로
+        알려주세요. 민감한 보안 문제는 공개 이슈 대신
+        <a href="https://github.com/Jaemani/BusyCafe/security/advisories/new" rel="noopener noreferrer">비공개 보안 제보</a>를
+        사용해 주세요.
+      </p>
+
+      <footer>시행일: 2026-07-15 · 변경 시 이 페이지에 갱신합니다.</footer>
+    </main>
+  </body>
+</html>

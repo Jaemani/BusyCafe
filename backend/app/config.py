@@ -283,6 +283,9 @@ STALE_WARN_MIN: Final = 25
 CURRENT_DISPLAY_MAX_AGE_MIN: Final = 120
 FRESHNESS_MAX_FUTURE_SKEW_MIN: Final = 2
 MAX_CAFES_PER_VIEWPORT: Final = 5_000
+# The frontend uses canonical Web Mercator tiles at zoom >= 10. Reject wider
+# arbitrary public queries so cache-busting callers cannot force broad DB scans.
+MAX_BBOX_SPAN_DEG: Final = 0.5
 # Public read API cache policy. Vercel keys shared-cache entries by the full
 # path and query string, so the frontend must request canonical tile bboxes to
 # reuse these entries. Map/detail data may lag one ingest cycle already; keep

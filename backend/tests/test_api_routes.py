@@ -220,6 +220,17 @@ def test_bbox_api_returns_active_cached_cafe_with_evidence(api_client) -> None:
     }
 
 
+def test_bbox_api_rejects_oversized_uncacheable_scan(api_client) -> None:
+    response = api_client.get(
+        "/api/cafes/summary",
+        params={"bbox": "126.0,37.0,127.0,38.0"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "bbox span is too large"}
+    assert response.headers.get("cache-control") is None
+
+
 def test_kakao_origin_place_fields_reach_map_and_detail_api(api_client) -> None:
     generated_at = datetime(2026, 7, 14, 12, 34, 56, tzinfo=UTC)
     place = KakaoPlace.model_validate(
