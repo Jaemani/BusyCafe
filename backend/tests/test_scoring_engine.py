@@ -209,20 +209,35 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         )
         session.add_all([hotspot, cafe, second_cafe])
         session.flush()
-        session.add(
-            HotspotSnapshot(
-                hotspot_id=hotspot.id,
-                observed_at=NOW,
-                fetched_at=NOW,
-                congest_level=3,
-                congest_label="약간 붐빔",
-                forecast_json=[
-                    {
-                        "FCST_TIME": "2026-07-11 19:00",
-                        "FCST_CONGEST_LVL": "보통",
-                    }
-                ],
-            )
+        session.add_all(
+            [
+                HotspotSnapshot(
+                    hotspot_id=hotspot.id,
+                    observed_at=NOW - timedelta(minutes=10),
+                    fetched_at=NOW - timedelta(minutes=10),
+                    congest_level=4,
+                    congest_label="붐빔",
+                    forecast_json=[
+                        {
+                            "FCST_TIME": "2026-07-11 19:00",
+                            "FCST_CONGEST_LVL": "붐빔",
+                        }
+                    ],
+                ),
+                HotspotSnapshot(
+                    hotspot_id=hotspot.id,
+                    observed_at=NOW,
+                    fetched_at=NOW,
+                    congest_level=3,
+                    congest_label="약간 붐빔",
+                    forecast_json=[
+                        {
+                            "FCST_TIME": "2026-07-11 19:00",
+                            "FCST_CONGEST_LVL": "보통",
+                        }
+                    ],
+                ),
+            ]
         )
         session.commit()
 
@@ -255,6 +270,10 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         assert serving_state is not None
         assert serving_state.observed_at.replace(tzinfo=UTC) == NOW
         assert serving_state.trend_12h_json == [
+            {
+                "observed_at": (NOW - timedelta(minutes=10)).isoformat(),
+                "level": 4,
+            },
             {"observed_at": NOW.isoformat(), "level": 3}
         ]
         assert serving_state.forecast_1h_json == {
@@ -266,7 +285,20 @@ def test_materialize_all_upserts_active_cafes_and_recomputes_in_place() -> None:
         assert "cafes.source_json" not in materialize_selects
         assert "cafe_scores.contributors_json" not in materialize_selects
         assert "hotspot_snapshots.raw_json" not in materialize_selects
-        assert "hotspot_snapshots.forecast_json" in materialize_selects
+        history_selects = [
+            statement
+            for statement in selected_statements
+            if "hotspot_snapshots.observed_at >=" in statement
+        ]
+        latest_selects = [
+            statement
+            for statement in selected_statements
+            if "max(hotspot_snapshots.observed_at)" in statement
+        ]
+        assert len(history_selects) == 1
+        assert "hotspot_snapshots.forecast_json" not in history_selects[0]
+        assert len(latest_selects) == 1
+        assert "hotspot_snapshots.forecast_json" in latest_selects[0]
         assert score_update_batches == [True]
     engine.dispose()
 

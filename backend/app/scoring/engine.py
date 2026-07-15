@@ -280,6 +280,7 @@ def materialize_all(
             Hotspot.lng,
             HotspotSnapshot.congest_level,
             HotspotSnapshot.observed_at,
+            HotspotSnapshot.forecast_json,
         )
         .join(latest, latest.c.hotspot_id == Hotspot.id)
         .join(
@@ -299,18 +300,37 @@ def materialize_all(
             level=congest_level,
             observed_at=_database_datetime(observed_at),
         )
-        for hotspot_id, name, lat, lng, congest_level, observed_at in rows
+        for (
+            hotspot_id,
+            name,
+            lat,
+            lng,
+            congest_level,
+            observed_at,
+            _forecast_json,
+        ) in rows
     )
     observed_at_by_hotspot_id = {
         observation.hotspot_id: observation.observed_at
         for observation in observations
+    }
+    latest_forecast_by_hotspot_id = {
+        hotspot_id: forecast_json
+        for (
+            hotspot_id,
+            _name,
+            _lat,
+            _lng,
+            _congest_level,
+            _observed_at,
+            forecast_json,
+        ) in rows
     }
     history_rows = session.execute(
         select(
             HotspotSnapshot.hotspot_id,
             HotspotSnapshot.observed_at,
             HotspotSnapshot.congest_level,
-            HotspotSnapshot.forecast_json,
         )
         .join(Hotspot, Hotspot.id == HotspotSnapshot.hotspot_id)
         .where(
@@ -320,18 +340,19 @@ def materialize_all(
         .order_by(HotspotSnapshot.hotspot_id, HotspotSnapshot.observed_at)
     ).all()
     history_by_hotspot_id: dict[
-        int, list[tuple[datetime, int, list[dict[str, Any]] | None]]
+        int, list[tuple[datetime, int]]
     ] = {}
-    for hotspot_id, observed_at, level, forecast_json in history_rows:
+    for hotspot_id, observed_at, level in history_rows:
         history_by_hotspot_id.setdefault(hotspot_id, []).append(
-            (_database_datetime(observed_at), level, forecast_json)
+            (_database_datetime(observed_at), level)
         )
     existing_states = {
         state.hotspot_id: state
         for state in session.scalars(select(HotspotServingState))
     }
     for hotspot_id, history in history_by_hotspot_id.items():
-        latest_observed_at, _latest_level, latest_forecast = history[-1]
+        latest_observed_at, _latest_level = history[-1]
+        latest_forecast = latest_forecast_by_hotspot_id.get(hotspot_id)
         values = {
             "computed_at": computed_at,
             "observed_at": latest_observed_at,
@@ -340,7 +361,7 @@ def materialize_all(
                     "observed_at": observed_at.isoformat(),
                     "level": level,
                 }
-                for observed_at, level, _forecast in history
+                for observed_at, level in history
             ],
             "forecast_1h_json": _forecast_one_hour(
                 latest_forecast,
