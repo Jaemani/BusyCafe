@@ -116,6 +116,20 @@ PURPOSE_OD_STABILITY_VECTOR_ANGLE_P90_MAX_DEG: Final = 75.0
 PURPOSE_OD_STABILITY_VECTOR_WITHIN_45_MIN: Final = 0.70
 PURPOSE_OD_STABILITY_VECTOR_STRENGTH_DELTA_MEDIAN_MAX: Final = 0.10
 
+# Pre-registered same-day OA-22784 living-population ↔ OA-22300 purpose-OD
+# relationship screen.  This remains offline-only and cannot alter public v1.
+LIVING_OD_SAME_DAY_REPORT_VERSION: Final = "v1-living-od-same-day-screen"
+LIVING_OD_SAME_DAY_DATE: Final = "2026-06-30"
+LIVING_OD_SAME_DAY_HOURS: Final = (8, 14, 18)
+LIVING_OD_SAME_DAY_IMPUTATIONS: Final = (0.0, 2.0, 3.0)
+LIVING_OD_SAME_DAY_PRIMARY_IMPUTATION: Final = 2.0
+LIVING_OD_SAME_DAY_CODE_COVERAGE_MIN: Final = 0.95
+LIVING_OD_SAME_DAY_CELL_UNIVERSE_JACCARD_MIN: Final = 0.99
+LIVING_OD_SAME_DAY_SCREENING_MEDIAN_MIN: Final = 0.30
+LIVING_OD_SAME_DAY_CONDITIONAL_MEDIAN_MIN: Final = 0.20
+LIVING_OD_SAME_DAY_CONDITIONAL_POSITIVE_MIN: Final = 2
+LIVING_OD_SAME_DAY_IMPUTATION_RHO_RANGE_MAX: Final = 0.02
+
 # Kakao Local is an offline catalog-enrichment source. It is never called from
 # the map request path. Sweep tuning lives here so completeness/cost changes
 # are explicit and testable.
