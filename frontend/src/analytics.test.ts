@@ -9,8 +9,12 @@ vi.mock("@vercel/analytics", () => analyticsMocks);
 
 import {
   initializeProductAnalytics,
+  isAnalyticsCafeBrand,
   stripAnalyticsUrlDetails,
+  trackBrandFilter,
   trackCafeMarkerClick,
+  trackCafeSearchResult,
+  trackCafeSearchSelect,
   trackCrowdFeedback,
   trackExternalMapClick,
   trackGeolocationClick,
@@ -55,6 +59,11 @@ describe("product analytics", () => {
     trackGeolocationResult("success");
     trackViewportLoad(20.8, 25);
     trackCrowdFeedback("quieter", 3, "fringe");
+    trackCafeSearchResult(0, "text");
+    trackCafeSearchResult(5, "brand");
+    trackCafeSearchResult(20, "both");
+    trackCafeSearchSelect("both");
+    trackBrandFilter("스타벅스", "on");
 
     expect(analyticsMocks.track.mock.calls).toEqual([
       ["cafe_marker_click", { coverage: "covered", colored: true }],
@@ -65,6 +74,16 @@ describe("product analytics", () => {
         feedback: "quieter",
         context: "fringe:3",
       }],
+      ["cafe_search_result", { result_bucket: "0", mode: "text" }],
+      ["cafe_search_result", { result_bucket: "1-5", mode: "brand" }],
+      ["cafe_search_result", { result_bucket: "6-20", mode: "both" }],
+      ["cafe_search_select", { mode: "both" }],
+      ["brand_filter", { brand: "스타벅스", state: "on" }],
     ]);
+  });
+
+  it("accepts only the fixed brand allowlist", () => {
+    expect(isAnalyticsCafeBrand("폴바셋")).toBe(true);
+    expect(isAnalyticsCafeBrand("사용자 검색어")).toBe(false);
   });
 });

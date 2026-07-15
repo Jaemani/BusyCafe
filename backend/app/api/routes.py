@@ -9,16 +9,22 @@ from math import ceil, isfinite
 from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session, load_only, raiseload, selectinload
 
 from app.config import (
+    CAFE_SEARCH_BRAND_ALIASES,
+    CAFE_SEARCH_DEFAULT_LIMIT,
+    CAFE_SEARCH_MAX_LIMIT,
+    CAFE_SEARCH_MAX_QUERY_LENGTH,
+    CAFE_SEARCH_MIN_QUERY_LENGTH,
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
     MAX_BBOX_SPAN_DEG,
     MAX_CAFES_PER_VIEWPORT,
     NAVER_MAP_SEARCH_BASE_URL,
     OVERTURE_RELEASE,
+    SEOUL_BBOX,
     STALE_WARN_MIN,
 )
 from app.database import get_db
@@ -34,6 +40,7 @@ from app.schemas import (
     CafeDetailResponse,
     CafeMapResponse,
     CafeMapSummaryResponse,
+    CafeSearchResponse,
     ContributorResponse,
     DataSourceManifestItem,
     EvidenceResponse,
@@ -426,6 +433,48 @@ def _cafe_map_summary_response(
     )
 
 
+def _normalized_search_term(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = " ".join(value.split()).lower()
+    return normalized or None
+
+
+def _brand_search_terms(value: str | None) -> tuple[str, ...] | None:
+    normalized = _normalized_search_term(value)
+    if normalized is None:
+        return None
+    for canonical, aliases in CAFE_SEARCH_BRAND_ALIASES.items():
+        normalized_aliases = tuple(
+            term
+            for alias in aliases
+            if (term := _normalized_search_term(alias)) is not None
+        )
+        if normalized in {
+            _normalized_search_term(canonical),
+            *normalized_aliases,
+        }:
+            return (
+                normalized,
+                *(term for term in normalized_aliases if term != normalized),
+            )
+    return ()
+
+
+def _cafe_search_response(
+    cafe: Cafe,
+    score: CafeScore | None,
+    hotspot: Hotspot | None,
+    *,
+    now: datetime,
+) -> CafeSearchResponse:
+    base = _cafe_map_response(cafe, score, hotspot, now=now)
+    return CafeSearchResponse(
+        **base.model_dump(),
+        road_address=cafe.road_address,
+    )
+
+
 @router.get("/sources", response_model=SourceManifestResponse)
 def sources() -> SourceManifestResponse:
     return _SOURCE_MANIFEST
@@ -534,6 +583,115 @@ def list_cafe_summaries(
         for item in items
         if min_conf == 0
         or (item.confidence is not None and item.confidence >= min_conf)
+    ]
+
+
+@router.get("/cafes/search", response_model=list[CafeSearchResponse])
+def search_cafes(
+    q: str | None = Query(
+        default=None,
+        min_length=CAFE_SEARCH_MIN_QUERY_LENGTH,
+        max_length=CAFE_SEARCH_MAX_QUERY_LENGTH,
+    ),
+    brand: str | None = Query(
+        default=None,
+        min_length=CAFE_SEARCH_MIN_QUERY_LENGTH,
+        max_length=CAFE_SEARCH_MAX_QUERY_LENGTH,
+    ),
+    limit: int = Query(
+        CAFE_SEARCH_DEFAULT_LIMIT,
+        ge=1,
+        le=CAFE_SEARCH_MAX_LIMIT,
+    ),
+    db: Session = Depends(get_db),
+) -> list[CafeSearchResponse]:
+    """Search only the materialized Seoul cafe catalog; never call providers."""
+
+    normalized_q = _normalized_search_term(q)
+    if (
+        normalized_q is not None
+        and len(normalized_q) < CAFE_SEARCH_MIN_QUERY_LENGTH
+    ):
+        raise HTTPException(status_code=422, detail="q is too short")
+    brand_terms = _brand_search_terms(brand)
+    if brand_terms == ():
+        raise HTTPException(status_code=422, detail="unsupported brand")
+    if normalized_q is None and brand_terms is None:
+        raise HTTPException(
+            status_code=422,
+            detail="q or brand must contain a search term",
+        )
+
+    min_lng, min_lat, max_lng, max_lat = SEOUL_BBOX
+    statement = (
+        select(Cafe, CafeScore, Hotspot)
+        .options(
+            load_only(
+                Cafe.id,
+                Cafe.name,
+                Cafe.lat,
+                Cafe.lng,
+                Cafe.road_address,
+                raiseload=True,
+            ),
+            load_only(
+                CafeScore.cafe_id,
+                CafeScore.source_observed_at,
+                CafeScore.level,
+                CafeScore.confidence,
+                CafeScore.coverage,
+                CafeScore.primary_hotspot_id,
+                CafeScore.primary_distance_m,
+                raiseload=True,
+            ),
+            load_only(Hotspot.id, Hotspot.name, raiseload=True),
+            raiseload(Cafe.provider_places),
+        )
+        .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
+        .outerjoin(Hotspot, Hotspot.id == CafeScore.primary_hotspot_id)
+        .where(
+            Cafe.active.is_(True),
+            Cafe.lng.between(min_lng, max_lng),
+            Cafe.lat.between(min_lat, max_lat),
+        )
+    )
+    lower_name = func.lower(Cafe.name)
+    if normalized_q is not None:
+        statement = statement.where(
+            or_(
+                lower_name.contains(normalized_q, autoescape=True),
+                func.lower(Cafe.road_address).contains(
+                    normalized_q,
+                    autoescape=True,
+                ),
+            )
+        )
+    if brand_terms is not None:
+        statement = statement.where(
+            or_(
+                *(
+                    lower_name.contains(term, autoescape=True)
+                    for term in brand_terms
+                )
+            )
+        )
+
+    relevance_term = normalized_q or brand_terms[0]
+    statement = statement.order_by(
+        case(
+            (lower_name == relevance_term, 0),
+            (lower_name.startswith(relevance_term, autoescape=True), 1),
+            (lower_name.contains(relevance_term, autoescape=True), 2),
+            else_=3,
+        ),
+        lower_name,
+        Cafe.id,
+    ).limit(limit)
+
+    request_time = datetime.now(UTC)
+    return [
+        _cafe_search_response(cafe, score, hotspot, now=request_time)
+        for cafe, score, hotspot in db.execute(statement).all()
     ]
 
 

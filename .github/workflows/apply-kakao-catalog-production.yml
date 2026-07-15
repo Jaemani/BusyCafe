@@ -1,12 +1,20 @@
 name: Apply production Kakao canonical cafe catalog
 
 on:
+  schedule:
+    # Tuesday 03:23 KST. Off-peak, once weekly, away from ingest cron minutes.
+    - cron: "23 18 * * 1"
   workflow_dispatch:
     inputs:
       max_expected_candidates:
         description: "Maximum Kakao-owned cafes allowed to insert (1-40000)"
         required: true
         default: 25000
+        type: number
+      max_expected_large_moves:
+        description: "Maximum existing cafes allowed to move over 250m (0-40000)"
+        required: true
+        default: 0
         type: number
       confirmation:
         description: "Type APPLY_KAKAO_CATALOG exactly"
@@ -31,10 +39,13 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
-      MAX_EXPECTED_CANDIDATES: ${{ inputs.max_expected_candidates }}
+      MAX_EXPECTED_CANDIDATES: ${{ github.event_name == 'schedule' && '2000' || inputs.max_expected_candidates }}
+      MAX_EXPECTED_LARGE_MOVES: ${{ github.event_name == 'schedule' && '0' || inputs.max_expected_large_moves }}
       CONFIRMATION: ${{ inputs.confirmation }}
       KAKAO_CACHE: data/kakao-apply/kakao-ce7-seoul.jsonl
       KAKAO_MANIFEST: data/kakao-apply/kakao-ce7-seoul.jsonl.manifest.json
+      KAKAO_DRY_RUN_REPORT: data/kakao-apply/dry-run-report.json
+      KAKAO_APPLY_REPORT: data/kakao-apply/apply-report.json
     steps:
       - name: Check secrets, bound, and exact confirmation
         working-directory: .
@@ -60,7 +71,22 @@ jobs:
             echo "max_expected_candidates must be an integer from 1 through 40000" >&2
             exit 1
           fi
-          if [ "$CONFIRMATION" != "APPLY_KAKAO_CATALOG" ]; then
+          case "$MAX_EXPECTED_LARGE_MOVES" in
+            ''|*[!0-9]*)
+              echo "max_expected_large_moves must be an integer from 0 through 40000" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$MAX_EXPECTED_LARGE_MOVES" -lt 0 ] || [ "$MAX_EXPECTED_LARGE_MOVES" -gt 40000 ]; then
+            echo "max_expected_large_moves must be an integer from 0 through 40000" >&2
+            exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            if [ "$MAX_EXPECTED_CANDIDATES" != "2000" ] || [ "$MAX_EXPECTED_LARGE_MOVES" != "0" ]; then
+              echo "scheduled Kakao refresh must use fixed bounds 2000 candidates and 0 large moves" >&2
+              exit 1
+            fi
+          elif [ "$CONFIRMATION" != "APPLY_KAKAO_CATALOG" ]; then
             echo "confirmation must equal APPLY_KAKAO_CATALOG" >&2
             exit 1
           fi
@@ -91,28 +117,37 @@ jobs:
         run: uv run alembic -c alembic.ini current --check-heads
 
       - name: Re-read production and dry-run exact expansion
-        run: >-
-          uv run python scripts/seed_kakao_catalog_expansion.py
-          --kakao-cache "$KAKAO_CACHE"
-          --kakao-manifest "$KAKAO_MANIFEST"
-          --max-candidates "$MAX_EXPECTED_CANDIDATES"
+        run: |
+          set -o pipefail
+          uv run python scripts/seed_kakao_catalog_expansion.py \
+            --kakao-cache "$KAKAO_CACHE" \
+            --kakao-manifest "$KAKAO_MANIFEST" \
+            --max-candidates "$MAX_EXPECTED_CANDIDATES" \
+            --max-large-moves "$MAX_EXPECTED_LARGE_MOVES" \
+            | tee "$KAKAO_DRY_RUN_REPORT"
 
       - name: Re-read production and apply exact expansion
-        run: >-
-          uv run python scripts/seed_kakao_catalog_expansion.py
-          --kakao-cache "$KAKAO_CACHE"
-          --kakao-manifest "$KAKAO_MANIFEST"
-          --max-candidates "$MAX_EXPECTED_CANDIDATES"
-          --apply
+        run: |
+          set -o pipefail
+          uv run python scripts/seed_kakao_catalog_expansion.py \
+            --kakao-cache "$KAKAO_CACHE" \
+            --kakao-manifest "$KAKAO_MANIFEST" \
+            --max-candidates "$MAX_EXPECTED_CANDIDATES" \
+            --max-large-moves "$MAX_EXPECTED_LARGE_MOVES" \
+            --apply \
+            | tee "$KAKAO_APPLY_REPORT"
 
       - name: Materialize cafe scores after insert
         run: uv run python scripts/materialize_scores.py
 
       - if: ${{ always() }}
-        name: Upload validated Kakao manifest
+        name: Upload validated Kakao manifest and apply reports
         uses: actions/upload-artifact@v6
         with:
           name: kakao-catalog-apply-manifest-${{ github.run_id }}
-          path: backend/${{ env.KAKAO_MANIFEST }}
+          path: |
+            backend/${{ env.KAKAO_MANIFEST }}
+            backend/${{ env.KAKAO_DRY_RUN_REPORT }}
+            backend/${{ env.KAKAO_APPLY_REPORT }}
           if-no-files-found: warn
           retention-days: 30

@@ -9,6 +9,26 @@ export type ExternalMapLinkType = "direct" | "search";
 export type GeolocationResult = "success" | "error";
 export type CrowdFeedback = "similar" | "busier" | "quieter";
 export type CafeCoverage = "covered" | "fringe" | "uncovered";
+export type CafeSearchMode = "text" | "brand" | "both";
+export type CafeSearchResultBucket = "0" | "1-5" | "6-20";
+export type CafeBrand =
+  | "스타벅스"
+  | "투썸플레이스"
+  | "메가MGC커피"
+  | "컴포즈커피"
+  | "빽다방"
+  | "이디야커피"
+  | "폴바셋";
+
+const CAFE_BRANDS = new Set<string>([
+  "스타벅스",
+  "투썸플레이스",
+  "메가MGC커피",
+  "컴포즈커피",
+  "빽다방",
+  "이디야커피",
+  "폴바셋",
+]);
 
 export function stripAnalyticsUrlDetails(event: BeforeSendEvent): BeforeSendEvent | null {
   try {
@@ -83,6 +103,34 @@ export function trackViewportLoad(count: number, colored: number): void {
 
 export function trackCafeDetailError(): void {
   send("cafe_detail_error");
+}
+
+export function isAnalyticsCafeBrand(brand: string): brand is CafeBrand {
+  return CAFE_BRANDS.has(brand);
+}
+
+export function trackCafeSearchResult(
+  count: number,
+  mode: CafeSearchMode,
+): void {
+  const safeCount = Math.max(0, Math.floor(Number.isFinite(count) ? count : 0));
+  const resultBucket: CafeSearchResultBucket = safeCount === 0
+    ? "0"
+    : safeCount <= 5
+      ? "1-5"
+      : "6-20";
+  send("cafe_search_result", { result_bucket: resultBucket, mode });
+}
+
+export function trackCafeSearchSelect(mode: CafeSearchMode): void {
+  send("cafe_search_select", { mode });
+}
+
+export function trackBrandFilter(
+  brand: CafeBrand,
+  state: "on" | "off",
+): void {
+  send("brand_filter", { brand, state });
 }
 
 export function trackCrowdFeedback(

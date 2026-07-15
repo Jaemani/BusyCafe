@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.config import (
     KAKAO_CATALOG_APPLY_ABSOLUTE_MAX_CANDIDATES,
+    KAKAO_CATALOG_REFRESH_ABSOLUTE_MAX_LARGE_MOVES,
+    KAKAO_CATALOG_REFRESH_LARGE_MOVE_M,
     PROVIDER_VERIFIED_CAFE_CONFIDENCE,
 )
 from app.database import create_db_engine
@@ -26,6 +28,12 @@ from app.ingest.kakao_catalog_expansion import (
     CanonicalCafeIdentity,
     KakaoCanonicalCandidate,
     build_kakao_expansion,
+)
+from app.ingest.kakao_catalog_refresh import (
+    KAKAO_SAFE_DISPLAY_REFRESH_MATCH_METHODS,
+    KakaoDisplayRefresh,
+    KakaoRefreshTarget,
+    build_kakao_display_refresh,
 )
 from app.models import Cafe, CafeProviderPlace
 from app.schemas import KakaoPlace
@@ -53,19 +61,34 @@ class KakaoCatalogApplyReport:
     source_release: str
     cache_place_count: int
     outside_target_region_count: int
+    outside_target_bbox_count: int
     canonical_cafe_count: int
     existing_kakao_origin_count: int
     existing_kakao_provider_count: int
     existing_provider_id_missing_from_cache_count: int
     candidate_count: int
     conflict_count: int
+    blocking_conflict_count: int
+    advisory_conflict_count: int
     conflict_rule_counts: dict[str, int]
+    refresh_eligible_count: int
+    refresh_seen_count: int
+    refresh_missing_count: int
+    refresh_rejected_count: int
+    planned_cafe_refresh_count: int
+    refreshed_cafe_count: int
+    refresh_coordinate_changed_count: int
+    refresh_large_move_count: int
+    refresh_move_bucket_counts: dict[str, int]
+    refresh_changed_field_counts: dict[str, int]
+    refresh_large_move_sample: tuple[dict[str, object], ...]
     planned_cafe_insert_count: int
     planned_provider_insert_count: int
     inserted_cafe_count: int
     inserted_provider_count: int
     candidate_ids_sha256: str
     max_expected_candidates: int | None
+    max_expected_large_moves: int | None
 
 
 def read_validated_kakao_snapshot(
@@ -208,12 +231,28 @@ def _validate_database_ownership(
             )
 
 
+def _refresh_candidate(refresh: KakaoDisplayRefresh) -> KakaoCanonicalCandidate:
+    return KakaoCanonicalCandidate(
+        canonical_source=KAKAO_CANONICAL_SOURCE,
+        canonical_source_id=refresh.kakao_place_id,
+        name=refresh.name,
+        latitude=refresh.latitude,
+        longitude=refresh.longitude,
+        category=refresh.category,
+        road_address=refresh.road_address,
+        lot_address=refresh.lot_address,
+        phone=refresh.phone,
+        direct_url=refresh.direct_url,
+    )
+
+
 def seed_kakao_catalog_expansion(
     session: Session,
     snapshot: ValidatedKakaoSnapshot,
     *,
     apply: bool,
     max_expected_candidates: int | None,
+    max_expected_large_moves: int | None = None,
 ) -> KakaoCatalogApplyReport:
     """Select against current DB state, then insert cafes and links atomically."""
 
@@ -235,6 +274,19 @@ def seed_kakao_catalog_expansion(
         raise KakaoCatalogApplyError(
             "--apply requires an explicit --max-candidates safety bound"
         )
+    if max_expected_large_moves is not None and not (
+        0
+        <= max_expected_large_moves
+        <= KAKAO_CATALOG_REFRESH_ABSOLUTE_MAX_LARGE_MOVES
+    ):
+        raise ValueError(
+            "max_expected_large_moves must be between 0 and "
+            f"{KAKAO_CATALOG_REFRESH_ABSOLUTE_MAX_LARGE_MOVES}"
+        )
+    if apply and max_expected_large_moves is None:
+        raise KakaoCatalogApplyError(
+            "--apply requires an explicit --max-large-moves safety bound"
+        )
 
     try:
         cafes = tuple(session.scalars(select(Cafe).order_by(Cafe.id)))
@@ -242,6 +294,12 @@ def seed_kakao_catalog_expansion(
             session.scalars(select(CafeProviderPlace).order_by(CafeProviderPlace.id))
         )
         _validate_database_ownership(cafes, provider_places)
+        cafes_by_id = {cafe.id: cafe for cafe in cafes}
+        kakao_places_by_cafe = {
+            place.cafe_id: place
+            for place in provider_places
+            if place.provider == KAKAO_CANONICAL_SOURCE
+        }
         existing_kakao_origin_count = sum(
             cafe.origin_provider == KAKAO_CANONICAL_SOURCE for cafe in cafes
         )
@@ -261,6 +319,42 @@ def seed_kakao_catalog_expansion(
             for place in provider_places
             if place.provider == KAKAO_CANONICAL_SOURCE
         )
+        refresh_targets = tuple(
+            KakaoRefreshTarget(
+                cafe_id=cafe.id,
+                origin_provider=cafe.origin_provider,
+                kakao_place_id=kakao_places_by_cafe[cafe.id].provider_place_id,
+                match_method=kakao_places_by_cafe[cafe.id].match_method,
+                name=cafe.name,
+                latitude=cafe.lat,
+                longitude=cafe.lng,
+                road_address=cafe.road_address,
+                phone=cafe.phone,
+                source_release=cafe.source_release,
+            )
+            for cafe in cafes
+            if cafe.active
+            and cafe.id in kakao_places_by_cafe
+            and kakao_places_by_cafe[cafe.id].active
+            and kakao_places_by_cafe[cafe.id].match_method
+            in KAKAO_SAFE_DISPLAY_REFRESH_MATCH_METHODS
+        )
+        refresh_build = build_kakao_display_refresh(
+            snapshot.places,
+            refresh_targets,
+            source_release=snapshot.source_release,
+        )
+        if (
+            apply
+            and max_expected_large_moves is not None
+            and refresh_build.report.large_move_count > max_expected_large_moves
+        ):
+            raise KakaoCatalogApplyError(
+                "large coordinate move count "
+                f"{refresh_build.report.large_move_count} exceeds operator bound "
+                f"{max_expected_large_moves} "
+                f"(threshold={KAKAO_CATALOG_REFRESH_LARGE_MOVE_M:g}m)"
+            )
         build = build_kakao_expansion(
             snapshot.places,
             canonical,
@@ -291,8 +385,36 @@ def seed_kakao_catalog_expansion(
                     "Kakao candidate collides with an existing origin/provider"
                 )
             _candidate_values(candidate, source_release=snapshot.source_release)
+        for refresh in refresh_build.refreshes:
+            _candidate_values(
+                _refresh_candidate(refresh),
+                source_release=snapshot.source_release,
+            )
 
-        inserted_cafes = inserted_providers = 0
+        inserted_cafes = inserted_providers = refreshed_cafes = 0
+        if apply:
+            for refresh in refresh_build.refreshes:
+                cafe = cafes_by_id[refresh.cafe_id]
+                values = _candidate_values(
+                    _refresh_candidate(refresh),
+                    source_release=snapshot.source_release,
+                )
+                cafe.name = values["name"]  # type: ignore[assignment]
+                cafe.lat = values["lat"]  # type: ignore[assignment]
+                cafe.lng = values["lng"]  # type: ignore[assignment]
+                cafe.road_address = values["road_address"]  # type: ignore[assignment]
+                cafe.phone = values["phone"]  # type: ignore[assignment]
+                if cafe.origin_provider == KAKAO_CANONICAL_SOURCE:
+                    cafe.source_release = snapshot.source_release
+                    cafe.source_json = values["source_json"]  # type: ignore[assignment]
+                refreshed_cafes += 1
+            for cafe_id in refresh_build.seen_cafe_ids:
+                provider = kakao_places_by_cafe[cafe_id]
+                provider.detail_url = (
+                    f"https://place.map.kakao.com/{provider.provider_place_id}"
+                )
+                provider.last_seen_at = snapshot.generated_at
+                provider.verified_at = snapshot.generated_at
         if apply and candidates:
             created_by_place_id: dict[str, Cafe] = {}
             for candidate in candidates:
@@ -332,6 +454,7 @@ def seed_kakao_catalog_expansion(
             outside_target_region_count=(
                 build.report.outside_target_region_count
             ),
+            outside_target_bbox_count=build.report.outside_target_bbox_count,
             canonical_cafe_count=len(cafes),
             existing_kakao_origin_count=existing_kakao_origin_count,
             existing_kakao_provider_count=len(kakao_provider_ids),
@@ -340,13 +463,43 @@ def seed_kakao_catalog_expansion(
             ),
             candidate_count=len(candidates),
             conflict_count=build.report.conflict_count,
+            blocking_conflict_count=build.report.blocking_conflict_count,
+            advisory_conflict_count=build.report.advisory_conflict_count,
             conflict_rule_counts=build.report.conflict_rule_counts,
+            refresh_eligible_count=refresh_build.report.eligible_target_count,
+            refresh_seen_count=refresh_build.report.seen_target_count,
+            refresh_missing_count=refresh_build.report.missing_target_count,
+            refresh_rejected_count=refresh_build.report.rejected_target_count,
+            planned_cafe_refresh_count=len(refresh_build.refreshes),
+            refreshed_cafe_count=refreshed_cafes,
+            refresh_coordinate_changed_count=(
+                refresh_build.report.coordinate_changed_count
+            ),
+            refresh_large_move_count=refresh_build.report.large_move_count,
+            refresh_move_bucket_counts=refresh_build.report.move_bucket_counts,
+            refresh_changed_field_counts=(
+                refresh_build.report.changed_field_counts
+            ),
+            refresh_large_move_sample=tuple(
+                {
+                    "cafe_id": refresh.cafe_id,
+                    "kakao_place_id": refresh.kakao_place_id,
+                    "name": refresh.name,
+                    "movement_m": round(refresh.movement_m, 3),
+                }
+                for refresh in sorted(
+                    refresh_build.refreshes,
+                    key=lambda item: (-item.movement_m, item.cafe_id),
+                )
+                if refresh.movement_m > KAKAO_CATALOG_REFRESH_LARGE_MOVE_M
+            )[:20],
             planned_cafe_insert_count=len(candidates),
             planned_provider_insert_count=len(candidates),
             inserted_cafe_count=inserted_cafes,
             inserted_provider_count=inserted_providers,
             candidate_ids_sha256=build.report.candidate_ids_sha256,
             max_expected_candidates=max_expected_candidates,
+            max_expected_large_moves=max_expected_large_moves,
         )
     except Exception:
         session.rollback()
@@ -359,6 +512,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--kakao-manifest", type=Path)
     parser.add_argument("--database-url")
     parser.add_argument("--max-candidates", type=int)
+    parser.add_argument("--max-large-moves", type=int)
     parser.add_argument("--apply", action="store_true")
     return parser
 
@@ -376,6 +530,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     snapshot,
                     apply=args.apply,
                     max_expected_candidates=args.max_candidates,
+                    max_expected_large_moves=args.max_large_moves,
                 )
         finally:
             engine.dispose()

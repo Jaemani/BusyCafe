@@ -78,6 +78,9 @@ def build_database_report(
         cafes,
         provider_ids,
     )
+    candidate_ids = {
+        candidate.canonical_source_id for candidate in build.candidates
+    }
     return {
         "mode": "read-only-dry-run",
         "canonical_source_for_candidates": "kakao",
@@ -93,7 +96,17 @@ def build_database_report(
             }
             for candidate in build.candidates[:20]
         ],
-        "conflict_sample": [asdict(conflict) for conflict in build.conflicts[:20]],
+        "conflict_sample": [
+            {
+                **asdict(conflict),
+                "disposition": (
+                    "advisory_included"
+                    if conflict.kakao_place_id in candidate_ids
+                    else "blocking_excluded"
+                ),
+            }
+            for conflict in build.conflicts[:20]
+        ],
         "apply_gate": "HUMAN approval required; this command has no apply mode",
     }
 

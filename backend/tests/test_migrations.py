@@ -322,6 +322,56 @@ def test_public_table_lockdown_is_sqlite_compatible(
         get_settings.cache_clear()
 
 
+def test_postgresql_search_migration_installs_trigram_indexes() -> None:
+    raw_database_url = os.environ.get("DATABASE_URL", "")
+    if not raw_database_url:
+        pytest.skip("PostgreSQL CI database is not configured")
+    database_url = normalize_database_url(raw_database_url)
+    if not database_url.startswith("postgresql+psycopg://"):
+        pytest.skip("PostgreSQL-only search-index assertion")
+
+    engine = create_engine(database_url)
+    if engine.url.database != "cafe_crowd_test":
+        engine.dispose()
+        pytest.skip("refusing to mutate a non-test PostgreSQL database")
+
+    get_settings.cache_clear()
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    try:
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            extension_installed = connection.execute(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_extension "
+                    "WHERE extname = 'pg_trgm')"
+                )
+            ).scalar_one()
+            index_definitions = dict(
+                connection.execute(
+                    text(
+                        "SELECT indexname, indexdef FROM pg_indexes "
+                        "WHERE schemaname = 'public' AND tablename = 'cafes' "
+                        "AND indexname IN ("
+                        "'ix_cafes_active_name_trgm', "
+                        "'ix_cafes_active_road_address_trgm')"
+                    )
+                ).all()
+            )
+
+        assert extension_installed
+        assert set(index_definitions) == {
+            "ix_cafes_active_name_trgm",
+            "ix_cafes_active_road_address_trgm",
+        }
+        assert all(
+            "USING gin" in definition and "gin_trgm_ops" in definition
+            for definition in index_definitions.values()
+        )
+    finally:
+        engine.dispose()
+        get_settings.cache_clear()
+
+
 def test_public_table_lockdown_revokes_supabase_client_access_on_postgresql() -> None:
     raw_database_url = os.environ.get("DATABASE_URL", "")
     if not raw_database_url:

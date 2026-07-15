@@ -109,6 +109,11 @@ KAKAO_CACHE_FILENAME: Final = "kakao-ce7-seoul.jsonl"
 # Hard stop for the manually confirmed Kakao-owned canonical catalog apply.
 # The operator supplies a lower expected-candidate bound for every write run.
 KAKAO_CATALOG_APPLY_ABSOLUTE_MAX_CANDIDATES: Final = 40_000
+# Existing Kakao-linked display rows may refresh from the same validated
+# snapshot, but large coordinate moves require an explicit operator allowance.
+KAKAO_CATALOG_REFRESH_ABSOLUTE_MAX_LARGE_MOVES: Final = 40_000
+KAKAO_CATALOG_REFRESH_LARGE_MOVE_M: Final = 250.0
+KAKAO_CATALOG_REFRESH_MOVE_BUCKETS_M: Final = (10.0, 50.0, 250.0, 1_000.0)
 KAKAO_VERIFY_LNG: Final = 126.9769
 KAKAO_VERIFY_LAT: Final = 37.5759
 KAKAO_VERIFY_RADIUS_M: Final = 1_000
@@ -283,6 +288,25 @@ STALE_WARN_MIN: Final = 25
 CURRENT_DISPLAY_MAX_AGE_MIN: Final = 120
 FRESHNESS_MAX_FUTURE_SKEW_MIN: Final = 2
 MAX_CAFES_PER_VIEWPORT: Final = 5_000
+# Public catalog search is cache-only and deliberately bounded. One-character
+# scans are too broad to be useful against the full Seoul catalog; the result
+# cap protects both database work and response size during autocomplete.
+CAFE_SEARCH_MIN_QUERY_LENGTH: Final = 2
+CAFE_SEARCH_MAX_QUERY_LENGTH: Final = 80
+CAFE_SEARCH_DEFAULT_LIMIT: Final = 20
+CAFE_SEARCH_MAX_LIMIT: Final = 50
+# Canonical UI labels map to provider-name aliases observed in Korean catalogs.
+# This is a product filter, not a claim that every matching row is corporate-
+# verified; place identity still comes from the cached provider catalog.
+CAFE_SEARCH_BRAND_ALIASES: Final = {
+    "스타벅스": ("스타벅스", "starbucks"),
+    "투썸플레이스": ("투썸플레이스", "투썸", "a twosome place", "twosome"),
+    "메가MGC커피": ("메가mgc커피", "메가커피", "mega mgc coffee"),
+    "컴포즈커피": ("컴포즈커피", "컴포즈", "compose coffee"),
+    "빽다방": ("빽다방", "paik's coffee", "paiks coffee"),
+    "이디야커피": ("이디야커피", "이디야", "ediya coffee", "ediya"),
+    "폴바셋": ("폴바셋", "paul bassett"),
+}
 # The frontend uses canonical Web Mercator tiles at zoom >= 10. Reject wider
 # arbitrary public queries so cache-busting callers cannot force broad DB scans.
 MAX_BBOX_SPAN_DEG: Final = 0.5
@@ -295,6 +319,10 @@ API_MAP_BROWSER_MAX_AGE_SEC: Final = 30
 API_MAP_EDGE_MAX_AGE_SEC: Final = 60
 API_MAP_STALE_WHILE_REVALIDATE_SEC: Final = 120
 API_MAP_STALE_IF_ERROR_SEC: Final = 600
+# Free-text queries have high cardinality and poor shared-cache reuse. Keep
+# them only in the caller's browser; allowlisted brand-only queries use the
+# normal shared map cache because their key space is fixed and tiny.
+API_SEARCH_BROWSER_MAX_AGE_SEC: Final = 30
 # Frontend map requests carry a data version derived from durable ingest time
 # and catalog size. A new ingest therefore uses a new cache key immediately;
 # the old version can stay at the edge for one full polling interval.

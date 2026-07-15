@@ -49,9 +49,9 @@ def _canonical() -> CanonicalCafeIdentity:
     )
 
 
-def test_expansion_uses_kakao_identity_and_quarantines_collisions() -> None:
+def test_expansion_uses_kakao_identity_and_only_blocks_canonical_collisions() -> None:
     records = (
-        _kakao("100", x=126.90, y=37.40),
+        _kakao("100", x=126.90, y=37.42),
         _kakao("200", x=127.10, y=37.70),
         _kakao("300", place_name="기존카페", x=126.98, y=37.5502),
         _kakao("301", phone="02-1234-5678", x=126.98, y=37.5508),
@@ -66,12 +66,19 @@ def test_expansion_uses_kakao_identity_and_quarantines_collisions() -> None:
 
     build = build_kakao_expansion(records, (_canonical(),), ("100",))
 
-    assert [item.canonical_source_id for item in build.candidates] == ["200"]
+    assert [item.canonical_source_id for item in build.candidates] == [
+        "200",
+        "400",
+        "401",
+        "500",
+        "501",
+    ]
     candidate = build.candidates[0]
     assert candidate.canonical_source == "kakao"
     assert candidate.direct_url == "https://place.map.kakao.com/200"
     assert build.report.kakao_input_count == 11
     assert build.report.outside_target_region_count == 0
+    assert build.report.outside_target_bbox_count == 0
     assert build.report.unique_kakao_place_count == 9
     assert build.report.duplicate_kakao_place_id_count == 1
     assert build.report.existing_provider_id_in_cache_count == 1
@@ -79,13 +86,15 @@ def test_expansion_uses_kakao_identity_and_quarantines_collisions() -> None:
     assert build.report.canonical_collision_count == 3
     assert build.report.peer_collision_count == 4
     assert build.report.conflict_count == 7
-    assert build.report.candidate_count == 1
+    assert build.report.blocking_conflict_count == 3
+    assert build.report.advisory_conflict_count == 4
+    assert build.report.candidate_count == 5
     assert build.report.human_apply_required is True
 
 
 def test_expansion_is_order_independent() -> None:
     records = (
-        _kakao("100", x=126.90, y=37.40),
+        _kakao("100", x=126.90, y=37.42),
         _kakao("200", x=127.10, y=37.70),
         _kakao("300", place_name="기존카페", x=126.98, y=37.5502),
     )
@@ -127,8 +136,37 @@ def test_expansion_excludes_non_seoul_and_missing_addresses() -> None:
 
     assert [item.canonical_source_id for item in build.candidates] == ["300"]
     assert build.report.outside_target_region_count == 2
+    assert build.report.outside_target_bbox_count == 0
     assert build.report.unmatched_kakao_place_count == 1
     assert build.report.candidate_count == 1
+
+
+def test_expansion_requires_seoul_bbox_and_preserves_kakao_xy_axis_order() -> None:
+    records = (
+        _kakao("100", x=126.90, y=37.55),
+        _kakao(
+            "200",
+            x=37.55,
+            y=37.55,
+            address_name="서울 종로구 테스트동 200",
+            road_address_name="서울 종로구 테스트로 200",
+        ),
+        _kakao(
+            "300",
+            x=127.30,
+            y=37.55,
+            address_name="서울 종로구 테스트동 300",
+            road_address_name="서울 종로구 테스트로 300",
+        ),
+    )
+
+    build = build_kakao_expansion(records, (), ())
+
+    assert [item.canonical_source_id for item in build.candidates] == ["100"]
+    assert build.candidates[0].longitude == 126.90
+    assert build.candidates[0].latitude == 37.55
+    assert build.report.outside_target_region_count == 0
+    assert build.report.outside_target_bbox_count == 2
 
 
 def test_expansion_rejects_invalid_provider_ownership_inputs() -> None:
@@ -180,7 +218,7 @@ def test_database_report_is_read_only_and_exposes_human_gate(
             report_kakao_catalog_expansion,
             "read_kakao_cache",
             lambda cache, manifest: (
-                _kakao("100", x=126.90, y=37.40),
+                _kakao("100", x=126.90, y=37.42),
                 _kakao("200", x=127.10, y=37.70),
             ),
         )

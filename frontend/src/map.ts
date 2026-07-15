@@ -34,6 +34,12 @@ import {
   trackGeolocationResult,
   trackViewportLoad,
 } from "./analytics";
+import {
+  cafeMapCenter,
+  cafeMatchesBrand,
+  initializeCafeSearch,
+  type CafeSearchResult,
+} from "./cafe-search";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const INITIAL_CENTER: [number, number] = [126.9237, 37.5563];
@@ -329,6 +335,7 @@ export async function initializeCafeMap(
   let displayedDelayedCount = 0;
   let displayedStaleCount = 0;
   let displayedDelayRange: { min: number; max: number } | null = null;
+  let activeBrand: string | null = null;
 
   const renderCafeStatus = (): void => {
     if (displayedCafeCount === null) return;
@@ -406,11 +413,19 @@ export async function initializeCafeMap(
 
   const updateDisplayedCollection = (forceMapUpdate = false): void => {
     if (!hasLoadedCafeData) return;
-    const nextCollection = ageCafeCollection(
+    const agedCollection = ageCafeCollection(
       rawCafeCollection,
       Date.now(),
       freshnessLimits,
     );
+    const nextCollection: CafeFeatureCollection = activeBrand === null
+      ? agedCollection
+      : {
+          ...agedCollection,
+          features: agedCollection.features.filter((feature) =>
+            cafeMatchesBrand(feature.properties.name, activeBrand)
+          ),
+        };
     const shouldUpdateMap = forceMapUpdate ||
       hasVisualFreshnessChange(displayedCafeCollection, nextCollection);
     displayedCafeCollection = nextCollection;
@@ -450,17 +465,21 @@ export async function initializeCafeMap(
 
   let detailController: AbortController | null = null;
   let detailRequestSequence = 0;
-  const selectCafe = async (cafeId: string): Promise<void> => {
-    const cafe = displayedCafeCollection.features.find(
+  const selectCafe = async (
+    cafeId: string,
+    fallback?: CafeMapProperties,
+  ): Promise<void> => {
+    const cafeFeature = displayedCafeCollection.features.find(
       (feature) => feature.properties.id === cafeId,
     );
+    const cafe = cafeFeature?.properties ?? fallback;
     if (!cafe) return;
 
     detailController?.abort();
     const controller = new AbortController();
     detailController = controller;
     const sequence = ++detailRequestSequence;
-    showCafePanelLoading(cafe.properties);
+    showCafePanelLoading(cafe);
     try {
       const detail = await cafeProvider.getCafeDetail(cafeId, controller.signal);
       if (
@@ -473,7 +492,7 @@ export async function initializeCafeMap(
       if (controller.signal.aborted || sequence !== detailRequestSequence) return;
       trackCafeDetailError();
       showCafePanelError(
-        cafe.properties,
+        cafe,
         error instanceof Error ? error.message : "카페 상세 정보를 불러오지 못했습니다",
       );
     } finally {
@@ -576,6 +595,30 @@ export async function initializeCafeMap(
       statusElement.textContent = "일부 지도 데이터를 다시 불러오는 중입니다";
       statusElement.dataset.state = "loading";
     });
+  });
+
+  const focusSearchResult = (cafe: CafeSearchResult): void => {
+    let opened = false;
+    const openCafe = (): void => {
+      if (opened) return;
+      opened = true;
+      void selectCafe(cafe.id, cafe);
+    };
+    map.once("moveend", openCafe);
+    map.easeTo({
+      center: cafeMapCenter(cafe),
+      zoom: Math.max(map.getZoom(), 16),
+      duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 450,
+    });
+    window.setTimeout(openCafe, 700);
+  };
+
+  initializeCafeSearch({
+    onSelect: focusSearchResult,
+    onBrandChange: (brand) => {
+      activeBrand = brand;
+      updateDisplayedCollection(true);
+    },
   });
 
   const refreshInBackground = (): void => {

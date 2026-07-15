@@ -22,6 +22,7 @@ from app.database import get_db
 from app.main import (
     HEALTH_CACHE_CONTROL,
     MAP_CACHE_CONTROL,
+    SEARCH_CACHE_CONTROL,
     STATIC_CACHE_CONTROL,
     VERSIONED_MAP_CACHE_CONTROL,
     create_app,
@@ -258,9 +259,10 @@ def test_kakao_origin_place_fields_reach_map_and_detail_api(api_client) -> None:
                 generated_at=generated_at,
                 source_release=generated_at.isoformat(),
             ),
-            apply=True,
-            max_expected_candidates=1,
-        )
+                apply=True,
+                max_expected_candidates=1,
+                max_expected_large_moves=0,
+            )
         assert report.inserted_cafe_count == 1
         cafe = session.scalar(
             select(Cafe).where(
@@ -332,6 +334,256 @@ def test_bbox_summary_omits_lazy_evidence_but_keeps_map_state(api_client) -> Non
     assert payload[0]["freshness"] == "fresh"
     assert payload[0]["level"] == 2
     assert payload[0]["coverage"] == "covered"
+
+
+def test_cafe_search_matches_cached_name_and_address_with_map_evidence(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add_all(
+            [
+                Cafe(
+                    overture_id="overture:search-starbucks",
+                    source_release="test",
+                    source_confidence=1.0,
+                    primary_category="cafe",
+                    name="스타벅스 서울역점",
+                    lat=37.554,
+                    lng=126.971,
+                    road_address="서울 용산구 한강대로 405",
+                ),
+                Cafe(
+                    overture_id="overture:search-latin",
+                    source_release="test",
+                    source_confidence=1.0,
+                    primary_category="cafe",
+                    name="BLUE BOTTLE 성수",
+                    lat=37.544,
+                    lng=127.055,
+                    road_address="서울 성동구 아차산로 7",
+                ),
+            ]
+        )
+        session.commit()
+
+    by_name = api_client.get("/api/cafes/search", params={"q": "blue bottle"})
+    assert by_name.status_code == 200
+    assert by_name.headers["cache-control"] == SEARCH_CACHE_CONTROL
+    assert [item["name"] for item in by_name.json()] == ["BLUE BOTTLE 성수"]
+    assert set(by_name.json()[0]) == {
+        "id",
+        "name",
+        "road_address",
+        "lat",
+        "lng",
+        "level",
+        "confidence",
+        "freshness",
+        "coverage",
+        "evidence",
+    }
+    assert by_name.json()[0]["freshness"] == "n/a"
+    assert by_name.json()[0]["coverage"] == "uncovered"
+    assert by_name.json()[0]["evidence"] == {
+        "hotspot_name": None,
+        "distance_m": None,
+        "observed_at": None,
+        "age_minutes": None,
+    }
+
+    by_address = api_client.get(
+        "/api/cafes/search",
+        params={"q": "한강대로", "brand": "스타벅스"},
+    )
+    assert by_address.status_code == 200
+    assert [item["name"] for item in by_address.json()] == ["스타벅스 서울역점"]
+    assert by_address.json()[0]["road_address"] == "서울 용산구 한강대로 405"
+
+    scored = api_client.get("/api/cafes/search", params={"q": "정확한"}).json()
+    assert len(scored) == 1
+    assert scored[0]["level"] == 2
+    assert scored[0]["coverage"] == "covered"
+    assert scored[0]["evidence"]["hotspot_name"] == "테스트 핫스팟"
+
+
+def test_cafe_search_excludes_inactive_and_out_of_seoul_rows(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add(
+            Cafe(
+                overture_id="overture:search-busan",
+                source_release="test",
+                source_confidence=1.0,
+                primary_category="cafe",
+                name="검색제외 부산카페",
+                lat=35.1796,
+                lng=129.0756,
+            )
+        )
+        session.commit()
+
+    assert api_client.get(
+        "/api/cafes/search", params={"q": "비활성"}
+    ).json() == []
+    assert api_client.get(
+        "/api/cafes/search", params={"q": "검색제외"}
+    ).json() == []
+
+
+def test_cafe_search_treats_sql_wildcards_as_literal_and_honors_limit(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add_all(
+            [
+                Cafe(
+                    overture_id="overture:search-percent",
+                    source_release="test",
+                    source_confidence=1.0,
+                    primary_category="cafe",
+                    name="카페 100%",
+                    lat=37.56,
+                    lng=127.01,
+                ),
+                Cafe(
+                    overture_id="overture:search-percent-decoy",
+                    source_release="test",
+                    source_confidence=1.0,
+                    primary_category="cafe",
+                    name="카페 100점",
+                    lat=37.57,
+                    lng=127.02,
+                ),
+            ]
+        )
+        session.commit()
+
+    literal = api_client.get("/api/cafes/search", params={"q": "100%"})
+    assert literal.status_code == 200
+    assert [item["name"] for item in literal.json()] == ["카페 100%"]
+
+    limited = api_client.get(
+        "/api/cafes/search",
+        params={"q": "카페", "limit": 1},
+    )
+    assert limited.status_code == 200
+    assert len(limited.json()) == 1
+
+
+def test_cafe_search_orders_exact_then_prefix_then_contains_then_address(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        for source_id, name, address in (
+            ("exact", "블루보틀", "서울 종로구 1"),
+            ("prefix", "블루보틀 성수점", "서울 성동구 2"),
+            ("contains", "성수 블루보틀", "서울 성동구 3"),
+            ("address", "다른 이름", "서울 중구 블루보틀길 4"),
+        ):
+            session.add(
+                Cafe(
+                    overture_id=f"overture:search-rank-{source_id}",
+                    source_release="test",
+                    source_confidence=1.0,
+                    primary_category="cafe",
+                    name=name,
+                    lat=37.56,
+                    lng=127.01,
+                    road_address=address,
+                )
+            )
+        session.commit()
+
+    response = api_client.get("/api/cafes/search", params={"q": "블루보틀"})
+
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()] == [
+        "블루보틀",
+        "블루보틀 성수점",
+        "성수 블루보틀",
+        "다른 이름",
+    ]
+
+
+def test_cafe_search_brand_allowlist_accepts_canonical_and_alias(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        session.add(
+            Cafe(
+                overture_id="overture:search-brand-alias",
+                source_release="test",
+                source_confidence=1.0,
+                primary_category="cafe",
+                name="메가커피 서초점",
+                lat=37.49,
+                lng=127.01,
+            )
+        )
+        session.commit()
+
+    canonical = api_client.get(
+        "/api/cafes/search", params={"brand": "메가MGC커피"}
+    )
+    alias = api_client.get("/api/cafes/search", params={"brand": "메가커피"})
+    unsupported = api_client.get(
+        "/api/cafes/search", params={"brand": "알수없는브랜드"}
+    )
+
+    assert canonical.status_code == 200
+    assert alias.status_code == 200
+    assert canonical.json() == alias.json()
+    assert [item["name"] for item in canonical.json()] == ["메가커피 서초점"]
+    assert canonical.headers["cache-control"] == MAP_CACHE_CONTROL
+    assert unsupported.status_code == 422
+    assert unsupported.headers.get("cache-control") is None
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {},
+        {"q": "  "},
+        {"q": "한"},
+        {"q": "한 "},
+        {"brand": "A"},
+        {"q": "카페", "limit": 0},
+        {"q": "카페", "limit": 51},
+        {"q": "가" * 81},
+    ],
+)
+def test_cafe_search_rejects_unbounded_inputs(api_client, params) -> None:
+    response = api_client.get("/api/cafes/search", params=params)
+
+    assert response.status_code == 422
+    assert response.headers.get("cache-control") is None
+
+
+def test_cafe_search_reads_only_materialized_serving_tables(api_client) -> None:
+    factory = api_client.app.state.test_session_factory
+    engine = factory.kw["bind"]
+    selected_statements: list[str] = []
+
+    def capture_selects(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ) -> None:
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            selected_statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", capture_selects)
+    try:
+        response = api_client.get("/api/cafes/search", params={"q": "정확한"})
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+    assert response.status_code == 200
+    assert len(selected_statements) == 1
+    statement = selected_statements[0]
+    assert "hotspot_snapshots" not in statement
+    assert "hotspot_serving_states" not in statement
+    assert "cafe_provider_places" not in statement
 
 
 def test_api_request_modules_never_import_scoring_code() -> None:

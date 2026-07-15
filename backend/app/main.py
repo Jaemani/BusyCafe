@@ -14,6 +14,7 @@ from app.config import (
     API_MAP_EDGE_MAX_AGE_SEC,
     API_MAP_STALE_IF_ERROR_SEC,
     API_MAP_STALE_WHILE_REVALIDATE_SEC,
+    API_SEARCH_BROWSER_MAX_AGE_SEC,
     API_STATIC_BROWSER_MAX_AGE_SEC,
     API_STATIC_EDGE_MAX_AGE_SEC,
     API_STATIC_STALE_IF_ERROR_SEC,
@@ -62,6 +63,7 @@ STATIC_CACHE_CONTROL = _public_cache_control(
     stale_while_revalidate=API_STATIC_STALE_WHILE_REVALIDATE_SEC,
     stale_if_error=API_STATIC_STALE_IF_ERROR_SEC,
 )
+SEARCH_CACHE_CONTROL = f"private, max-age={API_SEARCH_BROWSER_MAX_AGE_SEC}"
 
 
 def _cache_control_for_path(path: str) -> str | None:
@@ -69,7 +71,12 @@ def _cache_control_for_path(path: str) -> str | None:
         return HEALTH_CACHE_CONTROL
     if path == "/api/sources":
         return STATIC_CACHE_CONTROL
-    if path in {"/api/cafes", "/api/cafes/summary", "/api/hotspots"}:
+    if path in {
+        "/api/cafes",
+        "/api/cafes/summary",
+        "/api/cafes/search",
+        "/api/hotspots",
+    }:
         return MAP_CACHE_CONTROL
     if (
         path.startswith("/api/cafes/")
@@ -93,6 +100,11 @@ def create_app() -> FastAPI:
 
         response = await call_next(request)
         cache_control = _cache_control_for_path(request.url.path)
+        if (
+            request.url.path == "/api/cafes/search"
+            and request.query_params.get("q") is not None
+        ):
+            cache_control = SEARCH_CACHE_CONTROL
         if (
             cache_control == MAP_CACHE_CONTROL
             and request.query_params.get("data_version")

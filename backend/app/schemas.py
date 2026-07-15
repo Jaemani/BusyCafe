@@ -272,6 +272,12 @@ class CafeMapSummaryResponse(BaseModel):
     age_minutes: int | None = Field(default=None, ge=0)
 
 
+class CafeSearchResponse(CafeMapResponse):
+    """Bounded catalog-search result with enough context to disambiguate names."""
+
+    road_address: str | None = None
+
+
 class ContributorResponse(BaseModel):
     hotspot_id: int
     distance_m: float

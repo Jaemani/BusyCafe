@@ -26,6 +26,38 @@
         <p id="search-status" class="search-status" role="status">
           지도를 준비하고 있습니다
         </p>
+        <section class="cafe-search" aria-label="카페 찾기">
+          <form id="cafe-search-form" class="cafe-search-form" role="search">
+            <label class="sr-only" for="cafe-search-input">카페 이름 또는 주소</label>
+            <span class="cafe-search-icon" aria-hidden="true">⌕</span>
+            <input
+              id="cafe-search-input"
+              name="q"
+              type="search"
+              inputmode="search"
+              enterkeyhint="search"
+              autocomplete="off"
+              placeholder="가려는 카페를 검색해 보세요"
+              aria-controls="cafe-search-results"
+              aria-describedby="cafe-search-message"
+              aria-expanded="false"
+            />
+            <button id="cafe-search-submit" type="submit">검색</button>
+          </form>
+          <div id="cafe-brand-filters" class="cafe-brand-filters" aria-label="프랜차이즈 필터">
+            <button type="button" data-cafe-brand="스타벅스" aria-pressed="false">스타벅스</button>
+            <button type="button" data-cafe-brand="투썸플레이스" aria-pressed="false">투썸</button>
+            <button type="button" data-cafe-brand="메가MGC커피" aria-pressed="false">메가MGC</button>
+            <button type="button" data-cafe-brand="컴포즈커피" aria-pressed="false">컴포즈</button>
+            <button type="button" data-cafe-brand="빽다방" aria-pressed="false">빽다방</button>
+            <button type="button" data-cafe-brand="이디야커피" aria-pressed="false">이디야</button>
+            <button type="button" data-cafe-brand="폴바셋" aria-pressed="false">폴바셋</button>
+          </div>
+          <div id="cafe-search-popover" class="cafe-search-popover" hidden>
+            <p id="cafe-search-message" class="cafe-search-message" role="status"></p>
+            <ul id="cafe-search-results" class="cafe-search-results" aria-label="카페 검색 결과"></ul>
+          </div>
+        </section>
         <p class="source-line">
           서울시 실시간 도시데이터 기반
           · <a href="/about.html">서비스·데이터 안내</a>

@@ -13,6 +13,7 @@ from app.config import (
     KAKAO_CAFE_CATEGORY_CODE,
     PERMIT_RECONCILE_EXACT_NAME_MAX_M,
     PERMIT_RECONCILE_EXACT_PHONE_MAX_M,
+    SEOUL_BBOX,
 )
 from app.geo import haversine_m
 from app.ingest.permit_reconciliation import normalize_name
@@ -58,6 +59,7 @@ class KakaoExpansionConflict:
 class KakaoExpansionReport:
     kakao_input_count: int
     outside_target_region_count: int
+    outside_target_bbox_count: int
     unique_kakao_place_count: int
     duplicate_kakao_place_id_count: int
     canonical_cafe_count: int
@@ -68,6 +70,8 @@ class KakaoExpansionReport:
     canonical_collision_count: int
     peer_collision_count: int
     conflict_count: int
+    blocking_conflict_count: int
+    advisory_conflict_count: int
     conflict_rule_counts: dict[str, int]
     candidate_count: int
     candidate_ids_sha256: str
@@ -115,6 +119,22 @@ def _has_seoul_address(place: KakaoPlace) -> bool:
         if parts and parts[0] in _SEOUL_ADDRESS_PREFIXES:
             return True
     return False
+
+
+def _is_within_seoul_bbox(place: KakaoPlace) -> bool:
+    """Validate Kakao's documented ``x=longitude, y=latitude`` contract."""
+
+    min_lng, min_lat, max_lng, max_lat = SEOUL_BBOX
+    return (
+        min_lng <= place.longitude <= max_lng
+        and min_lat <= place.latitude <= max_lat
+    )
+
+
+def is_target_seoul_kakao_place(place: KakaoPlace) -> bool:
+    """Return whether address and WGS84 coordinate gates both pass."""
+
+    return _has_seoul_address(place) and _is_within_seoul_bbox(place)
 
 
 def _candidate(place: KakaoPlace) -> KakaoCanonicalCandidate:
@@ -182,14 +202,20 @@ def build_kakao_expansion(
     place_groups: dict[str, list[KakaoPlace]] = defaultdict(list)
     all_input_ids: set[str] = set()
     outside_target_region_count = 0
+    outside_target_bbox_count = 0
     for place in kakao_places:
         if place.category_group_code != KAKAO_CAFE_CATEGORY_CODE:
             raise ValueError(f"Kakao place is not CE7: {place.place_id}")
         if not place.place_id.isascii() or not place.place_id.isdigit():
             raise ValueError("Kakao place ID must be ASCII digits")
         all_input_ids.add(place.place_id)
-        if not _has_seoul_address(place):
+        has_seoul_address = _has_seoul_address(place)
+        within_seoul_bbox = _is_within_seoul_bbox(place)
+        if not has_seoul_address:
             outside_target_region_count += 1
+        if not within_seoul_bbox:
+            outside_target_bbox_count += 1
+        if not has_seoul_address or not within_seoul_bbox:
             continue
         place_groups[place.place_id].append(place)
     duplicate_ids = {
@@ -319,7 +345,12 @@ def build_kakao_expansion(
     candidates = tuple(
         _candidate(place)
         for place in unlinked
-        if place.place_id not in conflicts
+        # A Kakao place ID is an authoritative provider identity. Multiple
+        # distinct IDs at one coordinate or sharing a chain phone number are
+        # common in malls and dense streets, so peer signals are audit-only.
+        # Only a strong collision with an existing canonical cafe blocks a new
+        # canonical row.
+        if place.place_id not in canonical_collision_ids
     )
     candidate_ids = "\n".join(
         candidate.canonical_source_id for candidate in candidates
@@ -334,6 +365,7 @@ def build_kakao_expansion(
         report=KakaoExpansionReport(
             kakao_input_count=len(kakao_places),
             outside_target_region_count=outside_target_region_count,
+            outside_target_bbox_count=outside_target_bbox_count,
             unique_kakao_place_count=len(unique_places),
             duplicate_kakao_place_id_count=len(duplicate_ids),
             canonical_cafe_count=len(canonical_by_id),
@@ -346,6 +378,10 @@ def build_kakao_expansion(
             canonical_collision_count=len(canonical_collision_ids),
             peer_collision_count=len(peer_collision_ids),
             conflict_count=len(conflict_records),
+            blocking_conflict_count=len(canonical_collision_ids),
+            advisory_conflict_count=len(
+                peer_collision_ids - canonical_collision_ids
+            ),
             conflict_rule_counts=dict(sorted(rule_counts.items())),
             candidate_count=len(candidates),
             candidate_ids_sha256=hashlib.sha256(candidate_ids).hexdigest(),
