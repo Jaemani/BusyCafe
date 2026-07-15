@@ -268,6 +268,34 @@ Jaccard 0.998712였다. 예를 들어 `다사43754600`은 07시에 두 행정동
 - 이 변경은 source row 단위 실측에 따른 representation 수정이다. 결과 threshold 조정이
   아니며 v2도 정확도·인과·독립 검증으로 해석하지 않는다.
 
+#### v2 결과
+
+입력계약 수정과 서로 다른 `PYTHONHASHSEED` 회귀 테스트를 고정한 뒤 v2를 실행했다.
+결정적 report는
+[`artifacts/living-od-same-day-20260630.json`](artifacts/living-od-same-day-20260630.json)이며
+SHA-256은 `f65313105d2aa62d8991d2a1d16737d994f60f20ceeba60cba665b0940e716f7`다.
+
+- 세 시각 모두 427/427 행정동 code coverage 1.0이었다. bare-cell Jaccard minimum은
+  08시 0.99871, 14시 0.99860, 18시 0.99778로 v2 gate를 통과했다. zone-cell Jaccard는
+  0.98512~0.98901이었고 진단값으로 보존했다.
+- primary `OD net(h)` 대 `LP(h+1)-LP(h)` Spearman은 08시 0.92870, 14시 0.59438,
+  18시 0.90204였다. 모두 양수이고 median 0.90204로 고정 screening 기준을 통과했다.
+- secondary 이전 정렬 `LP(h)-LP(h-1)`은 0.91954, 0.23811, 0.83956이었다. 특히 14시에
+  primary보다 낮았다. 결과가 더 좋은 정렬을 고른 것이 아니라 사건시간 뒤 재고를 primary로
+  미리 고정한 결과다.
+- 규모 sanity check인 gross flow 대 동별 stock은 0.89603, 0.95610, 0.93839였다. 동 크기와
+  중심성이라는 공통 요인이 큰 상관을 만들 수 있으므로 독립적인 정확도 증거로 쓰지 않는다.
+- `masked=2, absent=0` primary와 네 sensitivity variant의 verdict는 모두 `screening`이었다.
+  시간별 rho range maximum은 0.000503으로 0.02 상한보다 작아
+  `imputation_sensitive=false`였다.
+
+판정은 **screening relationship supported, promotion denied**다. 같은 날짜 두 통신계열
+추정치에서 시간대별 이동의 순유입과 다음 시간 생활인구 재고 변화가 구조적으로 연결됐다.
+그러나 하루치·공통 원천·행정동 횡단면이므로 실제 보행 혼잡이나 카페 좌석 정확도를 검증한
+것은 아니다. decision의 `historical_feature_candidate`, `accuracy_claim_allowed`,
+`public_promotion_allowed`는 모두 `false`를 유지한다. 다음 단계는 06-09/16/23 화요일을
+held-out 반복으로 사용하고 06-27/28 주말은 기술통계로만 보는 다일 동일날짜 검증이다.
+
 ## 3. 요일·공휴일·시간 기준선
 
 단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,

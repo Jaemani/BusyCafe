@@ -14,6 +14,9 @@
   분리 판정하는 offline evaluator. 어린이날·토요일·일요일은 기술통계에만 쓰고, 입력
   source/artifact SHA와 pair별 지표를 결정적 report로 보존한다. 결과는 scalar
   `conditional`, 목적 `stable`, 방향 `usable`이며 정확도 주장·공개 승격은 금지
+- 같은 `2026-06-30`의 OA-22784 생활인구 재고 변화와 OA-22300 순유입을 exact 행정동
+  코드로 비교하는 offline screen. 경계 격자의 행정동별 부분행·bare-cell universe·마스킹과
+  미게시 행 민감도를 분리하고 결과는 `screening`이지만 정확도 주장·공개 승격은 금지
 - 카페명·주소 전역 검색과 스타벅스·투썸·메가MGC·컴포즈·빽다방·이디야·폴바셋
   필터. 검색은 PostgreSQL cache만 읽고 exact→prefix→부분 일치 순으로 정렬하며,
   PostgreSQL `pg_trgm` index와 2~80자·최대 50건 제한을 적용
@@ -135,6 +138,12 @@
   공개 승격 후보는 권장 8~12주 연속 snapshot과 Phase 6 관측을 요구
 
 ### Fixed
+
+- OA-22784 실파일의 동일 `CELL_ID`가 여러 행정동 부분행을 갖는 계약과 `540.` 같은 trailing
+  decimal 숫자 표현을 strict parser에 반영. 동일 날짜·시각·행정동·CELL_ID를 실제 행
+  identity로 사용하고 원천 문법 밖 값은 계속 거부
+- same-day report가 Python hash seed에 따라 다른 SHA를 만들던 set 순회 float 합산을 정렬
+  합산으로 교체하고 서로 다른 `PYTHONHASHSEED` subprocess 회귀 테스트 추가
 
 - Kakao 대량 원장 적용이 DB commit 뒤 ORM 객체를 행별로 다시 읽어 workflow가 취소되고
   후속 score materialize가 건너뛰어질 수 있던 문제. commit 전 보고값 고정, batch flush,

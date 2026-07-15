@@ -1476,3 +1476,71 @@ INC-2026-018에 기록했다.
 반복됐지만, 한낮 순유입 순위는 불안정했고 실제 활동도·보행 혼잡·카페 좌석 정확도는 아직
 검증하지 않았다. 다음 gate는 OA-22784와 같은 `2026-06-30` 비교, 이후 7월 OA-22300과
 동일 날짜 citydata 비교, 마지막으로 Phase 6 현장 라벨에서 생활인구 단독 대비 개선 확인이다.
+
+## 2026-07-15 — OA-22784 생활인구 ↔ OA-22300 동일 날짜 관계 screen
+
+### 원본 확보와 계약 실측
+
+- OA-22784 공식 페이지를 다시 조회해 일별 파일은 `2026-07-01`부터, 6월은 월파일만
+  제공됨을 확인했다. 존재하지 않는 `seq=260630` 요청은 attachment가 아닌 응답으로
+  fail-closed됐고 파일을 만들지 않았다.
+- 공식 월파일 `250_LOCAL_RESD_202606.zip`: 448,638,322 bytes, SHA-256
+  `953e9790e174220eee0d028f1ae393ccd3e5fd88579db32b5b4a60cf2ba13d62`. ZIP 30개 member
+  integrity PASS.
+- 내부 `250_LOCAL_RESD_20260630.csv`: 58,627,465 bytes, CP949, header 제외
+  253,946행, SHA-256
+  `857b6273d58a83949e653a95720207be0344c740fe4d986fad29b3f4033024ba`.
+- 실파일에서 `(date,hour,CELL_ID)` 중복 group 44,837개,
+  `(date,hour,administrative_dong_code,CELL_ID)` 중복 0개를 확인했다. 같은 cell은 행정동
+  경계에서 여러 부분행을 가진다.
+- `생활인구합계='540.'` 같은 trailing decimal token은 2,477개였고, `*` 또는
+  `[0-9]+(?:\.[0-9]*)?` 밖의 token은 0개였다. parser와 DuckDB validator에 실측 문법을
+  반영했다.
+
+### fail-closed v1과 v2 재등록
+
+첫 두 실행은 각각 잘못된 CELL_ID 유일키와 trailing decimal regex에서 상관 계산 전에
+중단됐다. 입력계약 수정 뒤 v1은 08시 zone-cell Jaccard 0.985120719가 사전 하한 0.99에
+미달해 다시 중단됐다. threshold를 결과 뒤 완화하지 않고 v1을 무효로 기록했다.
+
+진단 결과 07→08시 bare cell은 8,536→8,535개, 이탈 6·진입 5, Jaccard 0.998712였다.
+반면 zone-cell 부분행은 이탈 81·진입 78이었다. geometry와 행정동 부분행 존재 변화를
+분리해야 함을 확인해 상관 계산 전 v2 계약을 commit `4521482`에 고정했다.
+
+- bare-cell 인접 Jaccard ≥0.99만 geometry gate로 사용
+- zone-cell pair 합집합에서 absent 0, masked 2를 primary로 사용
+- 한 요인씩 `mask=0/3`, `absent=2/3` 네 sensitivity variant 추가
+- 날짜 2026-06-30, 08·14·18시, exact code, Spearman과 기존 screening threshold는 유지
+- one-day·통신계열 공통 편향 때문에 accuracy·causality·public promotion은 항상 false
+
+### v2 결과
+
+실행기는 commit `a37793c`, hash-seed 결정성 수정은 `3dd4be6`이다. 결정적 report:
+[`research/artifacts/living-od-same-day-20260630.json`](research/artifacts/living-od-same-day-20260630.json),
+SHA-256 `f65313105d2aa62d8991d2a1d16737d994f60f20ceeba60cba665b0940e716f7`.
+
+| 지표 | 08시 | 14시 | 18시 |
+|---|---:|---:|---:|
+| 행정동 exact coverage | 427/427 | 427/427 | 427/427 |
+| bare-cell Jaccard minimum | 0.99871 | 0.99860 | 0.99778 |
+| primary `net(h)` ↔ `LP(h+1)-LP(h)` rho | 0.92870 | 0.59438 | 0.90204 |
+| secondary `net(h)` ↔ `LP(h)-LP(h-1)` rho | 0.91954 | 0.23811 | 0.83956 |
+| secondary gross flow ↔ stock rho | 0.89603 | 0.95610 | 0.93839 |
+
+- primary 세 rho 모두 양수, median 0.90204로 verdict `screening`.
+- 5개 mask/absence variant 모두 같은 verdict. 시간별 rho range maximum 0.000503으로
+  `imputation_sensitive=false`.
+- 최초 v2 dry-run/apply는 verdict가 같아도 report SHA가 `9399…`/`648d…`로 달랐다.
+  정렬되지 않은 set float 합산을 발견해 두 artifact를 폐기하고 cell ID 정렬과 서로 다른
+  `PYTHONHASHSEED` subprocess 테스트를 추가했다. 수정 뒤 dry-run/apply SHA는 모두 위
+  `f653…16f7`로 일치했다. 상세는 INC-2026-020.
+- backend 전체 `841 passed, 2 skipped`; 대상 7파일 mypy PASS; app/scripts/tests compileall과
+  `git diff --check` PASS.
+- frontend TypeScript와 production build PASS. 기존 500kB chunk warning만 있으며 이번
+  offline 변경과 무관하다.
+
+판정: **PASS(cross-source relationship screen only)**. OD 순유입과 다음 시간 생활인구 재고
+변화의 구조적 관계는 확인했지만 두 데이터 모두 통신계열이고 하루치뿐이다. public v1 API,
+DB, frontend, confidence는 변경하지 않았다. `historical_feature_candidate=false`를 유지한다.
+다음은 06-09/16/23 held-out 화요일 반복과 06-27/28 주말 기술통계이며, compactor의 행정동
+부분행·부분 마스킹 schema는 INC-2026-019 미완 조치로 별도 해결한다.
