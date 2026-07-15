@@ -12,6 +12,7 @@ from app.config import (
     SEOUL_REFRESHMENT_PERMIT_SERVICE,
 )
 from app.geo import haversine_m
+from app.ingest.provider_cafe_catalog import PERMIT_SOURCE
 from app.ingest.seoul_refreshment_candidates import PlaceCandidate
 from scripts.cache_refreshment_candidates import serialize_candidates
 from scripts.report_capacity_match_coverage import (
@@ -47,7 +48,7 @@ def _permit(
     unit_status: str = AREA_UNIT_STATUS,
 ) -> PlaceCandidate:
     return PlaceCandidate(
-        source="fixture",
+        source=PERMIT_SOURCE,
         source_id=identifier,
         name=name,
         latitude=latitude,
@@ -190,6 +191,61 @@ def test_grid_prefilter_keeps_match_across_cell_boundary() -> None:
     report = build_capacity_coverage([permit], [cafe])
 
     assert report["resolution_counts"]["verified"] == 1
+
+
+def test_same_source_catalog_rows_are_excluded_from_independent_matching() -> None:
+    permit = _permit(
+        "permit-source-row",
+        name="Same source cafe",
+        address="Same source address",
+        area="42.9",
+    )
+    same_source = _cafe(
+        "same-source-cafe",
+        name="Same source cafe",
+        address="Same source address",
+        provider=PERMIT_SOURCE,
+    )
+
+    report = build_capacity_coverage([permit], [same_source])
+
+    assert report["resolution_counts"] == {
+        "verified": 0,
+        "missing": 1,
+        "ambiguous": 0,
+    }
+    assert report["scope"]["active_cafe_count"] == 1
+    assert report["scope"]["independent_active_cafe_count"] == 0
+    assert report["scope"]["same_source_cafe_excluded_count"] == 1
+    assert report["scope"]["independent_source_required"] is True
+
+
+def test_same_source_duplicate_cannot_make_independent_match_ambiguous() -> None:
+    permit = _permit(
+        "permit-with-independent-match",
+        name="Independent cafe",
+        address="Independent address",
+        area="42.9",
+    )
+    cafes = [
+        _cafe(
+            "same-source-copy",
+            name="Independent cafe",
+            address="Independent address",
+            provider=PERMIT_SOURCE,
+        ),
+        _cafe(
+            "kakao-independent",
+            name="Independent cafe",
+            address="Independent address",
+            provider="kakao",
+        ),
+    ]
+
+    report = build_capacity_coverage([permit], cafes)
+
+    assert report["resolution_counts"]["verified"] == 1
+    assert report["matched_cafe_origin_provider_counts"] == {"kakao": 1}
 
 
 def test_report_is_input_order_independent_and_contains_no_source_identity() -> None:

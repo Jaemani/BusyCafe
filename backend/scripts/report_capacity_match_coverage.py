@@ -36,6 +36,7 @@ from app.ingest.permit_cafe_entity_resolution import (
     normalize_phone_digits,
     resolve_permit_to_cafes,
 )
+from app.ingest.provider_cafe_catalog import PERMIT_SOURCE
 from app.ingest.seoul_refreshment_candidates import PlaceCandidate
 from app.models import Cafe
 from scripts.cache_refreshment_candidates import (
@@ -229,9 +230,13 @@ def build_capacity_coverage(
 ) -> dict[str, Any]:
     """Resolve eligible permits and return aggregate-only deterministic facts."""
 
-    sorted_cafes = sorted(cafes, key=lambda item: item.cafe_id)
-    if len({item.cafe_id for item in sorted_cafes}) != len(sorted_cafes):
+    all_cafes = sorted(cafes, key=lambda item: item.cafe_id)
+    if len({item.cafe_id for item in all_cafes}) != len(all_cafes):
         raise CapacityCoverageError("active cafe IDs are not unique")
+    sorted_cafes = [
+        cafe for cafe in all_cafes if cafe.origin_provider != PERMIT_SOURCE
+    ]
+    same_source_excluded_count = len(all_cafes) - len(sorted_cafes)
     grid: dict[tuple[int, int, int], list[CapacityCafe]] = defaultdict(list)
     provider_by_id: dict[str, str] = {}
     for cafe in sorted_cafes:
@@ -254,6 +259,8 @@ def build_capacity_coverage(
     eligible.sort(key=lambda item: item[0].source_id)
     if len({item[0].source_id for item in eligible}) != len(eligible):
         raise CapacityCoverageError("eligible permit IDs are not unique")
+    if {item[0].source for item in eligible} - {PERMIT_SOURCE}:
+        raise CapacityCoverageError("eligible permit source is not canonical")
 
     statuses: Counter[str] = Counter()
     evidence_rules: Counter[str] = Counter()
@@ -341,7 +348,11 @@ def build_capacity_coverage(
         "scope": {
             "input_candidate_count": len(candidates),
             "eligible_coffee_permit_count": len(eligible),
-            "active_cafe_count": len(sorted_cafes),
+            "active_cafe_count": len(all_cafes),
+            "independent_active_cafe_count": len(sorted_cafes),
+            "same_source_cafe_excluded_count": same_source_excluded_count,
+            "same_source_origin_provider": PERMIT_SOURCE,
+            "independent_source_required": True,
             "max_distance_m": PERMIT_CAFE_ENTITY_MAX_DISTANCE_M,
             "required_category": TARGET_CATEGORY,
             "required_area_status": "eligible",
