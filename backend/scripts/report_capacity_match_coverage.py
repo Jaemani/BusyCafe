@@ -33,6 +33,7 @@ from app.geo import EARTH_RADIUS_M, haversine_m
 from app.ingest.permit_cafe_entity_resolution import (
     CafeEntityRecord,
     PermitEntityRecord,
+    normalize_entity_text,
     normalize_phone_digits,
     resolve_permit_to_cafes,
 )
@@ -45,12 +46,22 @@ from scripts.cache_refreshment_candidates import (
 )
 
 
-REPORT_VERSION = "v1-production-capacity-match-coverage"
+REPORT_VERSION = "v2-production-capacity-match-coverage"
 INPUT_CONTRACT_VERSION = "oa-16095-place-candidate-area-v1"
 TARGET_CATEGORY = SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE
 AREA_UNIT = SEOUL_REFRESHMENT_PERMIT_AREA_UNIT
 AREA_UNIT_STATUS = SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS
 PERCENTILES = (1, 5, 50, 95, 99)
+GATE_DIAGNOSTIC_STAGES = (
+    "grid_nearby",
+    "actual_within_distance_gate",
+    "exact_normalized_name_within_distance_gate",
+    "exact_normalized_address_within_distance_gate",
+    "exact_normalized_phone_within_distance_gate",
+    "exact_address_and_name_within_distance_gate",
+    "exact_address_and_phone_within_distance_gate",
+    "exact_name_and_phone_within_distance_gate",
+)
 
 
 class CapacityCoverageError(RuntimeError):
@@ -268,6 +279,8 @@ def build_capacity_coverage(
     matched_areas: list[Decimal] = []
     nearby_candidate_pair_count = 0
     max_nearby_cafes_per_permit = 0
+    gate_pair_counts: Counter[str] = Counter()
+    gate_permit_counts: Counter[str] = Counter()
     for candidate, area in eligible:
         cell = _grid_cell(
             candidate.latitude,
@@ -286,6 +299,51 @@ def build_capacity_coverage(
         max_nearby_cafes_per_permit = max(
             max_nearby_cafes_per_permit, len(nearby)
         )
+        permit_name = normalize_entity_text(candidate.name)
+        permit_address = normalize_entity_text(candidate.road_address)
+        permit_phone = _usable_phone(candidate.phone)
+        permit_stage_hits: set[str] = set()
+        for cafe in nearby:
+            gate_pair_counts["grid_nearby"] += 1
+            permit_stage_hits.add("grid_nearby")
+            distance_m = haversine_m(
+                candidate.latitude,
+                candidate.longitude,
+                cafe.latitude,
+                cafe.longitude,
+            )
+            if distance_m > PERMIT_CAFE_ENTITY_MAX_DISTANCE_M:
+                continue
+            gate_pair_counts["actual_within_distance_gate"] += 1
+            permit_stage_hits.add("actual_within_distance_gate")
+            cafe_name = normalize_entity_text(cafe.name)
+            cafe_address = normalize_entity_text(cafe.road_address)
+            cafe_phone = _usable_phone(cafe.phone)
+            name_exact = permit_name is not None and permit_name == cafe_name
+            address_exact = (
+                permit_address is not None and permit_address == cafe_address
+            )
+            phone_exact = permit_phone is not None and permit_phone == cafe_phone
+            flags = {
+                "exact_normalized_name_within_distance_gate": name_exact,
+                "exact_normalized_address_within_distance_gate": address_exact,
+                "exact_normalized_phone_within_distance_gate": phone_exact,
+                "exact_address_and_name_within_distance_gate": (
+                    address_exact and name_exact
+                ),
+                "exact_address_and_phone_within_distance_gate": (
+                    address_exact and phone_exact
+                ),
+                "exact_name_and_phone_within_distance_gate": (
+                    name_exact and phone_exact
+                ),
+            }
+            for stage, matched in flags.items():
+                if matched:
+                    gate_pair_counts[stage] += 1
+                    permit_stage_hits.add(stage)
+        for stage in permit_stage_hits:
+            gate_permit_counts[stage] += 1
         resolution = resolve_permit_to_cafes(
             PermitEntityRecord(
                 permit_id=candidate.source_id,
@@ -368,6 +426,18 @@ def build_capacity_coverage(
         "verified_evidence_rule_counts": {
             rule: evidence_rules[rule]
             for rule in ("name_only", "phone_only", "both")
+        },
+        "gate_diagnostics": {
+            "scope": "eligible_permits_x_independent_active_cafes",
+            "identifiers_or_text_emitted": False,
+            "permit_counts": {
+                stage: gate_permit_counts[stage]
+                for stage in GATE_DIAGNOSTIC_STAGES
+            },
+            "pair_counts": {
+                stage: gate_pair_counts[stage]
+                for stage in GATE_DIAGNOSTIC_STAGES
+            },
         },
         "matched_area_m2": area_distribution,
         "matched_cafe_origin_provider_counts": dict(sorted(provider_counts.items())),

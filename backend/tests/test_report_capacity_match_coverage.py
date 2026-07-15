@@ -153,6 +153,30 @@ def test_aggregate_resolution_rules_percentiles_providers_and_filters() -> None:
         "phone_only": 1,
         "both": 1,
     }
+    assert report["gate_diagnostics"] == {
+        "scope": "eligible_permits_x_independent_active_cafes",
+        "identifiers_or_text_emitted": False,
+        "permit_counts": {
+            "grid_nearby": 5,
+            "actual_within_distance_gate": 5,
+            "exact_normalized_name_within_distance_gate": 3,
+            "exact_normalized_address_within_distance_gate": 4,
+            "exact_normalized_phone_within_distance_gate": 2,
+            "exact_address_and_name_within_distance_gate": 3,
+            "exact_address_and_phone_within_distance_gate": 2,
+            "exact_name_and_phone_within_distance_gate": 1,
+        },
+        "pair_counts": {
+            "grid_nearby": 25,
+            "actual_within_distance_gate": 25,
+            "exact_normalized_name_within_distance_gate": 4,
+            "exact_normalized_address_within_distance_gate": 5,
+            "exact_normalized_phone_within_distance_gate": 2,
+            "exact_address_and_name_within_distance_gate": 4,
+            "exact_address_and_phone_within_distance_gate": 2,
+            "exact_name_and_phone_within_distance_gate": 1,
+        },
+    }
     assert report["matched_area_m2"] == {
         "samples": 3,
         "unit": "m2",
@@ -218,6 +242,8 @@ def test_same_source_catalog_rows_are_excluded_from_independent_matching() -> No
     assert report["scope"]["independent_active_cafe_count"] == 0
     assert report["scope"]["same_source_cafe_excluded_count"] == 1
     assert report["scope"]["independent_source_required"] is True
+    assert set(report["gate_diagnostics"]["permit_counts"].values()) == {0}
+    assert set(report["gate_diagnostics"]["pair_counts"].values()) == {0}
 
 
 def test_same_source_duplicate_cannot_make_independent_match_ambiguous() -> None:
@@ -246,6 +272,7 @@ def test_same_source_duplicate_cannot_make_independent_match_ambiguous() -> None
 
     assert report["resolution_counts"]["verified"] == 1
     assert report["matched_cafe_origin_provider_counts"] == {"kakao": 1}
+    assert report["gate_diagnostics"]["pair_counts"]["grid_nearby"] == 1
 
 
 def test_report_is_input_order_independent_and_contains_no_source_identity() -> None:
