@@ -6,6 +6,15 @@
 
 ### Added
 
+- 공식 `㎡` 단위가 확인된 OA-16095 `FACILTOTSCP`의 전수 분포를 사용하는
+  결정적 venue-capacity offline shadow. 상대 면적 계수로 작은 매장의 구조적
+  pressure를 표현하되 좌석 점유율·확률·공개 점수로 사용하지 않는다
+- 서울 도로명주소의 시·구·도로명·건물 본번·부번을 정확히 비교하는
+  capacity entity-resolution challenger. 50m·이름 또는 전화 정확 일치·전역
+  1:1을 모두 요구하고 출처·부정형 주소·다중 후보에서 abstain한다
+- 비정상 ingest cycle별 상태·지속시간·저장 수·신호를 개인정보 없이 보고하는
+  SLO analyzer schema v2와 주간 168시간 read-only 점검. Capacity 매칭도 단계별
+  aggregate만 보고하며 식별자·이름·주소·전화를 출력하지 않는다
 - 수도권 생활이동 OA-22300의 엄격한 UTF-8 CSV/ZIP 스트리밍 파서와 offline 이동 shadow.
   유입은 도착시각, 유출은 출발시각으로 정렬하고 목적별 비율·순유입·행정구역 중심점 간
   합성 방향·방향 강도·좌표 coverage를 결정적으로 산출한다. dry-run 기본, 원자 게시,
@@ -147,6 +156,12 @@
 
 ### Fixed
 
+- 인허가에서 파생된 카페가 같은 인허가 원장과 자기매칭돼 capacity 독립
+  검증으로 집계되던 문제. 동일 source를 후보 index 구성 전에 제외하고 기존
+  4,637건 결과를 폐기했다
+- 두 개 이상 인허가가 하나의 카페를 각각 단일 후보로 점유할 수 있던
+  reverse identity 충돌. 관련 매칭을 모두 ambiguous로 강등하고 임의로 승자를
+  선택하지 않는다
 - OA-22784 실파일의 동일 `CELL_ID`가 여러 행정동 부분행을 갖는 계약과 `540.` 같은 trailing
   decimal 숫자 표현을 strict parser에 반영. 동일 날짜·시각·행정동·CELL_ID를 실제 행
   identity로 사용하고 원천 문법 밖 값은 계속 거부

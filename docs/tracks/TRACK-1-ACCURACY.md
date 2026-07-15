@@ -102,33 +102,39 @@
 
 매장 단위 자리 혼잡은 주변 수요만이 아니라 매장이 받아낼 수 있는 수용력에도 좌우된다는
 가설을 shadow로 검증한다. 같은 지역 수요에서도 큰 매장과 작은 매장을 demand-only 모델이
-같게 평가하면 순위 오차가 생길 수 있다. 서울시 휴게음식점 인허가 OA-16095의 공식 Open
-API 스키마에는 `SITEAREA`(소재지면적)와 정확히 `FACILTOTSCP`(시설총규모)가 있으며,
-서비스명은 `LOCALDATA_072405`다. 공식 설명과 샘플은
-[서울 열린데이터광장 OA-16095](https://data.seoul.go.kr/dataList/OA-16095/A/1/datasetView.do)와
-[공식 sample 응답](http://openapi.seoul.go.kr:8088/sample/json/LOCALDATA_072405/1/5/)을
-근거로 한다.
+같게 평가하면 순위 오차가 생길 수 있다.
 
-2026-07-15 실응답 첫 1,000행에서 영업상태·상세영업상태가 모두 `01`이고 업태가 `커피숍`인
-66행은 66행 모두 `FACILTOTSCP`, `SITEAREA`, 좌표, 도로명주소, 사업장명과 관리번호가
-비어 있지 않았다. 두 면적 필드도 66행 모두 숫자로 같았다. 그러나 첫 페이지는 무작위
-표본이 아니므로 이 결과를 전체 결측률이나 매칭 성공률로 외삽하지 않는다. 공식 스키마가
-면적 단위를 명시하지 않았으므로 단위는 `unverified`로 보존하고, 공식 코드북 또는 담당기관
-확인 전에는 제곱미터로 해석하거나 좌석 수로 변환하지 않는다.
+서울시 휴게음식점 인허가 OA-16095의 `FACILTOTSCP`(시설총규모)와
+`SITEAREA`(소재지면적)의 행정상 단위는 공식 근거로 `㎡`로 확정했다. 다만 OpenAPI의
+machine-readable schema 자체에는 unit metadata가 없다. 전수 분포·출처·artifact SHA는
+[검증 기록](../VERIFICATION.md)이 소유한다. Capacity 입력은 `FACILTOTSCP`만 사용하고
+`SITEAREA`, 건축물대장 면적, building footprint를 대체값으로 채우지 않는다.
 
-카카오 등 소비자 POI와 인허가 행은 공통 ID가 없다. 영업 중 커피숍만 대상으로 좌표 변환
-후 정규화한 도로명주소·상호·거리에서 단일하고 강한 일치가 있을 때만 면적을 연결한다.
-법인명과 간판명이 다르거나 후보가 둘 이상이면 연결하지 않는다. 건축물대장의 건물·층·호
-면적과 building footprint는 업소 시설면적이 아니다. 정확한 동·층·호 결합이 없는
-건축물대장은 별도 저신뢰 provenance로만, footprint는 주변 공간 형태 feature로만 다루며
-`FACILTOTSCP`의 대체값으로 채우지 않는다. 이 실험은 공개 `v1-idw-point` 점수·신뢰도·API에
-영향을 주지 않는 offline shadow다.
+Shadow 공식은 다음으로 고정한다.
+
+```text
+pressure = regional_demand × (42.9㎡ / max(FACILTOTSCP, 10㎡))^alpha
+alpha ∈ {0.25, 0.5, 0.75, 1.0}; 현재 shadow 기본값 = 0.5
+```
+
+면적 비율은 무차원 계수다. `regional_demand`가 `people/m²`면 pressure도 `people/m²`,
+무차원 anomaly면 pressure도 무차원으로 남는다. Hotspot 전체 인구를 각 카페에 귀속하거나
+면적으로 나누지 않는다. 기본 값에서 10㎡ 매장은 약 2.07배, 42.9㎡는 1배,
+234㎡는 약 0.43배의 구조적 pressure를 갖는다. 이는 작은 매장의 수용력 제약을
+더 크게 반영하는 proxy이며, 좌석 점유율·수용 인원·적중 확률이 아니다.
+
+인허가와 소비자 POI는 공통 ID가 없다. 독립 source 카페만 대상으로 50m 이내,
+구조화한 서울 도로명주소 일치, 이름 또는 전화 일치, 단일 후보를 모두 만족할
+때만 면적을 연결한다. 동일 인허가 source에서 파생된 카페는 독립 검증 후보에서
+제외한다. 백화점·역사·테이크아웃 등 매장 문맥은 provenance로 보존하되 아직
+공식을 바꾸지 않는다. 면적이 없거나 0 이하이거나 단위·매칭이 확실하지 않으면
+abstain한다. 공개 `v1-idw-point` 점수·신뢰도·API에는 영향을 주지 않는다.
 
 **Gate F:** 고정한 Phase 6 매장 상태 라벨의 held-out 슬롯에서 capacity shadow를 동일 입력의
 demand-only 기준선과 paired 비교한다. 매장 순위 Spearman 개선분의 사전 등록한 95% bootstrap
 구간 하한이 0보다 크고, 한 단계 이내 정확도가 악화되지 않으며, 매장 규모·거리 구간에서
-심각한 회귀가 없어야 후보로 유지한다. 표본 부족, 단위 미확인 또는 entity resolution
-오류가 남으면 결과와 무관하게 shadow에 머문다.
+심각한 회귀가 없어야 후보로 유지한다. 면적 단위는 확인했지만, 독립 entity resolution과
+held-out Phase 6 검증이 통과하지 않았으므로 현재 capacity 모델은 shadow에 머문다.
 
 ## 실험 운영 원칙
 

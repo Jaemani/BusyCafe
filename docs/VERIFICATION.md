@@ -7,7 +7,7 @@
 | Phase | 상태 | 완료일 | 근거 |
 |---|---|---|---|
 | Phase 0 | 완료 | 2026-07-11 | 실 API/스키마/라벨/호출 제한/마스터 검증 및 fixture 커밋 |
-| Phase 1 | 진행 중 (1시간 무인 구동 대기) | - | 121개 seed apply와 full-cycle 121/121 성공 확인. 대상별 5개 snapshot 1시간 검증 전 |
+| Phase 1 | 인제스트 구현 완료·운영 SLO 미달 | - | 121개 coverage는 100%이나 24시간 complete rate 94.46%, 최근 6시간 97.22%로 99% 목표 미달 |
 | Phase 2 | 진행 중 (catalog cache 설계/구현) | - | Overture release cache·인허가 보정·직접 상세 링크 검증 전 |
 | Phase 3 | 병렬 구현 완료·gate 대기 | - | 순수 IDW/신뢰도/materialize 및 테스트 완료, Phase 2 HUMAN 품질 gate 대기 |
 | Phase 4 | 병렬 구현 완료·gate 대기 | - | cache-only 4 endpoint·CORS·bbox p95 검증 완료, Phase 3 gate 대기 |
@@ -1671,3 +1671,126 @@ uv run python -m compileall -q app scripts tests
 손실 없이 보존하고 consumer가 불확실한 현재값에서 abstain함을 real apply와 회귀 테스트로
 확인했다. 이는 historical/activity shadow 입력 계약의 수정이며 public v1 API, DB,
 frontend, production score와 confidence는 변경하지 않는다.
+
+## 2026-07-15 — OA-16095 면적 단위·전수 프로파일과 capacity shadow
+
+- 관련 커밋: `8840ac3`
+- 입력: 서울시 휴게음식점 인허가 OA-16095 `LOCALDATA_072405` 전체
+  146,286행
+- 단위 근거:
+  - [LOCALDATA 관리자 Q&A `nttId=1011`](https://www.localdata.go.kr/devcenter/bbs/devQnaDetail.do?nttId=1011&bbsId=B0000100&menuNo=20003)
+  - [식품위생법 시행규칙 별지 37](https://www.law.go.kr/LSW/flDownload.do?gubun=&flSeq=160975813&bylClsCd=110202)
+  - [식품위생법 시행규칙 별지 34](https://www.law.go.kr/LSW/flDownload.do?gubun=&flSeq=160975791&bylClsCd=110202)
+- 행정상 `FACILTOTSCP`(시설총규모)와 `SITEAREA`(소재지면적)의 단위는 모두
+  `㎡`로 확인했다. 다만 machine-readable OpenAPI schema에는 unit metadata가 없어
+  단위의 행정적 근거와 기계 스키마 한계를 provenance에 함께 보존했다.
+- 영업 중 커피숍은 14,663곳이다. `FACILTOTSCP`는 14,663/14,663이 숫자,
+  14,649건이 양수, 14건이 0㎡였다. 양수 분포는 p5 10㎡, p50 42.9㎡,
+  p95 234㎡, 최댓값 1,124.36㎡였다.
+- 유효한 서울 좌표는 14,364건, 주소는 14,663건이다. 두 면적 필드가 모두
+  숫자인 14,646건 중 14,581건은 같고 65건은 다르다. 의미가 다른
+  `SITEAREA`를 `FACILTOTSCP` 대체값으로 사용하지 않는다.
+- 집계 artifact:
+  [`research/artifacts/seoul-refreshment-permit-area-profile-20260715.json`](research/artifacts/seoul-refreshment-permit-area-profile-20260715.json),
+  SHA-256 `fab4b97de606ef756fb9fac498beed67779f5eb14f979d8952bc805e6e62f672`.
+- capacity shadow는 `regional_demand × (42.9㎡ / max(FACILTOTSCP, 10㎡))^alpha`를
+  사용하며 `alpha={0.25,0.5,0.75,1.0}`, 기본값 0.5를 사전 등록했다.
+  같은 수요에서 10㎡는 약 2.07배, 42.9㎡는 1배, 234㎡는 약 0.43배의
+  상대 pressure를 만든다. 이 값은 좌석 점유율나 정확도 확률이 아니다.
+
+판정: **PASS(unit/profile and offline shadow only)**. 면적 단위와 분포는 확정했지만
+독립 매장 매칭과 Phase 6 held-out 검증이 남았다. 공개 `v1-idw-point`, API,
+DB, frontend는 변경하지 않았다.
+
+## 2026-07-15 — Production capacity 매칭 gate 실측
+
+- 첫 production report run
+  [`29401122318`](https://github.com/Jaemani/BusyCafe/actions/runs/29401122318)의 verified
+  4,637건은 모두 `origin_provider=seoul_refreshment_permits`였다. 인허가에서 파생한
+  카페를 같은 인허가로 다시 검증한 자기매칭이므로 결과를 폐기했다.
+- 커밋 `3ab9241`에서 동일 source 카페를 spatial candidate 구성 전에 전체
+  제외하고 제외 수를 report에 남겼다.
+- 후속 run
+  [`29401367671`](https://github.com/Jaemani/BusyCafe/actions/runs/29401367671)은 active 카페
+  30,483곳 중 same-source 5,064곳을 제외한 25,419곳과 유효 커피숍 인허가
+  14,350건을 비교했다. 기존 strict rule에서 verified 0, missing 14,350이었다.
+- 결과를 보고 threshold를 완화하지 않고 커밋 `0cef73d`에서 ID·이름·주소·전화를
+  출력하지 않는 단계별 집계 진단을 추가했다.
+- v2 run
+  [`29401829561`](https://github.com/Jaemani/BusyCafe/actions/runs/29401829561)에서 50m 이내
+  독립 카페가 있는 인허가는 10,601/14,350(73.87%)이었다. 정확한 이름은
+  383건, 전화는 160건의 인허가에서 일치했지만 기존 전체 주소 문자열 일치는
+  0건이었다. 근접 후보 부족이 아니라 인허가의 층·호·법정동 후치와 소비자 POI
+  주소 표현 차이가 병목임을 확인했다.
+- [도로명주소법 시행령 제6조](https://www.law.go.kr/법령/도로명주소법시행령)의 표기 순서와
+  [공식 주소 API 구성요소](https://business.juso.go.kr/jst/jstRoadNmAddrApiSearch)를 근거로
+  커밋 `29b55db`에서 `seoul-road-address-components-v1`을 고정했다. 서울 별칭,
+  25개 구, 도로명, 건물 본번·부번만 exact 구성요소로 비교하고 건물번호 뒤의
+  층·호·동·괄호 참고항목만 identity에서 제외한다. 파싱 불가, 비서울,
+  지번, 알 수 없는 후치, 깨진 괄호는 모두 abstain하며 원본은 보존한다.
+- 단일 인허가 안에서만 후보가 하나인 것으로 충분하지 않다. 두 인허가가 같은
+  카페를 점유하면 관련 결과를 모두 ambiguous로 강등하는 전역 1:1 gate를 같은
+  커밋에 추가했다. report는 reverse collision의 인허가·카페 수만 출력한다.
+- 커밋 `29b55db` 검증: backend 988 passed, 2 skipped, 1 warning; 변경 5파일
+  mypy PASS; 변경 Python 파일 Ruff PASS; app/scripts/tests compileall PASS; frontend
+  TypeScript와 production build PASS. 기존 1,088.85kB JS chunk warning만 유지됐다. GitHub
+  [CI run `29403042381`](https://github.com/Jaemani/BusyCafe/actions/runs/29403042381)에서도
+  backend·frontend·실제 PostgreSQL migration smoke가 모두 통과했다.
+- 같은 커밋의 v3 production run
+  [`29403047910`](https://github.com/Jaemani/BusyCafe/actions/runs/29403047910)은 기존과 같은
+  독립 카페 25,419곳과 인허가 14,350건을 read-only로 비교했다. 50m 안에서
+  구조화 건물주소가 일치한 후보는 5,005 pair/3,204 permit, 주소+이름은
+  32 pair/32 permit, 주소+전화는 10 pair/9 permit였다. 전역 reverse collision은
+  2개 cafe/4개 permit에서 발생해 관련 결과를 모두 중단했다.
+- 최종 결과는 verified 36, ambiguous 5, missing 14,309였다. 근거별로는 name-only
+  30, phone-only 6, both 0이고 provider는 Kakao 24, Overture 12였다. 연결된
+  `FACILTOTSCP`는 6~442.2㎡, p50 63.88㎡였다. report에는 ID·이름·주소·전화를
+  출력하지 않았다.
+
+판정: **BLOCKED(independent precision gate)**. 도로명주소 구성요소 일치를 별도
+challenger로 검증하되, 50m·정확한 이름 또는 전화·단일 후보 조건을 유지한다.
+HUMAN precision sample과 전역 1:1 충돌 검증 전에는 capacity를 공개 점수에 쓰지 않는다.
+관련 사건은 INC-2026-021에 기록했다.
+
+## 2026-07-15 — Production ingest SLO와 nowcast shadow 추적
+
+### Ingest SLO
+
+- analyzer schema v2 관련 커밋: `a542e4a`
+- 24시간 run
+  [`29401552844`](https://github.com/Jaemani/BusyCafe/actions/runs/29401552844): terminal 289,
+  complete 273, failed 14, partial 2. Complete rate 94.4637%, target 저장 성공률
+  95.1471%였다. Cycle duration은 p50 59.093초, p95 121.496초, 최댓값
+  141.643초였고 hotspot coverage는 121/121이었다.
+- source observation lag는 p50 32.660분, p95 32.881분, 최댓값 33.104분이었다.
+  이 수치는 `fetched_at-observed_at`이며 HTTP 응답 시간이나 API worker 실행 시간이 아니다.
+- full failure 14건은 첫 5개 hotspot에서 각각 4회 `ConnectTimeout` 후 circuit가
+  열린 cycle이었다. Partial 2건은 no-record/parse 응답으로 120/121,
+  119/121개를 저장했다. DB commit이나 materialize 실패 증거는 없었다.
+- 168시간 run
+  [`29402148225`](https://github.com/Jaemani/BusyCafe/actions/runs/29402148225)은 운영 시작
+  전 window head 5,539분을 포함했으므로 7일 연속 SLO로 판정할 수 없다. 관측된
+  terminal 553건의 complete rate는 94.7559%, target 성공률은 96.0068%였다.
+- 최근 6시간 run
+  [`29402225836`](https://github.com/Jaemani/BusyCafe/actions/runs/29402225836)은 terminal 72,
+  complete 70, failed 1, partial 1로 complete rate 97.2222%, target 성공률 98.5882%,
+  coverage 121/121이었다. 개선 방향은 보이지만 99% 목표는 아직 통과하지 못했다.
+
+판정: **FAIL(99% production SLO)**. 원인 확정 전 concurrency나 retry를 늘리지 않는다.
+연속 7일 창이 쌓였을 때 다시 측정하고, 그때도 99%에 미달하면 서울 리전의
+상시 worker를 검토한다. 관련 사건은 INC-2026-022에 기록했다.
+
+### Nowcast shadow
+
+- 일일 read-only run
+  [`29363194234`](https://github.com/Jaemani/BusyCafe/actions/runs/29363194234)은 121개 hotspot,
+  44,176표본, 2.593일을 평가했다. 관측 지연 평균은 32.606분이었다.
+- forecast interpolation은 인구 WAPE를 delayed baseline 6.2424%에서 3.8746%로
+  낮춰지만 4단계 exact accuracy는 90.3477%에서 75.7583%, adjacent accuracy는
+  99.0628%에서 97.7409%로 악화됐다.
+- hybrid comparator는 인구만 forecast로 보정하고 레벨은 latest observed를 유지해
+  레벨 회귀를 피하지만, 현재 공개 카페 순위는 4단계 레벨이 주 신호라 즉시
+  승격 이익이 없다.
+
+판정: **BLOCKED(insufficient span and ordinal regression)**. `promotion_eligible=false`를
+유지했고 public model을 변경하지 않았다.
