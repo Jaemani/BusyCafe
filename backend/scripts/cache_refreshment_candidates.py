@@ -92,6 +92,19 @@ def serialize_candidates(candidates: Sequence[PlaceCandidate]) -> bytes:
 def build_manifest(resolution: CandidateResolution, cache_bytes: bytes) -> dict[str, object]:
     """Return aggregate facts only; no business names, addresses, phones, or IDs."""
 
+    area_eligible_count = sum(
+        candidate.facility_area_status == "eligible"
+        for candidate in resolution.candidates
+    )
+    area_nonpositive_count = sum(
+        candidate.facility_area_status == "nonpositive"
+        for candidate in resolution.candidates
+    )
+    # Old rows have no status; count them with blank/nonnumeric evidence as
+    # missing rather than making aggregate counts silently stop balancing.
+    area_missing_count = (
+        len(resolution.candidates) - area_eligible_count - area_nonpositive_count
+    )
     return {
         "dataset_id": SEOUL_REFRESHMENT_PERMIT_DATASET_ID,
         "service": SEOUL_REFRESHMENT_PERMIT_SERVICE,
@@ -106,6 +119,9 @@ def build_manifest(resolution: CandidateResolution, cache_bytes: bytes) -> dict[
         "quarantine_reason_counts": resolution.quarantine_reason_counts,
         "exclusion_reason_counts": resolution.exclusion_reason_counts,
         "candidate_category_counts": resolution.candidate_category_counts,
+        "facility_area_eligible_count": area_eligible_count,
+        "facility_area_missing_count": area_missing_count,
+        "facility_area_nonpositive_count": area_nonpositive_count,
     }
 
 

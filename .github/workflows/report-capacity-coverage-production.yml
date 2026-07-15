@@ -1,0 +1,61 @@
+name: Report production capacity match coverage
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-capacity-match-coverage
+  cancel-in-progress: true
+
+jobs:
+  report:
+    environment: Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Define runner-temporary paths
+        run: |
+          echo "CAPACITY_CACHE=${RUNNER_TEMP}/capacity-candidates.jsonl" >> "${GITHUB_ENV}"
+          echo "CAPACITY_MANIFEST=${RUNNER_TEMP}/capacity-candidates.manifest.json" >> "${GITHUB_ENV}"
+          echo "CAPACITY_REPORT=${RUNNER_TEMP}/capacity-match-coverage.json" >> "${GITHUB_ENV}"
+      - name: Build complete ephemeral permit cache
+        env:
+          SEOUL_API_KEY: ${{ secrets.SEOUL_API_KEY }}
+        run: >-
+          uv run python scripts/cache_refreshment_candidates.py
+          --output "${CAPACITY_CACHE}"
+          --manifest "${CAPACITY_MANIFEST}"
+      - name: Match against production cafes without writes
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: >-
+          uv run python scripts/report_capacity_match_coverage.py
+          --cache "${CAPACITY_CACHE}"
+          --manifest "${CAPACITY_MANIFEST}"
+          --output "${CAPACITY_REPORT}"
+      - name: Upload aggregate report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: capacity-match-coverage-${{ github.run_id }}
+          path: ${{ runner.temp }}/capacity-match-coverage.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove source cache
+        if: always()
+        run: >-
+          rm -f "${CAPACITY_CACHE}" "${CAPACITY_MANIFEST}"
+          "${CAPACITY_REPORT}" "${CAPACITY_REPORT}.part"

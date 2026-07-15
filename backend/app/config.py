@@ -6,6 +6,7 @@ the plan remain configurable until Phase 0 verification is recorded.
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Final
@@ -38,6 +39,29 @@ SEOUL_REFRESHMENT_PERMIT_SOURCE_LAG_DAYS: Final = 3
 SEOUL_REFRESHMENT_PERMIT_PROFILE_PATH: Final = (
     BACKEND_DIR / "data" / "seoul_refreshment_permit_profile.json"
 )
+SEOUL_REFRESHMENT_PERMIT_AREA_PROFILE_VERSION: Final = (
+    "oa-16095-open-coffee-shop-venue-area-v1"
+)
+SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE: Final = "커피숍"
+# LOCALDATA administrator Q&A nttId=1011 and the Food Sanitation Act
+# Enforcement Rule forms 37/34 define both source fields in square metres.
+# The machine-readable OA-16095 schema itself does not carry unit metadata.
+SEOUL_REFRESHMENT_PERMIT_AREA_UNIT: Final = "m2"
+SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS: Final = (
+    "verified_official_administrative_meaning"
+)
+SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_PROVENANCE: Final = (
+    "LOCALDATA administrator Q&A nttId=1011; Food Sanitation Act Enforcement "
+    "Rule forms 37/34; machine-readable schema unit metadata absent"
+)
+SEOUL_REFRESHMENT_PERMIT_AREA_EXTREME_ABS_THRESHOLD_RAW: Final = Decimal("10000")
+SEOUL_REFRESHMENT_PERMIT_AREA_PERCENTILES: Final = (
+    ("p1", 1),
+    ("p5", 5),
+    ("p50", 50),
+    ("p95", 95),
+    ("p99", 99),
+)
 # Report-only candidates. No row is promoted to the cafe catalog until each
 # exact source category passes the full profile and a manual precision sample.
 SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES: Final = (
@@ -50,6 +74,11 @@ SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES: Final = (
 # they do not authorize automatic catalog publication.
 PERMIT_RECONCILE_EXACT_NAME_MAX_M: Final = 50.0
 PERMIT_RECONCILE_EXACT_PHONE_MAX_M: Final = 150.0
+# Stricter offline permit-to-cafe entity-resolution gate.  Unlike the legacy
+# reconciliation report, this requires exact normalized address plus exact
+# name or phone, so one distance threshold applies to every verified result.
+PERMIT_CAFE_ENTITY_MAX_DISTANCE_M: Final = 50.0
+PERMIT_CAFE_ENTITY_MIN_PHONE_DIGITS: Final = 9
 # Official Seoul major-place master attachments (dataset OA-21285).
 SEOUL_DATAFILE_DOWNLOAD_URL: Final = (
     "https://datafile.seoul.go.kr/bigfile/iot/inf/nio_download.do"
@@ -304,6 +333,14 @@ TEMPORAL_BASELINE_SHADOW_MASKED_IMPUTATION: Final = 2.0
 ACTIVITY_SHADOW_MODEL_VERSION: Final = "v1-city-activity-shadow"
 ACTIVITY_SHADOW_MIN_LOG_DISPERSION: Final = 1e-6
 ACTIVITY_SHADOW_STANDARDIZED_ANOMALY_CAP: Final = 5.0
+# Offline-only venue-capacity pressure challenger.  Reference/floor use the
+# measured FACILTOTSCP p50/p5 among operating coffee shops.  Alpha stays a
+# pre-registered grid candidate; none of these parameters affect public v1.
+CAPACITY_SHADOW_MODEL_VERSION: Final = "v1-capacity-pressure-shadow"
+CAPACITY_SHADOW_REFERENCE_AREA_M2: Final = 42.9
+CAPACITY_SHADOW_AREA_FLOOR_M2: Final = 10.0
+CAPACITY_SHADOW_SIZE_EXPONENT_ALPHA: Final = 0.5
+CAPACITY_SHADOW_SIZE_EXPONENT_GRID: Final = (0.25, 0.5, 0.75, 1.0)
 SHADOW_DIVERGENCE_AUDIT_LIMIT: Final = 20
 # Offline-only observation-lag nowcast challenger.  It interpolates the saved
 # Seoul forecast curve to the original fetch time, then backtests that estimate

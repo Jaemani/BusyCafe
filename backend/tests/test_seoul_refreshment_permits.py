@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -41,12 +42,19 @@ def test_parse_measured_permit_fixture_preserves_status_and_category() -> None:
     assert active_cafe.phone is None
     assert active_cafe.projected_x_m == pytest.approx(202_513.119414067)
     assert active_cafe.projected_y_m == pytest.approx(443_478.806945055)
+    assert active_cafe.facility_total_scope_raw == "125.50000"
+    assert active_cafe.facility_total_scope_decimal == Decimal("125.50000")
+    assert active_cafe.site_area_raw == "125.50"
+    assert active_cafe.site_area_decimal == Decimal("125.50")
 
     assert closed_cafe.business_type == "커피숍"
     assert closed_cafe.trade_status_name == "폐업"
     assert closed_cafe.detail_status_name == "폐업"
     assert closed_cafe.closure_date == "2023-12-29"
     assert closed_cafe.is_reported_open is False
+    assert closed_cafe.facility_total_scope_decimal == Decimal("0")
+    assert closed_cafe.site_area_raw == "not-numeric"
+    assert closed_cafe.site_area_decimal is None
 
     # OA-16095 is a broad permit source, not a cafe-only catalog.
     assert active_non_cafe.business_type == "편의점"

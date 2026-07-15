@@ -21,6 +21,7 @@
         "TRDSTATENM": "영업/정상",
         "DTLSTATEGBN": "01",
         "DTLSTATENM": "영업",
+        "FACILTOTSCP": "125.50000   ",
         "DCBYMD": "                        ",
         "SITETEL": "",
         "SITEWHLADDR": "서울특별시 서초구 서초동 1329-7 1층",
@@ -31,7 +32,8 @@
         "UPTAENM": "커피숍",
         "X": "202513.119414067    ",
         "Y": "443478.806945055    ",
-        "SNTUPTAENM": "커피숍"
+        "SNTUPTAENM": "커피숍",
+        "SITEAREA": "125.50   "
       },
       {
         "OPNSFTEAMCODE": "3210000",
@@ -41,6 +43,7 @@
         "TRDSTATENM": "폐업",
         "DTLSTATEGBN": "02",
         "DTLSTATENM": "폐업",
+        "FACILTOTSCP": "0",
         "DCBYMD": "2023-12-29              ",
         "SITETEL": "",
         "SITEWHLADDR": "서울특별시 서초구 서초동 1641-10 서초금융연수원 내 1층",
@@ -51,7 +54,8 @@
         "UPTAENM": "커피숍",
         "X": "201730.78273369     ",
         "Y": "443305.502426124    ",
-        "SNTUPTAENM": "커피숍"
+        "SNTUPTAENM": "커피숍",
+        "SITEAREA": "not-numeric"
       },
       {
         "OPNSFTEAMCODE": "3170000",
@@ -61,6 +65,7 @@
         "TRDSTATENM": "영업/정상",
         "DTLSTATEGBN": "01",
         "DTLSTATENM": "영업",
+        "FACILTOTSCP": "-1",
         "DCBYMD": "                        ",
         "SITETEL": "",
         "SITEWHLADDR": "서울특별시 금천구 시흥동 814-35",
@@ -71,7 +76,8 @@
         "UPTAENM": "편의점",
         "X": "191646.990306914    ",
         "Y": "439365.351328562    ",
-        "SNTUPTAENM": "편의점"
+        "SNTUPTAENM": "편의점",
+        "SITEAREA": "1000000"
       }
     ]
   }

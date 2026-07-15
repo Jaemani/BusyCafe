@@ -10,6 +10,7 @@ import sys
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
+from decimal import Decimal
 from math import ceil
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -25,17 +26,75 @@ from app.clients.seoul_refreshment_permits import (  # noqa: E402
 )
 from app.config import (  # noqa: E402
     SEOUL_BBOX,
+    SEOUL_REFRESHMENT_PERMIT_AREA_EXTREME_ABS_THRESHOLD_RAW,
+    SEOUL_REFRESHMENT_PERMIT_AREA_PERCENTILES,
+    SEOUL_REFRESHMENT_PERMIT_AREA_PROFILE_VERSION,
+    SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_PROVENANCE,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS,
     SEOUL_REFRESHMENT_PERMIT_MAX_PAGE_SIZE,
     SEOUL_REFRESHMENT_PERMIT_PROFILE_PATH,
     SEOUL_REFRESHMENT_PERMIT_SERVICE,
     SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES,
     get_settings,
 )
-from app.schemas import SeoulRefreshmentPermitPage  # noqa: E402
+from app.schemas import SeoulRefreshmentPermit, SeoulRefreshmentPermitPage  # noqa: E402
 
 
 class PermitProfileError(RuntimeError):
     """Raised when a moving or malformed source cannot produce a safe profile."""
+
+
+@dataclass(frozen=True, slots=True)
+class DecimalFieldProfile:
+    source_field: str
+    unit: str
+    unit_status: str
+    unit_provenance: str
+    target_row_count: int
+    blank_count: int
+    nonblank_count: int
+    numeric_count: int
+    nonnumeric_count: int
+    zero_count: int
+    negative_count: int
+    positive_count: int
+    extreme_abs_threshold: str
+    extreme_count: int
+    minimum: str | None
+    p1: str | None
+    p5: str | None
+    p50: str | None
+    p95: str | None
+    p99: str | None
+    maximum: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class VenueAreaProfile:
+    profile_version: str
+    target_business_type: str
+    target_state: str
+    unique_target_row_count: int
+    facility_total_scope: DecimalFieldProfile
+    site_area: DecimalFieldProfile
+    both_nonblank_count: int
+    both_numeric_count: int
+    exact_decimal_equal_count: int
+    exact_decimal_different_count: int
+    road_address_nonblank_count: int
+    lot_address_nonblank_count: int
+    any_address_nonblank_count: int
+    both_addresses_nonblank_count: int
+    missing_address_count: int
+    coordinate_pair_nonblank_count: int
+    coordinate_partial_count: int
+    coordinate_missing_count: int
+    valid_seoul_coordinate_count: int
+    invalid_coordinate_count: int
+    outside_seoul_bbox_count: int
+    row_retention: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +126,120 @@ class PermitProfile:
     open_category_counts: dict[str, int]
     provisional_open_candidate_counts: dict[str, int]
     conflicting_duplicate_field_counts: dict[str, int]
+    open_coffee_shop_venue_area: VenueAreaProfile
+
+
+@dataclass(slots=True)
+class _DecimalFieldAccumulator:
+    source_field: str
+    raw_values: list[str | None]
+    decimal_values: list[Decimal | None]
+
+    def add(self, raw: str | None, value: Decimal | None) -> None:
+        self.raw_values.append(raw)
+        self.decimal_values.append(value)
+
+
+@dataclass(frozen=True, slots=True)
+class _VenueAreaObservation:
+    is_target: bool
+    facility_raw: str | None
+    facility_decimal: Decimal | None
+    site_raw: str | None
+    site_decimal: Decimal | None
+    has_road_address: bool
+    has_lot_address: bool
+    coordinate_status: str
+
+
+def _venue_area_observation(row: SeoulRefreshmentPermit) -> _VenueAreaObservation:
+    if row.projected_x_m is None and row.projected_y_m is None:
+        coordinate_status = "missing"
+    elif row.projected_x_m is None or row.projected_y_m is None:
+        coordinate_status = "partial"
+    else:
+        try:
+            point = epsg5174_to_wgs84(row.projected_x_m, row.projected_y_m)
+        except SeoulRefreshmentPermitAPIError:
+            coordinate_status = "invalid"
+        else:
+            min_lng, min_lat, max_lng, max_lat = SEOUL_BBOX
+            coordinate_status = (
+                "valid_seoul"
+                if min_lng <= point.longitude <= max_lng
+                and min_lat <= point.latitude <= max_lat
+                else "outside_seoul"
+            )
+    return _VenueAreaObservation(
+        is_target=(
+            row.is_reported_open
+            and row.business_type == SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE
+        ),
+        facility_raw=row.facility_total_scope_raw,
+        facility_decimal=row.facility_total_scope_decimal,
+        site_raw=row.site_area_raw,
+        site_decimal=row.site_area_decimal,
+        has_road_address=row.road_address is not None,
+        has_lot_address=row.lot_address is not None,
+        coordinate_status=coordinate_status,
+    )
+
+
+def _decimal_text(value: Decimal | None) -> str | None:
+    return None if value is None else format(value, "f")
+
+
+def _nearest_rank(values: list[Decimal], percent: int) -> Decimal | None:
+    if not values:
+        return None
+    if percent < 1 or percent > 100:
+        raise ValueError("percent must be in 1..100")
+    rank = (percent * len(values) + 99) // 100
+    return values[rank - 1]
+
+
+def _finalize_decimal_field(
+    accumulator: _DecimalFieldAccumulator,
+) -> DecimalFieldProfile:
+    values = sorted(value for value in accumulator.decimal_values if value is not None)
+    percentiles = {
+        label: _decimal_text(_nearest_rank(values, percent))
+        for label, percent in SEOUL_REFRESHMENT_PERMIT_AREA_PERCENTILES
+    }
+    return DecimalFieldProfile(
+        source_field=accumulator.source_field,
+        unit=SEOUL_REFRESHMENT_PERMIT_AREA_UNIT,
+        unit_status=SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS,
+        unit_provenance=SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_PROVENANCE,
+        target_row_count=len(accumulator.raw_values),
+        blank_count=sum(value is None for value in accumulator.raw_values),
+        nonblank_count=sum(value is not None for value in accumulator.raw_values),
+        numeric_count=len(values),
+        nonnumeric_count=sum(
+            raw is not None and value is None
+            for raw, value in zip(
+                accumulator.raw_values, accumulator.decimal_values, strict=True
+            )
+        ),
+        zero_count=sum(value == 0 for value in values),
+        negative_count=sum(value < 0 for value in values),
+        positive_count=sum(value > 0 for value in values),
+        extreme_abs_threshold=_decimal_text(
+            SEOUL_REFRESHMENT_PERMIT_AREA_EXTREME_ABS_THRESHOLD_RAW
+        )
+        or "0",
+        extreme_count=sum(
+            abs(value) >= SEOUL_REFRESHMENT_PERMIT_AREA_EXTREME_ABS_THRESHOLD_RAW
+            for value in values
+        ),
+        minimum=_decimal_text(values[0] if values else None),
+        p1=percentiles["p1"],
+        p5=percentiles["p5"],
+        p50=percentiles["p50"],
+        p95=percentiles["p95"],
+        p99=percentiles["p99"],
+        maximum=_decimal_text(values[-1] if values else None),
+    )
 
 
 def _sorted_counts(counter: Counter[str]) -> dict[str, int]:
@@ -91,9 +264,9 @@ def build_permit_profile(
     first = fetch_page(1, page_size)
     total_count = first.total_count
     page_count = max(1, ceil(total_count / page_size))
-    seen_ids: set[str] = set()
-    fingerprints_by_id: dict[str, str] = {}
-    last_position_by_id: dict[str, int] = {}
+    seen_ids: set[str | None] = set()
+    fingerprints_by_id: dict[str | None, str] = {}
+    last_position_by_id: dict[str | None, int] = {}
     conflict_fields = (
         "trade_status_code",
         "trade_status_name",
@@ -109,8 +282,10 @@ def build_permit_profile(
         "business_type",
         "projected_x_m",
         "projected_y_m",
+        "facility_total_scope_raw",
+        "site_area_raw",
     )
-    values_by_id: dict[str, tuple[object, ...]] = {}
+    values_by_id: dict[str | None, tuple[object, ...]] = {}
     status_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
     open_category_counts: Counter[str] = Counter()
@@ -121,6 +296,9 @@ def build_permit_profile(
     identical_duplicates = conflicting_duplicates = adjacent_duplicates = 0
     conflict_later_newer = conflict_earlier_newer = conflict_timestamp_tie = 0
     candidates = set(candidate_types)
+    area_observation_by_id: dict[
+        str | None, tuple[str, str, _VenueAreaObservation]
+    ] = {}
 
     def process_page(
         page: SeoulRefreshmentPermitPage,
@@ -152,6 +330,17 @@ def build_permit_profile(
                 ).encode("utf-8")
             ).hexdigest()
             conflict_values = tuple(getattr(row, field) for field in conflict_fields)
+            area_selection = (
+                row.source_updated_at or "",
+                fingerprint,
+                _venue_area_observation(row),
+            )
+            previous_area_selection = area_observation_by_id.get(row.management_number)
+            if (
+                previous_area_selection is None
+                or area_selection[:2] > previous_area_selection[:2]
+            ):
+                area_observation_by_id[row.management_number] = area_selection
             if row.management_number in seen_ids:
                 duplicate_rows += 1
                 if fingerprints_by_id[row.management_number] == fingerprint:
@@ -250,6 +439,72 @@ def build_permit_profile(
             f"profile completeness mismatch: rows={row_count}, total={total_count}"
         )
     candidate_total = sum(candidate_counts.values())
+    facility_scope = _DecimalFieldAccumulator("FACILTOTSCP", [], [])
+    site_area = _DecimalFieldAccumulator("SITEAREA", [], [])
+    venue_target_count = both_nonblank = both_numeric = 0
+    exact_equal = exact_different = 0
+    road_address = lot_address = any_address = both_addresses = missing_address = 0
+    coordinate_pair = coordinate_partial = coordinate_missing = 0
+    target_valid_seoul = target_invalid_coordinate = target_outside_seoul = 0
+    for _updated_at, _fingerprint, observation in area_observation_by_id.values():
+        if not observation.is_target:
+            continue
+        venue_target_count += 1
+        facility_scope.add(observation.facility_raw, observation.facility_decimal)
+        site_area.add(observation.site_raw, observation.site_decimal)
+        both_nonblank += (
+            observation.facility_raw is not None and observation.site_raw is not None
+        )
+        if (
+            observation.facility_decimal is not None
+            and observation.site_decimal is not None
+        ):
+            both_numeric += 1
+            if observation.facility_decimal == observation.site_decimal:
+                exact_equal += 1
+            else:
+                exact_different += 1
+        road_address += observation.has_road_address
+        lot_address += observation.has_lot_address
+        any_address += observation.has_road_address or observation.has_lot_address
+        both_addresses += observation.has_road_address and observation.has_lot_address
+        missing_address += (
+            not observation.has_road_address and not observation.has_lot_address
+        )
+        coordinate_pair += observation.coordinate_status in {
+            "valid_seoul",
+            "outside_seoul",
+            "invalid",
+        }
+        coordinate_partial += observation.coordinate_status == "partial"
+        coordinate_missing += observation.coordinate_status == "missing"
+        target_valid_seoul += observation.coordinate_status == "valid_seoul"
+        target_invalid_coordinate += observation.coordinate_status == "invalid"
+        target_outside_seoul += observation.coordinate_status == "outside_seoul"
+    venue_area_profile = VenueAreaProfile(
+        profile_version=SEOUL_REFRESHMENT_PERMIT_AREA_PROFILE_VERSION,
+        target_business_type=SEOUL_REFRESHMENT_PERMIT_AREA_TARGET_BUSINESS_TYPE,
+        target_state="exact source-reported open predicate",
+        unique_target_row_count=venue_target_count,
+        facility_total_scope=_finalize_decimal_field(facility_scope),
+        site_area=_finalize_decimal_field(site_area),
+        both_nonblank_count=both_nonblank,
+        both_numeric_count=both_numeric,
+        exact_decimal_equal_count=exact_equal,
+        exact_decimal_different_count=exact_different,
+        road_address_nonblank_count=road_address,
+        lot_address_nonblank_count=lot_address,
+        any_address_nonblank_count=any_address,
+        both_addresses_nonblank_count=both_addresses,
+        missing_address_count=missing_address,
+        coordinate_pair_nonblank_count=coordinate_pair,
+        coordinate_partial_count=coordinate_partial,
+        coordinate_missing_count=coordinate_missing,
+        valid_seoul_coordinate_count=target_valid_seoul,
+        invalid_coordinate_count=target_invalid_coordinate,
+        outside_seoul_bbox_count=target_outside_seoul,
+        row_retention="aggregate-counts-and-distribution-only;no-venue-rows",
+    )
     return PermitProfile(
         service=SEOUL_REFRESHMENT_PERMIT_SERVICE,
         total_count=total_count,
@@ -278,6 +533,7 @@ def build_permit_profile(
         open_category_counts=_sorted_counts(open_category_counts),
         provisional_open_candidate_counts=_sorted_counts(candidate_counts),
         conflicting_duplicate_field_counts=_sorted_counts(conflicting_field_counts),
+        open_coffee_shop_venue_area=venue_area_profile,
     )
 
 
@@ -290,7 +546,9 @@ def write_profile(path: Path, profile: PermitProfile) -> None:
     with NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=path.parent, delete=False
     ) as temporary:
-        json.dump(asdict(profile), temporary, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dump(
+            asdict(profile), temporary, ensure_ascii=False, indent=2, sort_keys=True
+        )
         temporary.write("\n")
         temporary_path = Path(temporary.name)
     try:
@@ -300,14 +558,21 @@ def write_profile(path: Path, profile: PermitProfile) -> None:
         temporary_path.unlink(missing_ok=True)
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=SEOUL_REFRESHMENT_PERMIT_PROFILE_PATH)
-    return parser.parse_args()
+    parser.add_argument(
+        "--output", type=Path, default=SEOUL_REFRESHMENT_PERMIT_PROFILE_PATH
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="publish aggregate profile (default: dry-run)",
+    )
+    return parser.parse_args(argv)
 
 
-def main() -> int:
-    args = _parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
     secret = get_settings().seoul_api_key
     if secret is None or not secret.get_secret_value().strip():
         print("profile failed: missing SEOUL_API_KEY", file=sys.stderr)
@@ -315,11 +580,24 @@ def main() -> int:
     try:
         with SeoulRefreshmentPermitClient(secret.get_secret_value()) as client:
             profile = build_permit_profile(client.fetch_page)
-        write_profile(args.output, profile)
+        if args.apply:
+            write_profile(args.output, profile)
     except Exception as exc:
         print(f"profile failed ({type(exc).__name__}): {exc}", file=sys.stderr)
         return 1
-    print(f"profile created: {args.output}")
+    if args.apply:
+        print(f"profile created: {args.output}")
+    else:
+        print(
+            json.dumps(
+                asdict(profile),
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        print("dry-run: pass --apply to publish", file=sys.stderr)
     print(
         "rows={rows} open={open_rows} provisional_candidates={candidates}".format(
             rows=profile.row_count,

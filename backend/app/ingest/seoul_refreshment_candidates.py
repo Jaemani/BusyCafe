@@ -11,13 +11,24 @@ import hashlib
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import Literal
 
 from app.clients.seoul_refreshment_permits import (
     SeoulRefreshmentPermitAPIError,
     epsg5174_to_wgs84,
 )
-from app.config import SEOUL_BBOX, SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES
+from app.config import (
+    SEOUL_BBOX,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_PROVENANCE,
+    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS,
+    SEOUL_REFRESHMENT_PROVISIONAL_CAFE_TYPES,
+)
 from app.schemas import SeoulRefreshmentPermit
+
+
+FacilityAreaStatus = Literal["eligible", "missing", "nonnumeric", "nonpositive"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +44,15 @@ class PlaceCandidate:
     road_address: str | None
     lot_address: str | None
     phone: str | None
+    # Optional keeps old cache rows and non-permit provider candidates readable.
+    # Permit candidates populate these from FACILTOTSCP only; SITEAREA is not a
+    # substitute because the two official fields are not contractually equal.
+    facility_area_raw: str | None = None
+    facility_area_m2: str | None = None
+    facility_area_unit: str | None = None
+    facility_area_unit_status: str | None = None
+    facility_area_unit_provenance: str | None = None
+    facility_area_status: FacilityAreaStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +91,31 @@ def normalize_phone(value: str | None) -> str | None:
         return None
     digits = "".join(character for character in value if character.isdecimal())
     return digits or None
+
+
+def _canonical_decimal_text(value: Decimal) -> str:
+    """Return fixed-point canonical text without binary-float conversion."""
+
+    text = format(value, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
+def _facility_area_evidence(
+    row: SeoulRefreshmentPermit,
+) -> tuple[str | None, str | None, FacilityAreaStatus]:
+    """Resolve capacity input from official FACILTOTSCP only."""
+
+    raw = row.facility_total_scope_raw
+    value = row.facility_total_scope_decimal
+    if raw is None:
+        return None, None, "missing"
+    if value is None:
+        return raw, None, "nonnumeric"
+    if value <= 0:
+        return raw, None, "nonpositive"
+    return raw, _canonical_decimal_text(value), "eligible"
 
 
 def _row_values(row: SeoulRefreshmentPermit) -> dict[str, object]:
@@ -176,6 +221,9 @@ def resolve_permit_candidates(
         ):
             exclusions["outside_seoul_bbox"] += 1
             continue
+        facility_area_raw, facility_area_m2, facility_area_status = (
+            _facility_area_evidence(row)
+        )
         candidates.append(
             PlaceCandidate(
                 source="seoul_refreshment_permits",
@@ -187,6 +235,14 @@ def resolve_permit_candidates(
                 road_address=row.road_address,
                 lot_address=row.lot_address,
                 phone=phone,
+                facility_area_raw=facility_area_raw,
+                facility_area_m2=facility_area_m2,
+                facility_area_unit=SEOUL_REFRESHMENT_PERMIT_AREA_UNIT,
+                facility_area_unit_status=SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_STATUS,
+                facility_area_unit_provenance=(
+                    SEOUL_REFRESHMENT_PERMIT_AREA_UNIT_PROVENANCE
+                ),
+                facility_area_status=facility_area_status,
             )
         )
 

@@ -37,10 +37,56 @@ def test_resolver_keeps_only_open_exact_categories_with_seoul_coordinates() -> N
     assert candidate.category == "커피숍"
     assert candidate.latitude == pytest.approx(37.4935091, abs=1e-6)
     assert candidate.longitude == pytest.approx(127.0292067, abs=1e-6)
+    assert candidate.facility_area_raw == "125.50000"
+    assert candidate.facility_area_m2 == "125.5"
+    assert candidate.facility_area_unit == "m2"
+    assert (
+        candidate.facility_area_unit_status
+        == "verified_official_administrative_meaning"
+    )
+    assert "nttId=1011" in (candidate.facility_area_unit_provenance or "")
+    assert candidate.facility_area_status == "eligible"
     assert resolution.exclusion_reason_counts == {
         "category_not_selected": 1,
         "not_reported_open": 1,
     }
+
+
+@pytest.mark.parametrize(
+    ("facility_raw", "site_raw", "expected_raw", "expected_m2", "status"),
+    [
+        (" 42.9000 ", "999", "42.9000", "42.9", "eligible"),
+        (
+            "123456789012345678901234567890.12000",
+            "999",
+            "123456789012345678901234567890.12000",
+            "123456789012345678901234567890.12",
+            "eligible",
+        ),
+        ("", "999", None, None, "missing"),
+        ("unknown", "999", "unknown", None, "nonnumeric"),
+        ("0", "999", "0", None, "nonpositive"),
+        ("-3.50", "999", "-3.50", None, "nonpositive"),
+    ],
+)
+def test_facility_area_uses_only_faciltotscp_and_preserves_ineligible_reason(
+    facility_raw: str,
+    site_raw: str,
+    expected_raw: str | None,
+    expected_m2: str | None,
+    status: str,
+) -> None:
+    payload = _rows()[0].model_dump(mode="json", by_alias=True)
+    payload["FACILTOTSCP"] = facility_raw
+    payload["SITEAREA"] = site_raw
+    row = SeoulRefreshmentPermit.model_validate(payload)
+
+    candidate = resolve_permit_candidates([row]).candidates[0]
+
+    assert candidate.facility_area_raw == expected_raw
+    assert candidate.facility_area_m2 == expected_m2
+    assert candidate.facility_area_status == status
+    assert candidate.facility_area_unit == "m2"
 
 
 def test_exact_duplicates_collapse_by_management_number() -> None:

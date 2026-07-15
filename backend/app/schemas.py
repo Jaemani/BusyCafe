@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.config import CONGESTION_LEVELS
 
@@ -121,6 +123,21 @@ class NaverLocalResponse(ExternalModel):
     items: list[NaverLocalItem]
 
 
+_PERMIT_RAW_DECIMAL_PATTERN = re.compile(r"[+-]?[0-9]+(?:\.[0-9]*)?\Z", re.ASCII)
+
+
+def _permit_raw_decimal(value: Any) -> tuple[str | None, Decimal | None]:
+    if value is None:
+        return None, None
+    raw = str(value).strip()
+    if not raw:
+        return None, None
+    if _PERMIT_RAW_DECIMAL_PATTERN.fullmatch(raw) is None:
+        return raw, None
+    parsed = Decimal(raw)
+    return raw, parsed if parsed.is_finite() else None
+
+
 class SeoulRefreshmentPermit(ExternalModel):
     """One OA-16095 permit row, preserving source status and category."""
 
@@ -142,6 +159,25 @@ class SeoulRefreshmentPermit(ExternalModel):
     projected_x_m: float | None = Field(default=None, alias="X")
     projected_y_m: float | None = Field(default=None, alias="Y")
     hygiene_type: str | None = Field(default=None, alias="SNTUPTAENM")
+    facility_total_scope_raw: str | None = Field(default=None, alias="FACILTOTSCP")
+    facility_total_scope_decimal: Decimal | None = None
+    site_area_raw: str | None = Field(default=None, alias="SITEAREA")
+    site_area_decimal: Decimal | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_and_parse_raw_area_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        parsed = dict(value)
+        for alias, decimal_field in (
+            ("FACILTOTSCP", "facility_total_scope_decimal"),
+            ("SITEAREA", "site_area_decimal"),
+        ):
+            raw, decimal = _permit_raw_decimal(parsed.get(alias))
+            parsed[alias] = raw
+            parsed[decimal_field] = decimal
+        return parsed
 
     @field_validator(
         "municipality_code",
