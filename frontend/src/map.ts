@@ -36,8 +36,9 @@ import {
 } from "./analytics";
 import {
   cafeMapCenter,
-  cafeMatchesBrand,
   initializeCafeSearch,
+  type CafeDistanceOrigin,
+  type CafeSearchController,
   type CafeSearchResult,
 } from "./cafe-search";
 
@@ -58,6 +59,20 @@ const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+
+function searchResultCollection(
+  cafes: CafeSearchResult[],
+): CafeFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: cafes.map((cafe) => ({
+      type: "Feature",
+      id: cafe.id,
+      geometry: { type: "Point", coordinates: [cafe.lng, cafe.lat] },
+      properties: cafe,
+    })),
+  };
+}
 
 function readCafeProperties(feature: MapGeoJSONFeature): CafeMapProperties | null {
   const properties = feature.properties as Partial<CafeMapProperties> | null;
@@ -315,7 +330,21 @@ export async function initializeCafeMap(
 
   const cafeProvider = provider ?? new CachedApiCafeProvider();
 
-  geolocateControl.on("geolocate", () => {
+  let searchController: CafeSearchController | null = null;
+  let userDistanceOrigin: CafeDistanceOrigin | null = null;
+
+  geolocateControl.on("geolocate", (event) => {
+    if (
+      Number.isFinite(event.coords.latitude) &&
+      Number.isFinite(event.coords.longitude)
+    ) {
+      userDistanceOrigin = {
+        lat: event.coords.latitude,
+        lng: event.coords.longitude,
+        label: "내 위치",
+      };
+      searchController?.updateDistanceOrigin(userDistanceOrigin);
+    }
     trackGeolocationResult("success");
     statusElement.textContent = "내 위치를 찾았습니다";
     statusElement.dataset.state = "ready";
@@ -335,7 +364,7 @@ export async function initializeCafeMap(
   let displayedDelayedCount = 0;
   let displayedStaleCount = 0;
   let displayedDelayRange: { min: number; max: number } | null = null;
-  let activeBrand: string | null = null;
+  let activeSearchResults: CafeSearchResult[] | null = null;
 
   const renderCafeStatus = (): void => {
     if (displayedCafeCount === null) return;
@@ -412,20 +441,16 @@ export async function initializeCafeMap(
   };
 
   const updateDisplayedCollection = (forceMapUpdate = false): void => {
-    if (!hasLoadedCafeData) return;
+    if (!hasLoadedCafeData && activeSearchResults === null) return;
+    const sourceCollection = activeSearchResults === null
+      ? rawCafeCollection
+      : searchResultCollection(activeSearchResults);
     const agedCollection = ageCafeCollection(
-      rawCafeCollection,
+      sourceCollection,
       Date.now(),
       freshnessLimits,
     );
-    const nextCollection: CafeFeatureCollection = activeBrand === null
-      ? agedCollection
-      : {
-          ...agedCollection,
-          features: agedCollection.features.filter((feature) =>
-            cafeMatchesBrand(feature.properties.name, activeBrand)
-          ),
-        };
+    const nextCollection = agedCollection;
     const shouldUpdateMap = forceMapUpdate ||
       hasVisualFreshnessChange(displayedCafeCollection, nextCollection);
     displayedCafeCollection = nextCollection;
@@ -574,6 +599,14 @@ export async function initializeCafeMap(
     statusElement.dataset.state = "moving";
   });
   map.on("moveend", () => {
+    if (userDistanceOrigin === null) {
+      const center = map.getCenter();
+      searchController?.updateDistanceOrigin({
+        lat: center.lat,
+        lng: center.lng,
+        label: "지도 중심",
+      });
+    }
     void refresh();
   });
 
@@ -613,11 +646,18 @@ export async function initializeCafeMap(
     window.setTimeout(openCafe, 700);
   };
 
-  initializeCafeSearch({
+  const initialCenter = map.getCenter();
+  searchController = initializeCafeSearch({
     onSelect: focusSearchResult,
-    onBrandChange: (brand) => {
-      activeBrand = brand;
+    onBrandChange: () => undefined,
+    onResultsChange: (cafes) => {
+      activeSearchResults = cafes;
       updateDisplayedCollection(true);
+    },
+    distanceOrigin: {
+      lat: initialCenter.lat,
+      lng: initialCenter.lng,
+      label: "지도 중심",
     },
   });
 
@@ -650,6 +690,7 @@ export async function initializeCafeMap(
     window.clearInterval(delayTimerId);
     requestController?.abort();
     detailController?.abort();
+    searchController?.destroy();
     document.removeEventListener("visibilitychange", refreshAfterResume);
     window.removeEventListener("focus", refreshAfterResume);
   });

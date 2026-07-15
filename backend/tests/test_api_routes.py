@@ -508,6 +508,75 @@ def test_cafe_search_orders_exact_then_prefix_then_contains_then_address(
     ]
 
 
+def test_cafe_search_origin_orders_before_limit_and_breaks_ties_by_id(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        far_exact = Cafe(
+            overture_id="overture:search-distance-far",
+            source_release="test",
+            source_confidence=1.0,
+            primary_category="cafe",
+            name="거리검색",
+            lat=37.70,
+            lng=127.19,
+        )
+        near_first = Cafe(
+            overture_id="overture:search-distance-near-first",
+            source_release="test",
+            source_confidence=1.0,
+            primary_category="cafe",
+            name="거리검색 가까운점 A",
+            lat=37.551,
+            lng=126.981,
+        )
+        near_second = Cafe(
+            overture_id="overture:search-distance-near-second",
+            source_release="test",
+            source_confidence=1.0,
+            primary_category="cafe",
+            name="거리검색 가까운점 B",
+            lat=37.551,
+            lng=126.981,
+        )
+        session.add_all([far_exact, near_first, near_second])
+        session.flush()
+        expected_nearest_id = near_first.id
+        session.commit()
+
+    response = api_client.get(
+        "/api/cafes/search",
+        params={
+            "q": "거리검색",
+            "origin_lat": 37.55,
+            "origin_lng": 126.98,
+            "limit": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [expected_nearest_id]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"q": "카페", "origin_lat": 37.55},
+        {"q": "카페", "origin_lng": 126.98},
+        {"q": "카페", "origin_lat": 91, "origin_lng": 126.98},
+    ],
+)
+def test_cafe_search_rejects_invalid_or_unpaired_origin(
+    api_client,
+    params,
+) -> None:
+    response = api_client.get("/api/cafes/search", params=params)
+
+    assert response.status_code == 422
+    assert response.headers.get("cache-control") is None
+
+
 def test_cafe_search_brand_allowlist_accepts_canonical_and_alias(api_client) -> None:
     factory = api_client.app.state.test_session_factory
     with factory() as session:

@@ -8,11 +8,19 @@ import {
 } from "./analytics";
 
 const DEFAULT_DEBOUNCE_MS = 300;
-const SEARCH_LIMIT = 20;
+const SEARCH_LIMIT = 50;
 const MIN_QUERY_LENGTH = 2;
+const SERVER_ORIGIN_DECIMALS = 3;
+
+export interface CafeDistanceOrigin {
+  lat: number;
+  lng: number;
+  label?: string;
+}
 
 export interface CafeSearchResult extends CafeMapProperties {
   address: string;
+  proximityDistanceM?: number;
 }
 
 export interface CafeSearchApi {
@@ -20,16 +28,20 @@ export interface CafeSearchApi {
     query: string,
     brand: string | null,
     signal: AbortSignal,
+    origin?: CafeDistanceOrigin,
   ): Promise<CafeSearchResult[]>;
 }
 
 export interface CafeSearchController {
+  updateDistanceOrigin(origin: CafeDistanceOrigin): void;
   destroy(): void;
 }
 
 interface CafeSearchOptions {
   onSelect: (cafe: CafeSearchResult) => void;
   onBrandChange: (brand: string | null) => void;
+  onResultsChange?: (cafes: CafeSearchResult[] | null) => void;
+  distanceOrigin?: CafeDistanceOrigin;
   apiBaseUrl?: string;
   api?: CafeSearchApi;
   debounceMs?: number;
@@ -110,6 +122,7 @@ class HttpCafeSearchApi implements CafeSearchApi {
     query: string,
     brand: string | null,
     signal: AbortSignal,
+    origin?: CafeDistanceOrigin,
   ): Promise<CafeSearchResult[]> {
     const url = new URL(
       "/api/cafes/search",
@@ -117,6 +130,10 @@ class HttpCafeSearchApi implements CafeSearchApi {
     );
     if (query) url.searchParams.set("q", query);
     if (brand) url.searchParams.set("brand", brand);
+    if (origin !== undefined) {
+      url.searchParams.set("origin_lat", String(origin.lat));
+      url.searchParams.set("origin_lng", String(origin.lng));
+    }
     url.searchParams.set("limit", String(SEARCH_LIMIT));
 
     const response = await fetch(url, { signal, cache: "default" });
@@ -176,6 +193,56 @@ export function cafeMapCenter(
   return [cafe.lng, cafe.lat];
 }
 
+export function cafeDistanceMeters(
+  cafe: CafeDistanceOrigin,
+  origin: CafeDistanceOrigin,
+): number {
+  const earthRadiusM = 6_371_000;
+  const toRadians = (degrees: number): number => degrees * Math.PI / 180;
+  const lat1 = toRadians(origin.lat);
+  const lat2 = toRadians(cafe.lat);
+  const deltaLat = lat2 - lat1;
+  const deltaLng = toRadians(cafe.lng - origin.lng);
+  const haversine = Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) ** 2;
+  return 2 * earthRadiusM * Math.asin(Math.sqrt(Math.min(1, haversine)));
+}
+
+export function coarseSearchOrigin(
+  origin: CafeDistanceOrigin,
+): CafeDistanceOrigin {
+  const scale = 10 ** SERVER_ORIGIN_DECIMALS;
+  return {
+    lat: Math.round(origin.lat * scale) / scale,
+    lng: Math.round(origin.lng * scale) / scale,
+  };
+}
+
+export function rankCafeSearchResults(
+  cafes: CafeSearchResult[],
+  origin: CafeDistanceOrigin,
+): CafeSearchResult[] {
+  return cafes
+    .map((cafe) => ({
+      ...cafe,
+      proximityDistanceM: cafeDistanceMeters(cafe, origin),
+    }))
+    .sort((left, right) =>
+      (left.proximityDistanceM ?? Number.POSITIVE_INFINITY) -
+        (right.proximityDistanceM ?? Number.POSITIVE_INFINITY) ||
+      left.id.localeCompare(right.id)
+    );
+}
+
+export function formatCafeDistance(distanceM: number): string {
+  if (distanceM < 10) return "10m 이내";
+  if (distanceM < 1_000) {
+    return `${Math.round(distanceM / 10) * 10}m`;
+  }
+  const distanceKm = distanceM / 1_000;
+  return `${distanceKm < 10 ? distanceKm.toFixed(1) : Math.round(distanceKm)}km`;
+}
+
 export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchController {
   const form = requiredElement<HTMLFormElement>("#cafe-search-form");
   const input = requiredElement<HTMLInputElement>("#cafe-search-input");
@@ -192,6 +259,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   let requestSequence = 0;
   let results: CafeSearchResult[] = [];
   let resultMode: CafeSearchMode = "text";
+  let distanceOrigin = options.distanceOrigin;
 
   const setPopoverOpen = (open: boolean): void => {
     popover.hidden = !open;
@@ -211,14 +279,18 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     requestSequence += 1;
   };
 
-  const renderResults = (items: CafeSearchResult[]): void => {
+  const renderResults = (items: CafeSearchResult[], publish = true): void => {
     clearResults();
-    results = items;
-    for (const [index, cafe] of items.entries()) {
+    results = distanceOrigin === undefined
+      ? [...items]
+      : rankCafeSearchResults(items, distanceOrigin);
+    if (publish) options.onResultsChange?.(results.length > 0 ? results : null);
+    for (const [index, cafe] of results.entries()) {
       const item = document.createElement("li");
       const button = document.createElement("button");
       const heading = document.createElement("strong");
       const address = document.createElement("span");
+      const metadata = document.createElement("div");
       const crowd = levelLabel(cafe.level);
 
       button.type = "button";
@@ -226,15 +298,29 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
       heading.textContent = cafe.name;
       address.textContent = cafe.address;
       button.append(heading, address);
+      if (cafe.proximityDistanceM !== undefined) {
+        const proximity = document.createElement("em");
+        proximity.textContent = formatCafeDistance(cafe.proximityDistanceM);
+        proximity.setAttribute("aria-label", `기준 위치에서 ${proximity.textContent}`);
+        metadata.append(proximity);
+      }
       if (crowd !== null) {
         const crowdLabel = document.createElement("small");
         crowdLabel.textContent = crowd;
         crowdLabel.dataset.level = String(cafe.level);
-        button.append(crowdLabel);
+        metadata.append(crowdLabel);
       }
+      if (metadata.childElementCount > 0) button.append(metadata);
       item.append(button);
       resultList.append(item);
     }
+  };
+
+  const resultCountMessage = (): string => {
+    const count = results.length.toLocaleString("ko-KR");
+    return distanceOrigin === undefined
+      ? `${count}곳을 찾았어요`
+      : `${count}곳 · ${distanceOrigin.label ?? "기준 위치"}에서 가까운 순`;
   };
 
   const runSearch = async (): Promise<void> => {
@@ -243,6 +329,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     if (selectedBrand === null && query.length < MIN_QUERY_LENGTH) {
       cancelPending();
       clearResults();
+      options.onResultsChange?.(null);
       if (query.length > 0) {
         message.textContent = "두 글자 이상 입력해 주세요";
         setPopoverOpen(true);
@@ -260,20 +347,29 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     const mode = searchMode(query, selectedBrand);
     message.textContent = "카페를 찾는 중…";
     clearResults();
+    options.onResultsChange?.(null);
     setPopoverOpen(true);
 
     try {
-      const items = await api.search(query, selectedBrand, activeController.signal);
+      const items = distanceOrigin === undefined
+        ? await api.search(query, selectedBrand, activeController.signal)
+        : await api.search(
+            query,
+            selectedBrand,
+            activeController.signal,
+            coarseSearchOrigin(distanceOrigin),
+          );
       if (activeController.signal.aborted || sequence !== requestSequence) return;
       resultMode = mode;
       trackCafeSearchResult(items.length, mode);
       renderResults(items);
       message.textContent = items.length === 0
         ? "일치하는 카페를 찾지 못했어요"
-        : `${items.length.toLocaleString("ko-KR")}곳을 찾았어요`;
+        : resultCountMessage();
     } catch (error) {
       if (activeController.signal.aborted || sequence !== requestSequence) return;
       clearResults();
+      options.onResultsChange?.(null);
       message.textContent = error instanceof Error
         ? error.message
         : "검색 결과를 불러오지 못했습니다";
@@ -287,7 +383,14 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     timerId = window.setTimeout(() => void runSearch(), debounceMs);
   };
 
-  const onInput = (): void => scheduleSearch();
+  const onInput = (): void => {
+    if (selectedBrand === null && input.value.trim() === "") {
+      if (timerId !== null) window.clearTimeout(timerId);
+      void runSearch();
+      return;
+    }
+    scheduleSearch();
+  };
   const onSubmit = (event: SubmitEvent): void => {
     event.preventDefault();
     if (timerId !== null) window.clearTimeout(timerId);
@@ -360,6 +463,13 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   document.addEventListener("keydown", onKeyDown);
 
   return {
+    updateDistanceOrigin(origin: CafeDistanceOrigin): void {
+      distanceOrigin = origin;
+      if (results.length > 0) {
+        renderResults(results);
+        message.textContent = resultCountMessage();
+      }
+    },
     destroy(): void {
       cancelPending();
       input.removeEventListener("input", onInput);

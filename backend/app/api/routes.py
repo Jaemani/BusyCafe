@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import UTC, datetime, timedelta
-from math import ceil, isfinite
+from math import ceil, cos, isfinite, radians
 from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -461,6 +461,23 @@ def _brand_search_terms(value: str | None) -> tuple[str, ...] | None:
     return ()
 
 
+def _validated_search_origin(
+    origin_lat: float | None,
+    origin_lng: float | None,
+) -> tuple[float, float] | None:
+    if (origin_lat is None) != (origin_lng is None):
+        raise HTTPException(
+            status_code=422,
+            detail="origin_lat and origin_lng must be provided together",
+        )
+    if origin_lat is None or origin_lng is None:
+        return None
+    if not isfinite(origin_lat) or not isfinite(origin_lng):
+        raise HTTPException(status_code=422, detail="origin must be finite")
+
+    return origin_lat, origin_lng
+
+
 def _cafe_search_response(
     cafe: Cafe,
     score: CafeScore | None,
@@ -598,6 +615,8 @@ def search_cafes(
         min_length=CAFE_SEARCH_MIN_QUERY_LENGTH,
         max_length=CAFE_SEARCH_MAX_QUERY_LENGTH,
     ),
+    origin_lat: float | None = Query(default=None, ge=-90, le=90),
+    origin_lng: float | None = Query(default=None, ge=-180, le=180),
     limit: int = Query(
         CAFE_SEARCH_DEFAULT_LIMIT,
         ge=1,
@@ -621,6 +640,7 @@ def search_cafes(
             status_code=422,
             detail="q or brand must contain a search term",
         )
+    origin = _validated_search_origin(origin_lat, origin_lng)
 
     min_lng, min_lat, max_lng, max_lat = SEOUL_BBOX
     statement = (
@@ -676,17 +696,32 @@ def search_cafes(
             )
         )
 
-    relevance_term = normalized_q or brand_terms[0]
-    statement = statement.order_by(
-        case(
-            (lower_name == relevance_term, 0),
-            (lower_name.startswith(relevance_term, autoescape=True), 1),
-            (lower_name.contains(relevance_term, autoescape=True), 2),
-            else_=3,
-        ),
-        lower_name,
-        Cafe.id,
-    ).limit(limit)
+    if origin is not None:
+        search_lat, search_lng = origin
+        # Fixed-latitude equirectangular distance is sufficient for ordering
+        # within Seoul and compiles to basic arithmetic on SQLite/PostgreSQL.
+        # Latitude degrees need no scale; longitude degrees shrink by cos(lat).
+        seoul_mid_lat = (min_lat + max_lat) / 2
+        lng_scale = cos(radians(seoul_mid_lat))
+        lat_delta = Cafe.lat - search_lat
+        lng_delta = (Cafe.lng - search_lng) * lng_scale
+        distance_squared = (
+            lat_delta * lat_delta + lng_delta * lng_delta
+        )
+        statement = statement.order_by(distance_squared, Cafe.id)
+    else:
+        relevance_term = normalized_q or brand_terms[0]
+        statement = statement.order_by(
+            case(
+                (lower_name == relevance_term, 0),
+                (lower_name.startswith(relevance_term, autoescape=True), 1),
+                (lower_name.contains(relevance_term, autoescape=True), 2),
+                else_=3,
+            ),
+            lower_name,
+            Cafe.id,
+        )
+    statement = statement.limit(limit)
 
     request_time = datetime.now(UTC)
     return [

@@ -21,9 +21,13 @@ vi.mock("./analytics", () => ({
 }));
 
 import {
+  cafeDistanceMeters,
   cafeMapCenter,
   cafeMatchesBrand,
+  coarseSearchOrigin,
+  formatCafeDistance,
   initializeCafeSearch,
+  rankCafeSearchResults,
   type CafeSearchApi,
   type CafeSearchResult,
 } from "./cafe-search";
@@ -143,7 +147,13 @@ describe("cafe search", () => {
 
   it("shows empty and error states without stale result rows", async () => {
     const api = createApi([]);
-    initializeCafeSearch({ api, onSelect: vi.fn(), onBrandChange: vi.fn() });
+    const onResultsChange = vi.fn();
+    initializeCafeSearch({
+      api,
+      onSelect: vi.fn(),
+      onBrandChange: vi.fn(),
+      onResultsChange,
+    });
     const form = document.querySelector<HTMLFormElement>("#cafe-search-form")!;
     const input = document.querySelector<HTMLInputElement>("#cafe-search-input")!;
     input.value = "없는카페";
@@ -153,6 +163,7 @@ describe("cafe search", () => {
     expect(document.querySelector("#cafe-search-message")?.textContent).toBe(
       "일치하는 카페를 찾지 못했어요",
     );
+    expect(onResultsChange).toHaveBeenLastCalledWith(null);
 
     api.search.mockRejectedValueOnce(new Error("검색 서버 점검 중"));
     input.value = "오류카페";
@@ -163,6 +174,71 @@ describe("cafe search", () => {
       "검색 서버 점검 중",
     );
     expect(document.querySelectorAll("[data-search-result-index]")).toHaveLength(0);
+    expect(onResultsChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it("orders and re-orders visible results from the current distance origin", async () => {
+    const north = { ...result("north"), name: "북쪽", lat: 37.51, lng: 127 };
+    const south = { ...result("south"), name: "남쪽", lat: 37.49, lng: 127 };
+    const api = createApi([north, south]);
+    const onResultsChange = vi.fn();
+    const search = initializeCafeSearch({
+      api,
+      onSelect: vi.fn(),
+      onBrandChange: vi.fn(),
+      onResultsChange,
+      distanceOrigin: { lat: 37.489, lng: 127 },
+    });
+    const form = document.querySelector<HTMLFormElement>("#cafe-search-form")!;
+    const input = document.querySelector<HTMLInputElement>("#cafe-search-input")!;
+    input.value = "카페";
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(api.search).toHaveBeenCalledWith(
+      "카페",
+      null,
+      expect.any(AbortSignal),
+      { lat: 37.489, lng: 127 },
+    );
+    expect([...document.querySelectorAll("#cafe-search-results strong")].map(
+      (element) => element.textContent,
+    )).toEqual(["남쪽", "북쪽"]);
+    expect(document.querySelector("#cafe-search-results em")?.textContent).toMatch(/m|km/);
+
+    search.updateDistanceOrigin({ lat: 37.511, lng: 127 });
+    expect([...document.querySelectorAll("#cafe-search-results strong")].map(
+      (element) => element.textContent,
+    )).toEqual(["북쪽", "남쪽"]);
+    expect(onResultsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: "north" }),
+      expect.objectContaining({ id: "south" }),
+    ]);
+  });
+
+  it("restores the full map state immediately when search is cleared", async () => {
+    const api = createApi();
+    const onResultsChange = vi.fn();
+    initializeCafeSearch({
+      api,
+      onSelect: vi.fn(),
+      onBrandChange: vi.fn(),
+      onResultsChange,
+    });
+    const form = document.querySelector<HTMLFormElement>("#cafe-search-form")!;
+    const input = document.querySelector<HTMLInputElement>("#cafe-search-input")!;
+    input.value = "스타벅스";
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(onResultsChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ id: "cafe-1" }),
+    ]);
+
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(onResultsChange).toHaveBeenLastCalledWith(null);
   });
 });
 
@@ -176,5 +252,25 @@ describe("brand matching", () => {
 
   it("passes MapLibre coordinates in longitude-latitude order", () => {
     expect(cafeMapCenter({ lat: 37.54, lng: 127.05 })).toEqual([127.05, 37.54]);
+  });
+
+  it("ranks by haversine distance with deterministic id ties", () => {
+    const origin = { lat: 37.5, lng: 127 };
+    const tiedB = { ...result("b"), lat: 37.5, lng: 127 };
+    const tiedA = { ...result("a"), lat: 37.5, lng: 127 };
+    const far = { ...result("far"), lat: 37.6, lng: 127 };
+    expect(rankCafeSearchResults([far, tiedB, tiedA], origin).map(({ id }) => id)).toEqual([
+      "a",
+      "b",
+      "far",
+    ]);
+    expect(cafeDistanceMeters(far, origin)).toBeGreaterThan(11_000);
+    expect(formatCafeDistance(4)).toBe("10m 이내");
+    expect(formatCafeDistance(846)).toBe("850m");
+    expect(formatCafeDistance(1_240)).toBe("1.2km");
+    expect(coarseSearchOrigin({ lat: 37.48949, lng: 127.00051 })).toEqual({
+      lat: 37.489,
+      lng: 127.001,
+    });
   });
 });
