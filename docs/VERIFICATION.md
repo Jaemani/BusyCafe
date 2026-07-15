@@ -1607,3 +1607,67 @@ OA-22784 월 릴리스에 속해 독립 source release가 아니고, OA-22784와
 독립 ground truth가 아니다. 다른 월 rolling-origin과 Phase 6 현장 라벨 전에는
 `historical_feature_candidate=false`, 정확도 주장·공개 promotion=false이며 public v1 API,
 DB, frontend, confidence는 변경하지 않는다.
+
+## 2026-07-15 — OA-22784 fragment-aware compact v2와 activity consumer
+
+### 원본 전수 계약과 compact v2
+
+- 입력은 공식 `250_LOCAL_RESD_20260630.csv`, 253,946 fragment다. SHA-256은
+  `857b6273d58a83949e653a95720207be0344c740fe4d986fad29b3f4033024`다.
+- `(date, hour, cell_id)`로 합치면 204,780 cell observation이다. 둘 이상의 행정동
+  fragment를 가진 observation은 44,837개, 부분 마스킹은 4,355개, 전부 마스킹은
+  8,952개, observation당 최대 fragment는 4개였다.
+- compact schema version은 2, query version은
+  `oa-22784-cp949-cell-fragments-json-v2`다. 각 행은 exact Decimal `known_total`,
+  `fragment_count`, `masked_fragment_count`와 canonical `fragments_json`을 보존한다.
+  `known_value`는 exact decimal string 또는 `null`이고 `total_raw`, 행정동 코드,
+  마스킹 여부와 source filename을 함께 유지한다. 전부 마스킹이면 `known_total=0`이지만
+  이를 관측 점값으로 해석하지 않는다.
+- 첫 real apply는 DuckDB의 CP949 CSV decode 경로에서 native SIGSEGV로 종료됐다. 입력
+  검증을 완화하지 않고 Python stdlib의 strict CP949 decode로 전용 임시 디렉터리의 UTF-8
+  임시 파일을 만든 뒤 DuckDB가 읽도록 변경했다. 성공·실패 모두 임시 파일을 정리하며
+  검증 뒤 잔여 temp file은 0개였다.
+- 대표 4-cell allowlist의 real apply는 96 cell observation/168 fragment를 만들었다.
+  부분 마스킹 13개, 전부 마스킹 31개였고 Parquet SHA-256은
+  `0e7d26e8fcc083a6ba1165c34f2f8ad1c05ad5621d2c93adf0eba70f5ddf5a97`다.
+  sidecar manifest는 schema/query, 원본·allowlist·output SHA/size/row count와 집계 계약을
+  보존하며 Parquet과 함께 원자 게시된다.
+
+### activity consumer와 마스킹 abstention
+
+- consumer는 sidecar manifest를 필수로 읽고 schema/query/output filename/size/SHA/row
+  count를 실제 Parquet과 대조한다. v1, mixed query, missing/extra column, manifest 변조와
+  중복 cell identity를 fail-closed한다.
+- 모든 fragment에서 8자리 ASCII 행정동 코드, canonical JSON, exact Decimal 합,
+  fragment/masked count, 원본 token과 source filename을 재검증한다. 원본 fragment JSON과
+  검증된 manifest evidence는 activity artifact provenance에 보존한다.
+- target 상태는 `complete`, `partially_masked`, `masked`, `missing`으로 분리한다. 부분 또는
+  전부 마스킹된 history는 `HistoricalCellObservation(total=None, masked=True)`로 전달한다.
+  현재 target이 부분/전부 마스킹이면 suppression bound를 가정하지 않고
+  `baseline_only` 또는 `unsupported`로 abstain하며 0/2/3 점대치나 point/range anomaly를
+  생성하지 않는다.
+- 대표 Parquet의 2026-06-30 00시 real consumer dry-run/apply는 4 features를 만들었고
+  상태는 complete 1, partially masked 1, masked 2였다. 두 실행의 직렬화가 일치했고
+  artifact SHA-256은
+  `7576237fdd1a87d318b4de04d3f8283ebf8eceab9046db328d41308ab16d89d4`다.
+
+재현 검증 명령은 로컬 wrapper 없이 다음 표준 명령을 사용했다.
+
+```bash
+cd backend
+uv run pytest -q tests/test_compact_living_population.py tests/test_build_activity_artifact.py
+uv run pytest -q
+uv run --with mypy mypy app/config.py scripts/compact_living_population.py scripts/build_activity_artifact.py tests/test_compact_living_population.py tests/test_build_activity_artifact.py
+uv run python -m compileall -q app scripts tests
+```
+
+- focused producer/consumer: 64 passed
+- full backend: 884 passed, 2 skipped
+- 변경 5파일 mypy와 app/scripts/tests compileall: PASS
+- frontend TypeScript와 production build: PASS. 기존 500kB chunk warning만 유지
+- `git diff --check`: PASS
+
+판정: **PASS(fragment-preserving offline pipeline)**. 행정동 경계 fragment와 부분 마스킹을
+손실 없이 보존하고 consumer가 불확실한 현재값에서 abstain함을 real apply와 회귀 테스트로
+확인했다. 이는 historical/activity shadow 입력 계약의 수정이며 public v1 API, DB,
+frontend, production score와 confidence는 변경하지 않는다.

@@ -15,12 +15,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import duckdb
@@ -31,7 +33,9 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import (  # noqa: E402
+    LIVING_POPULATION_COMPACT_MANIFEST_SUFFIX,
     LIVING_POPULATION_COMPACT_PART_SUFFIX,
+    LIVING_POPULATION_COMPACT_QUERY_VERSION,
     LIVING_POPULATION_COMPACT_SCHEMA_VERSION,
     LIVING_POPULATION_HASH_CHUNK_BYTES,
 )
@@ -52,13 +56,31 @@ from app.scoring.temporal_baseline_shadow import (  # noqa: E402
 )
 
 
-ARTIFACT_MODEL_VERSION = "v1-offline-cell-activity-artifact"
+ARTIFACT_MODEL_VERSION = "v2-offline-cell-activity-artifact"
 SOURCE_ID = "seoul-living-population-oa-22784"
-OBSERVATION_TYPE = "presence_count"
+OBSERVATION_TYPE: Literal["presence_count"] = "presence_count"
 SEOUL_TIMEZONE = "Asia/Seoul"
 REQUIRED_PARQUET_COLUMNS = frozenset(
-    {"date", "hour", "cell_id", "total", "masked", "source_file"}
+    {
+        "date",
+        "hour",
+        "cell_id",
+        "known_total",
+        "fragment_count",
+        "masked_fragment_count",
+        "fragments_json",
+    }
 )
+REQUIRED_FRAGMENT_FIELDS = frozenset(
+    {
+        "administrative_dong_code",
+        "known_value",
+        "total_raw",
+        "masked",
+        "source_file",
+    }
+)
+KNOWN_TOTAL_RAW_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]*)?\Z", re.ASCII)
 
 
 class ActivityArtifactError(ValueError):
@@ -75,13 +97,40 @@ class CalendarSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class _SourceFragment:
+    administrative_dong_code: str
+    known_value: Decimal | None
+    total_raw: str
+    masked: bool
+    source_file: str
+
+
+@dataclass(frozen=True, slots=True)
 class _SourceRow:
     observed_date: date
     hour: int
     cell_id: str
-    total: float | None
-    masked: bool
-    source_file: str
+    known_total: Decimal
+    fragment_count: int
+    masked_fragment_count: int
+    fragments: tuple[_SourceFragment, ...]
+    fragments_json: str
+
+    @property
+    def target_status(self) -> str:
+        if self.masked_fragment_count == 0:
+            return "complete"
+        if self.masked_fragment_count == self.fragment_count:
+            return "masked"
+        return "partially_masked"
+
+    @property
+    def masked(self) -> bool:
+        return self.masked_fragment_count > 0
+
+    @property
+    def total(self) -> float | None:
+        return None if self.masked else float(self.known_total)
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,9 +201,125 @@ def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _preflight(
-    inputs: list[Path], output_path: Path
-) -> tuple[list[Path], Path, Path]:
+def _load_manifest_evidence(path: Path) -> dict[str, Any]:
+    manifest_path = path.with_name(
+        path.name + LIVING_POPULATION_COMPACT_MANIFEST_SUFFIX
+    )
+    if not manifest_path.is_file():
+        raise ActivityArtifactError(f"compact manifest does not exist: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ActivityArtifactError(
+            f"cannot read compact manifest {manifest_path}: {exc}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise ActivityArtifactError("compact manifest JSON must be an object")
+    if manifest.get("schema_version") != LIVING_POPULATION_COMPACT_SCHEMA_VERSION:
+        raise ActivityArtifactError(
+            "compact manifest schema_version mismatch: "
+            f"expected {LIVING_POPULATION_COMPACT_SCHEMA_VERSION!r}"
+        )
+    if manifest.get("query_version") != LIVING_POPULATION_COMPACT_QUERY_VERSION:
+        raise ActivityArtifactError(
+            "compact manifest query_version mismatch: "
+            f"expected {LIVING_POPULATION_COMPACT_QUERY_VERSION!r}"
+        )
+    if manifest.get("mode") != "apply":
+        raise ActivityArtifactError("compact manifest mode must be 'apply'")
+
+    output = manifest.get("output")
+    if not isinstance(output, dict):
+        raise ActivityArtifactError("compact manifest output must be an object")
+    output_path = output.get("path")
+    if (
+        not isinstance(output_path, str)
+        or not output_path.strip()
+        or Path(output_path).name != path.name
+    ):
+        raise ActivityArtifactError(
+            "compact manifest output filename does not match Parquet input"
+        )
+    output_size = output.get("size_bytes")
+    if (
+        not isinstance(output_size, int)
+        or isinstance(output_size, bool)
+        or output_size != path.stat().st_size
+    ):
+        raise ActivityArtifactError(
+            "compact manifest output size_bytes does not match Parquet input"
+        )
+    output_sha256 = output.get("sha256")
+    actual_sha256 = _sha256(path)
+    if not isinstance(output_sha256, str) or output_sha256 != actual_sha256:
+        raise ActivityArtifactError(
+            "compact manifest output sha256 does not match Parquet input"
+        )
+    schema = output.get("schema")
+    if not isinstance(schema, list) or any(
+        not isinstance(item, dict) for item in schema
+    ):
+        raise ActivityArtifactError("compact manifest output schema must be a list")
+    schema_names = [item.get("name") for item in schema]
+    if (
+        any(not isinstance(name, str) for name in schema_names)
+        or len(schema_names) != len(set(schema_names))
+        or frozenset(schema_names) != REQUIRED_PARQUET_COLUMNS
+    ):
+        raise ActivityArtifactError(
+            "compact manifest output schema must contain exact v2 columns"
+        )
+    row_counts = manifest.get("row_counts")
+    expected_rows = (
+        row_counts.get("cell_observations_filtered")
+        if isinstance(row_counts, dict)
+        else None
+    )
+    if (
+        not isinstance(expected_rows, int)
+        or isinstance(expected_rows, bool)
+        or expected_rows < 0
+    ):
+        raise ActivityArtifactError(
+            "compact manifest row_counts.cell_observations_filtered must be non-negative"
+        )
+    connection = duckdb.connect(":memory:")
+    try:
+        count_row = connection.execute(
+            f"SELECT count(*) FROM read_parquet({_sql_string(str(path))})"
+        ).fetchone()
+    except duckdb.Error as exc:
+        raise ActivityArtifactError(f"cannot read compact Parquet: {exc}") from exc
+    finally:
+        connection.close()
+    if count_row is None:
+        raise ActivityArtifactError("cannot count compact Parquet rows")
+    actual_rows = int(count_row[0])
+    if expected_rows != actual_rows:
+        raise ActivityArtifactError(
+            "compact manifest row count does not match Parquet input"
+        )
+    return {
+        "file": path.name,
+        "sha256": actual_sha256,
+        "size_bytes": path.stat().st_size,
+        "manifest": {
+            "file": manifest_path.name,
+            "sha256": _sha256(manifest_path),
+            "size_bytes": manifest_path.stat().st_size,
+            "schema_version": manifest["schema_version"],
+            "query_version": manifest["query_version"],
+            "verified_output": {
+                "file": path.name,
+                "sha256": actual_sha256,
+                "size_bytes": path.stat().st_size,
+                "rows": actual_rows,
+            },
+        },
+    }
+
+
+def _preflight(inputs: list[Path], output_path: Path) -> tuple[list[Path], Path, Path]:
     resolved_inputs = sorted({path.resolve() for path in inputs}, key=str)
     if not resolved_inputs:
         raise ActivityArtifactError("at least one Parquet input is required")
@@ -179,9 +344,7 @@ def _preflight(
     return resolved_inputs, output, part
 
 
-def _read_rows(
-    inputs: list[Path], *, target_date: date, hour: int
-) -> list[_SourceRow]:
+def _read_rows(inputs: list[Path], *, target_date: date, hour: int) -> list[_SourceRow]:
     input_list = ", ".join(_sql_string(str(path)) for path in inputs)
     relation = f"read_parquet([{input_list}], union_by_name = false)"
     connection = duckdb.connect(":memory:")
@@ -192,19 +355,24 @@ def _read_rows(
                 f"DESCRIBE SELECT * FROM {relation}"
             ).fetchall()
         }
-        missing = sorted(REQUIRED_PARQUET_COLUMNS - columns)
-        if missing:
+        if columns != REQUIRED_PARQUET_COLUMNS:
+            missing = sorted(REQUIRED_PARQUET_COLUMNS - columns)
+            extra = sorted(columns - REQUIRED_PARQUET_COLUMNS)
+            detail = []
+            if missing:
+                detail.append("missing=" + ",".join(missing))
+            if extra:
+                detail.append("extra=" + ",".join(extra))
             raise ActivityArtifactError(
-                "compact Parquet missing columns: " + ", ".join(missing)
+                "compact Parquet must contain exact v2 columns: " + "; ".join(detail)
             )
         raw_rows = connection.execute(
             f"""
-            SELECT date, hour, cell_id, total, masked, source_file
+            SELECT date, hour, cell_id, known_total, fragment_count,
+                   masked_fragment_count, fragments_json
             FROM {relation}
-            WHERE hour = ? AND date <= ?
-            ORDER BY date, cell_id, source_file
-            """,
-            [hour, target_date],
+            ORDER BY date, hour, cell_id
+            """
         ).fetchall()
     except duckdb.Error as exc:
         raise ActivityArtifactError(f"cannot read compact Parquet: {exc}") from exc
@@ -213,54 +381,191 @@ def _read_rows(
 
     rows: list[_SourceRow] = []
     seen: set[tuple[date, int, str]] = set()
-    for raw_date, raw_hour, raw_cell, raw_total, raw_masked, raw_source in raw_rows:
+    for (
+        raw_date,
+        raw_hour,
+        raw_cell,
+        raw_known_total,
+        raw_fragment_count,
+        raw_masked_fragment_count,
+        raw_fragments_json,
+    ) in raw_rows:
         if not isinstance(raw_date, date):
             raise ActivityArtifactError("Parquet date must use DATE type")
         if not isinstance(raw_hour, int) or not 0 <= raw_hour <= 23:
             raise ActivityArtifactError("Parquet hour must be an integer in 0..23")
-        if not isinstance(raw_cell, str) or not raw_cell.strip():
-            raise ActivityArtifactError("Parquet cell_id must be non-empty")
-        cell_id = raw_cell.strip()
+        if (
+            not isinstance(raw_cell, str)
+            or not raw_cell
+            or raw_cell != raw_cell.strip()
+        ):
+            raise ActivityArtifactError(
+                "Parquet cell_id must be non-empty canonical text"
+            )
+        cell_id = raw_cell
         try:
             cell_wgs84_corners(cell_id)
         except ValueError as exc:
             raise ActivityArtifactError(
                 f"invalid Parquet cell_id {cell_id!r}: {exc}"
             ) from None
-        if not isinstance(raw_masked, bool):
-            raise ActivityArtifactError("Parquet masked must use BOOLEAN type")
-        if raw_masked:
-            if raw_total is not None:
-                raise ActivityArtifactError("masked Parquet row total must be NULL")
-            total = None
-        else:
-            if raw_total is None:
+        if (
+            not isinstance(raw_known_total, Decimal)
+            or not raw_known_total.is_finite()
+            or raw_known_total < 0
+        ):
+            raise ActivityArtifactError(
+                "Parquet known_total must be finite non-negative DECIMAL"
+            )
+        for value, field in (
+            (raw_fragment_count, "fragment_count"),
+            (raw_masked_fragment_count, "masked_fragment_count"),
+        ):
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise ActivityArtifactError(f"Parquet {field} must be an integer")
+        if raw_fragment_count <= 0:
+            raise ActivityArtifactError("Parquet fragment_count must be positive")
+        if not 0 <= raw_masked_fragment_count <= raw_fragment_count:
+            raise ActivityArtifactError(
+                "Parquet masked_fragment_count must be within fragment_count"
+            )
+        if not isinstance(raw_fragments_json, str):
+            raise ActivityArtifactError("Parquet fragments_json must use VARCHAR type")
+        try:
+            raw_fragments = json.loads(raw_fragments_json)
+        except json.JSONDecodeError as exc:
+            raise ActivityArtifactError(
+                f"Parquet fragments_json must contain valid JSON: {exc}"
+            ) from None
+        if not isinstance(raw_fragments, list):
+            raise ActivityArtifactError("Parquet fragments_json must contain an array")
+        try:
+            canonical_fragments_json = json.dumps(
+                raw_fragments,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise ActivityArtifactError(
+                f"Parquet fragments_json must contain finite JSON values: {exc}"
+            ) from None
+        if raw_fragments_json != canonical_fragments_json:
+            raise ActivityArtifactError(
+                "Parquet fragments_json must use canonical compact JSON"
+            )
+        if len(raw_fragments) != raw_fragment_count:
+            raise ActivityArtifactError(
+                "Parquet fragments length must equal fragment_count"
+            )
+        fragments: list[_SourceFragment] = []
+        for raw_fragment in raw_fragments:
+            if (
+                not isinstance(raw_fragment, dict)
+                or frozenset(raw_fragment) != REQUIRED_FRAGMENT_FIELDS
+            ):
                 raise ActivityArtifactError(
-                    "unmasked Parquet row total must not be NULL"
+                    "Parquet fragment must contain exact v2 fields"
                 )
-            total = float(raw_total)
-            if not 0 <= total < float("inf"):
+            raw_admin = raw_fragment["administrative_dong_code"]
+            raw_known_value = raw_fragment["known_value"]
+            raw_total = raw_fragment["total_raw"]
+            raw_masked = raw_fragment["masked"]
+            raw_source = raw_fragment["source_file"]
+            if (
+                not isinstance(raw_admin, str)
+                or len(raw_admin) != 8
+                or not raw_admin.isascii()
+                or not raw_admin.isdigit()
+            ):
                 raise ActivityArtifactError(
-                    "unmasked Parquet row total must be finite and non-negative"
+                    "fragment administrative_dong_code must be 8 ASCII digits"
                 )
-        if not isinstance(raw_source, str) or not raw_source.strip():
-            raise ActivityArtifactError("Parquet source_file must be non-empty")
+            if not isinstance(raw_masked, bool):
+                raise ActivityArtifactError("fragment masked must use BOOLEAN type")
+            if not isinstance(raw_total, str):
+                raise ActivityArtifactError("fragment total_raw must use VARCHAR type")
+            if (
+                not isinstance(raw_source, str)
+                or not raw_source
+                or raw_source != raw_source.strip()
+            ):
+                raise ActivityArtifactError(
+                    "fragment source_file must be non-empty canonical text"
+                )
+            if raw_masked:
+                if raw_known_value is not None or raw_total != "*":
+                    raise ActivityArtifactError(
+                        "masked fragment must have NULL known_value and '*' total_raw"
+                    )
+                known_value = None
+            else:
+                if (
+                    not isinstance(raw_known_value, str)
+                    or KNOWN_TOTAL_RAW_PATTERN.fullmatch(raw_known_value) is None
+                ):
+                    raise ActivityArtifactError(
+                        "unmasked fragment known_value must be an exact "
+                        "non-negative decimal string"
+                    )
+                if KNOWN_TOTAL_RAW_PATTERN.fullmatch(raw_total) is None:
+                    raise ActivityArtifactError(
+                        "unmasked fragment total_raw has invalid numeric token"
+                    )
+                known_value = Decimal(raw_known_value)
+                if not known_value.is_finite() or known_value < 0:
+                    raise ActivityArtifactError(
+                        "unmasked fragment known_value must be finite and non-negative"
+                    )
+                if Decimal(raw_total) != known_value:
+                    raise ActivityArtifactError(
+                        "unmasked fragment known_value must equal total_raw exactly"
+                    )
+            fragments.append(
+                _SourceFragment(
+                    administrative_dong_code=raw_admin,
+                    known_value=known_value,
+                    total_raw=raw_total,
+                    masked=raw_masked,
+                    source_file=raw_source,
+                )
+            )
+        actual_masked_count = sum(fragment.masked for fragment in fragments)
+        if actual_masked_count != raw_masked_fragment_count:
+            raise ActivityArtifactError(
+                "actual masked fragment count must equal masked_fragment_count"
+            )
+        actual_known_total = sum(
+            (
+                fragment.known_value
+                for fragment in fragments
+                if fragment.known_value is not None
+            ),
+            Decimal(0),
+        )
+        if actual_known_total != raw_known_total:
+            raise ActivityArtifactError(
+                "known_total must equal exact sum of unmasked fragments"
+            )
         identity = (raw_date, raw_hour, cell_id)
         if identity in seen:
             raise ActivityArtifactError(
                 f"duplicate date-hour-cell observation: {identity!r}"
             )
         seen.add(identity)
-        rows.append(
-            _SourceRow(
-                observed_date=raw_date,
-                hour=raw_hour,
-                cell_id=cell_id,
-                total=total,
-                masked=raw_masked,
-                source_file=raw_source.strip(),
+        if raw_hour == hour and raw_date <= target_date:
+            rows.append(
+                _SourceRow(
+                    observed_date=raw_date,
+                    hour=raw_hour,
+                    cell_id=cell_id,
+                    known_total=raw_known_total,
+                    fragment_count=raw_fragment_count,
+                    masked_fragment_count=raw_masked_fragment_count,
+                    fragments=tuple(fragments),
+                    fragments_json=raw_fragments_json,
+                )
             )
-        )
     return rows
 
 
@@ -345,6 +650,34 @@ def _baseline_reference(
     )
 
 
+def _serialize_fragment(fragment: _SourceFragment) -> dict[str, Any]:
+    return {
+        "administrative_dong_code": fragment.administrative_dong_code,
+        "known_value": (
+            str(fragment.known_value) if fragment.known_value is not None else None
+        ),
+        "total_raw": fragment.total_raw,
+        "masked": fragment.masked,
+        "source_file": fragment.source_file,
+    }
+
+
+def _serialize_source_observation(target: _SourceRow | None) -> dict[str, Any]:
+    return {
+        "known_total": str(target.known_total) if target is not None else None,
+        "fragment_count": target.fragment_count if target is not None else None,
+        "masked_fragment_count": (
+            target.masked_fragment_count if target is not None else None
+        ),
+        "fragments": (
+            [_serialize_fragment(fragment) for fragment in target.fragments]
+            if target is not None
+            else []
+        ),
+        "fragments_json": target.fragments_json if target is not None else None,
+    }
+
+
 def _feature(
     *,
     cell_id: str,
@@ -388,14 +721,18 @@ def _feature(
         hour,
         tzinfo=ZoneInfo(calendar.timezone),
     )
-    target_status = (
-        "missing" if target is None else "masked" if target.masked else "observed"
-    )
+    target_status = "missing" if target is None else target.target_status
     if baseline.mean is None:
         activity = _unsupported_activity()
     else:
-        mode = "observed" if target_status == "observed" else "baseline_only"
-        current_value = target.total if target_status == "observed" else None
+        mode: Literal["observed", "baseline_only"] = (
+            "observed" if target_status == "complete" else "baseline_only"
+        )
+        if target_status == "complete":
+            assert target is not None
+            current_value = target.total
+        else:
+            current_value = None
         contributor = ActivityContributorInput(
             contributor_id=cell_id,
             observation_type=OBSERVATION_TYPE,
@@ -428,7 +765,9 @@ def _feature(
                 now=target_timestamp,
             )
         )
-    row_sources = sorted({row.source_file for row in rows})
+    row_sources = sorted(
+        {fragment.source_file for row in rows for fragment in row.fragments}
+    )
     return {
         "type": "Feature",
         "id": cell_id,
@@ -443,11 +782,7 @@ def _feature(
             ),
             "observation_type": OBSERVATION_TYPE,
             "target_status": target_status,
-            "source_observation": {
-                "total": target.total if target is not None else None,
-                "masked": target.masked if target is not None else None,
-                "source_file": target.source_file if target is not None else None,
-            },
+            "source_observation": _serialize_source_observation(target),
             "baseline": _serialize_baseline(baseline),
             "activity": activity,
             "source_id": SOURCE_ID,
@@ -457,13 +792,19 @@ def _feature(
                 "artifact_model_version": ARTIFACT_MODEL_VERSION,
                 "compact_schema_contract": {
                     "expected_version": LIVING_POPULATION_COMPACT_SCHEMA_VERSION,
-                    "validation": "required-columns-and-row-contract;manifest-not-read",
+                    "expected_query_version": (LIVING_POPULATION_COMPACT_QUERY_VERSION),
+                    "validation": (
+                        "exact-v2-columns-and-fragments;sidecar-manifest-verified"
+                    ),
                 },
                 "source_files": row_sources,
                 "source_hashes": list(source_hashes),
                 "calendar_sha256": calendar.sha256,
                 "baseline_cutoff": "date<target_date",
-                "masked_current_policy": "no-current;baseline-only-or-unsupported",
+                "masked_current_policy": (
+                    "partial-or-full-mask=no-current;"
+                    "baseline-only-or-unsupported;no-point-or-interval-imputation"
+                ),
                 "freshness_reference": "target-timestamp;offline-not-live-fetch",
                 "geometry": f"{CELL_GEOMETRY_VERSION};cell_wgs84_corners;closed-ring",
             },
@@ -491,13 +832,8 @@ def build_activity_artifact(
         raise ActivityArtifactError("source_version must be non-empty")
     inputs, output, part = _preflight(inputs, output_path)
     calendar = _load_calendar(calendar_path)
-    input_evidence = [
-        {"file": path.name, "sha256": _sha256(path), "size_bytes": path.stat().st_size}
-        for path in inputs
-    ]
-    source_hashes = tuple(
-        f"sha256:{item['sha256']}" for item in input_evidence
-    )
+    input_evidence = [_load_manifest_evidence(path) for path in inputs]
+    source_hashes = tuple(f"sha256:{item['sha256']}" for item in input_evidence)
     rows = _read_rows(inputs, target_date=target_date, hour=hour)
     if not rows:
         raise ActivityArtifactError(
@@ -532,13 +868,18 @@ def build_activity_artifact(
             feature["properties"]["activity"]["signal_mode"] == "unsupported"
             for feature in features
         ),
-        "masked_target": sum(
-            feature["properties"]["target_status"] == "masked"
+        "complete_target": sum(
+            feature["properties"]["target_status"] == "complete" for feature in features
+        ),
+        "partially_masked_target": sum(
+            feature["properties"]["target_status"] == "partially_masked"
             for feature in features
         ),
+        "masked_target": sum(
+            feature["properties"]["target_status"] == "masked" for feature in features
+        ),
         "missing_target": sum(
-            feature["properties"]["target_status"] == "missing"
-            for feature in features
+            feature["properties"]["target_status"] == "missing" for feature in features
         ),
     }
     artifact: dict[str, Any] = {
@@ -557,7 +898,10 @@ def build_activity_artifact(
             "version": source_version.strip(),
             "compact_schema_contract": {
                 "expected_version": LIVING_POPULATION_COMPACT_SCHEMA_VERSION,
-                "validation": "required-columns-and-row-contract;manifest-not-read",
+                "expected_query_version": LIVING_POPULATION_COMPACT_QUERY_VERSION,
+                "validation": (
+                    "exact-v2-columns-and-fragments;sidecar-manifest-verified"
+                ),
             },
             "inputs": input_evidence,
         },
@@ -570,7 +914,12 @@ def build_activity_artifact(
         },
         "provenance": {
             "baseline_cutoff": "strictly-before-target-date",
-            "masked_current_policy": "no-current;never-point-imputed",
+            "masked_current_policy": (
+                "partial-or-full-mask=no-current;never-point-or-interval-imputed"
+            ),
+            "manifest_validation": (
+                "required-sidecar;schema+query+filename+size+sha256+row-count"
+            ),
             "geometry": f"{CELL_GEOMETRY_VERSION};decoder-quadrilateral-wgs84",
             "ordering": "features=cell_id;json-keys=lexicographic",
             "network_calls": False,

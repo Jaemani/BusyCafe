@@ -346,6 +346,39 @@ SHA-256은 `2ba2485e74572076d7839d86cc82ade457aa8ef245c29b49866fa868443e6ea9`다
   `historical_feature_candidate`, `accuracy_claim_allowed`, `public_promotion_allowed`는 모두
   `false`이고 공개 `v1-idw-point`는 변경하지 않는다.
 
+### 2.8 생활인구 compact v2 결과
+
+경계 격자의 행정동 부분행과 마스킹 의미를 잃지 않는 compact v2 producer/consumer 계약을
+실데이터 결과 전에 고정했다. 원천 identity는
+`(date,hour,administrative_dong_code,CELL_ID)`이고, 동일 3-key의 서로 다른 행정동 fragment는
+허용하되 4-key 중복은 거부한다. 출력은 `(date,hour,CELL_ID)`당 한 행이며 schema는 다음과
+같다.
+
+- `date DATE`, `hour UTINYINT`, `cell_id VARCHAR`
+- `known_total DECIMAL(38,5)`: 숫자 fragment만 정확히 합산하며 전부 마스킹이면 0
+- `fragment_count UINTEGER`, `masked_fragment_count UINTEGER`
+- `fragments_json VARCHAR`: 행정동 코드, exact decimal string 또는 null인 `known_value`,
+  trimmed `total_raw`, `masked`, `source_file`을 결정적 순서로 보존
+
+부분 마스킹은 알려진 fragment 합계를 보존하지만 이를 cell 전체의 현재값으로 해석하지
+않는다. v2 activity consumer는 부분 또는 전체 마스킹 target에서 점·구간 대치를 모두
+거부하고 baseline-only 또는 unsupported로 abstain한다. 입력마다 필수 sidecar manifest를
+읽어 schema/query version, output 파일명·크기·SHA-256·행 수를 확인하고, JSON fragment 수,
+마스킹 수, 숫자 합계, canonical 직렬화와 정렬도 fail-closed로 검증한다.
+
+`2026-06-30` 전체 source 측정은 253,946 fragment를 204,780 cell observation으로 집계했다.
+multi-fragment cell observation은 44,837개, partially masked는 4,355개, all-masked는
+8,952개였다. 대표 4개 cell allowlist apply는 96 cell observation과 168 fragment를 만들었고,
+Parquet SHA-256은
+`0e7d26e8fcc083a6ba1165c34f2f8ad1c05ad5621d2c93adf0eba70f5ddf5a97`였다. 같은 입력 재실행의
+SHA가 일치했고 fragment 수·마스킹 수·known 합계·정렬 불변식도 통과했다. 이 compact를 읽은
+v2 activity artifact SHA-256은
+`7576237fdd1a87d318b4de04d3f8283ebf8eceab9046db328d41308ab16d89d4`다.
+
+이는 lossless에 가까운 offline 데이터 계약과 producer/consumer 연결 검증이지 활동도나
+카페 혼잡 정확도 증거가 아니다. 공개 `v1-idw-point` 영향과 promotion은 없으며, 2026-06 월
+30파일 전수 compaction 검증도 아직 남아 있다.
+
 ## 3. 요일·공휴일·시간 기준선
 
 단순 월평균이나 “평일/주말” 두 그룹만으로는 부족하다. 월요일 출근시간, 금요일 저녁,

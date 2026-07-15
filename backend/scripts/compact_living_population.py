@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Validate and compact OA-22784 CSVs to an allowlisted Parquet extract.
+"""Validate and compact OA-22784 fragments to cell-level Parquet rows.
 
 The portal's CP949 monthly files are hundreds of MB each.  This offline tool
-keeps only explicitly approved 250m cells while retaining source provenance.
+keeps only explicitly approved 250m cells while retaining every administrative-
+dong fragment and its source provenance.  Numeric fragments contribute to
+``known_total``; masked fragments remain separately counted and are never
+collapsed into a whole-cell mask or imputed here.
 It is dry-run by default: validation, hashing, duplicate detection, and row
 counts run, but no files are created.  ``--apply`` publishes both Parquet and
 its deterministic manifest through same-directory temporary files.
@@ -16,6 +19,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +32,8 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.config import (  # noqa: E402
+    LIVING_POPULATION_COMPACT_DECIMAL_PRECISION,
+    LIVING_POPULATION_COMPACT_DECIMAL_SCALE,
     LIVING_POPULATION_COMPACT_MANIFEST_SUFFIX,
     LIVING_POPULATION_COMPACT_MISSING_CELL_AUDIT_LIMIT,
     LIVING_POPULATION_COMPACT_PARQUET_COMPRESSION,
@@ -39,7 +45,9 @@ from app.config import (  # noqa: E402
 )
 from app.ingest.living_population import (  # noqa: E402
     CSV_ENCODING,
+    LivingPopulationCsvError,
     REQUIRED_COLUMNS,
+    iter_living_population_csv,
 )
 from app.ingest.national_grid import decode_cell_id  # noqa: E402
 
@@ -129,6 +137,15 @@ def _preflight_paths(
         raise LivingPopulationCompactionError("input CSV paths must be unique")
     if not resolved_inputs:
         raise LivingPopulationCompactionError("at least one input CSV is required")
+    source_filenames = [path.name for path in resolved_inputs]
+    duplicate_filenames = sorted(
+        {name for name in source_filenames if source_filenames.count(name) > 1}
+    )
+    if duplicate_filenames:
+        raise LivingPopulationCompactionError(
+            "input source_file basenames must be unique: "
+            + ", ".join(duplicate_filenames)
+        )
     for path in resolved_inputs:
         if not path.is_file():
             raise LivingPopulationCompactionError(f"input CSV does not exist: {path}")
@@ -161,25 +178,70 @@ def _preflight_paths(
     return resolved_inputs, cell_ids_path, output_part, manifest_part
 
 
+def _normalize_inputs(inputs: list[Path], directory: Path) -> list[Path]:
+    """Strictly parse CP949 sources and stream normalized UTF-8 CSVs.
+
+    DuckDB's CP949 decoder can crash natively on a valid large OA-22784 file.
+    Keeping that decoder outside the process boundary is not possible here, so
+    Python's strict, fixture-tested parser owns source decoding and validation.
+    DuckDB receives only the six normalized columns needed by this compactor.
+    """
+
+    normalized_inputs: list[Path] = []
+    normalized_header = (
+        "date_raw",
+        "hour_raw",
+        "administrative_dong_code",
+        "cell_id",
+        "total_raw",
+        "source_file",
+    )
+    for source_path in inputs:
+        normalized_path = directory / source_path.name
+        try:
+            with normalized_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle, lineterminator="\n")
+                writer.writerow(normalized_header)
+                for record in iter_living_population_csv(source_path):
+                    writer.writerow(
+                        (
+                            record.observed_date.strftime("%Y%m%d"),
+                            f"{record.hour:02d}",
+                            record.administrative_dong_code,
+                            record.cell_id,
+                            record.total_population_raw.strip(),
+                            source_path.name,
+                        )
+                    )
+        except LivingPopulationCsvError as exc:
+            raise LivingPopulationCompactionError(
+                f"{source_path}: strict source validation failed: {exc}"
+            ) from exc
+        except OSError as exc:
+            raise LivingPopulationCompactionError(
+                f"cannot write normalized source for {source_path}: {exc}"
+            ) from exc
+        normalized_inputs.append(normalized_path)
+    return normalized_inputs
+
+
 def _create_source_view(connection: duckdb.DuckDBPyConnection, inputs: list[Path]) -> None:
     input_list = ", ".join(_sql_string(str(path)) for path in inputs)
     connection.execute(
         f"""
         CREATE TEMP VIEW source_rows AS
         SELECT
-            trim("일자") AS date_raw,
-            trim("시간") AS hour_raw,
-            trim("행정동코드") AS administrative_dong_code,
-            trim("250M격자") AS cell_id,
-            trim("생활인구합계") AS total_raw,
-            filename AS source_path
+            trim(date_raw) AS date_raw,
+            trim(hour_raw) AS hour_raw,
+            trim(administrative_dong_code) AS administrative_dong_code,
+            trim(cell_id) AS cell_id,
+            trim(total_raw) AS total_raw,
+            source_file
         FROM read_csv(
             [{input_list}],
-            encoding = 'cp949',
             all_varchar = true,
             header = true,
             union_by_name = true,
-            filename = true,
             ignore_errors = false,
             null_padding = false
         )
@@ -191,8 +253,7 @@ def _validate_rows(connection: duckdb.DuckDBPyConnection) -> tuple[int, dict[str
     # Validation is deliberately set-based: every source row is checked before
     # the allowlist filter, so malformed data cannot silently hide outside the
     # current experiment cells.
-    row = connection.execute(
-        """
+    validation_sql = """
         SELECT
             count(*) AS total_rows,
             count(*) FILTER (WHERE NOT coalesce(
@@ -218,14 +279,30 @@ def _validate_rows(connection: duckdb.DuckDBPyConnection) -> tuple[int, dict[str
                 total_raw = '*'
                 OR (
                     regexp_full_match(total_raw, '[0-9]+(?:\\.[0-9]*)?')
-                    AND try_cast(total_raw AS DOUBLE) IS NOT NULL
-                    AND isfinite(try_cast(total_raw AS DOUBLE))
-                    AND try_cast(total_raw AS DOUBLE) >= 0
+                    AND try_cast(total_raw AS DECIMAL(
+                        __DECIMAL_PRECISION__,
+                        __DECIMAL_SCALE__
+                    )) IS NOT NULL
                 ), false
-            )) AS invalid_total
+            )) AS invalid_total,
+            count(*) FILTER (WHERE coalesce(
+                total_raw <> '*'
+                AND regexp_full_match(total_raw, '[0-9]+(?:\\.[0-9]*)?')
+                AND strpos(total_raw, '.') > 0
+                AND length(split_part(total_raw, '.', 2))
+                    > __DECIMAL_SCALE__,
+                false
+            )) AS invalid_fraction_scale
         FROM source_rows
         """
-    ).fetchone()
+    validation_sql = validation_sql.replace(
+        "__DECIMAL_PRECISION__",
+        str(LIVING_POPULATION_COMPACT_DECIMAL_PRECISION),
+    ).replace(
+        "__DECIMAL_SCALE__",
+        str(LIVING_POPULATION_COMPACT_DECIMAL_SCALE),
+    )
+    row = connection.execute(validation_sql).fetchone()
     assert row is not None
     names = (
         "date",
@@ -233,6 +310,7 @@ def _validate_rows(connection: duckdb.DuckDBPyConnection) -> tuple[int, dict[str
         "administrative_dong_code",
         "cell_id",
         "total",
+        "fraction_scale",
     )
     invalid = {name: int(value) for name, value in zip(names, row[1:], strict=True)}
     if any(invalid.values()):
@@ -241,21 +319,23 @@ def _validate_rows(connection: duckdb.DuckDBPyConnection) -> tuple[int, dict[str
     return int(row[0]), invalid
 
 
-def _reject_duplicate_observations(connection: duckdb.DuckDBPyConnection) -> None:
+def _reject_duplicate_fragments(connection: duckdb.DuckDBPyConnection) -> None:
     duplicate = connection.execute(
         """
-        SELECT date_raw, hour_raw, cell_id, count(*) AS n
+        SELECT date_raw, hour_raw, administrative_dong_code, cell_id,
+               count(*) AS n
         FROM source_rows
-        GROUP BY date_raw, hour_raw, cell_id
+        GROUP BY date_raw, hour_raw, administrative_dong_code, cell_id
         HAVING count(*) > 1
-        ORDER BY date_raw, hour_raw, cell_id
+        ORDER BY date_raw, hour_raw, administrative_dong_code, cell_id
         LIMIT 1
         """
     ).fetchone()
     if duplicate is not None:
         raise LivingPopulationCompactionError(
-            "duplicate date-hour-cell observation: "
-            f"{duplicate[0]} {duplicate[1]} {duplicate[2]} ({duplicate[3]} rows)"
+            "duplicate date-hour-admin-cell fragment: "
+            f"{duplicate[0]} {duplicate[1]} {duplicate[2]} {duplicate[3]} "
+            f"({duplicate[4]} rows)"
         )
 
 
@@ -293,30 +373,87 @@ def compact_living_population(
         for path in inputs
     ]
 
-    connection = duckdb.connect(":memory:")
+    normalization_directory = tempfile.TemporaryDirectory(
+        prefix="busy-cafe-living-population-"
+    )
+    connection: duckdb.DuckDBPyConnection | None = None
     try:
-        _create_source_view(connection, inputs)
+        normalized_inputs = _normalize_inputs(
+            inputs, Path(normalization_directory.name)
+        )
+        connection = duckdb.connect(":memory:")
+        connection.execute("SET threads = 1")
+        _create_source_view(connection, normalized_inputs)
         total_rows, _ = _validate_rows(connection)
-        _reject_duplicate_observations(connection)
+        _reject_duplicate_fragments(connection)
         connection.execute("CREATE TEMP TABLE allowed_cells(cell_id VARCHAR PRIMARY KEY)")
         connection.executemany(
             "INSERT INTO allowed_cells VALUES (?)", [(cell_id,) for cell_id in cell_ids]
         )
         connection.execute(
             """
-            CREATE TEMP TABLE selected_rows AS
+            CREATE TEMP TABLE selected_fragments AS
             SELECT
                 cast(strptime(date_raw, '%Y%m%d') AS DATE) AS date,
                 cast(hour_raw AS UTINYINT) AS hour,
+                administrative_dong_code,
                 cell_id,
                 CASE WHEN total_raw = '*' THEN NULL
-                     ELSE cast(total_raw AS DOUBLE) END AS total,
+                     ELSE cast(total_raw AS DECIMAL(
+                         {precision}, {scale}
+                     )) END AS known_value,
+                total_raw,
                 total_raw = '*' AS masked,
-                parse_filename(source_path) AS source_file
+                source_file
             FROM source_rows
             WHERE cell_id IN (SELECT cell_id FROM allowed_cells)
-            ORDER BY date, hour, cell_id, source_file
+            ORDER BY date, hour, cell_id, administrative_dong_code,
+                     source_file, total_raw
+            """.format(
+                precision=LIVING_POPULATION_COMPACT_DECIMAL_PRECISION,
+                scale=LIVING_POPULATION_COMPACT_DECIMAL_SCALE,
+            )
+        )
+        connection.execute(
             """
+            CREATE TEMP TABLE selected_rows AS
+            SELECT
+                date,
+                hour,
+                cell_id,
+                cast(
+                    coalesce(
+                        sum(known_value),
+                        cast(0 AS DECIMAL({precision}, {scale}))
+                    ) AS DECIMAL({precision}, {scale})
+                ) AS known_total,
+                cast(count(*) AS UINTEGER) AS fragment_count,
+                cast(count(*) FILTER (WHERE masked) AS UINTEGER)
+                    AS masked_fragment_count,
+                concat(
+                    '[',
+                    string_agg(
+                        cast(to_json(struct_pack(
+                            administrative_dong_code := administrative_dong_code,
+                            known_value := CASE
+                                WHEN known_value IS NULL THEN NULL
+                                ELSE cast(known_value AS VARCHAR)
+                            END,
+                            total_raw := total_raw,
+                            masked := masked,
+                            source_file := source_file
+                        )) AS VARCHAR),
+                        ',' ORDER BY administrative_dong_code, source_file, total_raw
+                    ),
+                    ']'
+                ) AS fragments_json
+            FROM selected_fragments
+            GROUP BY date, hour, cell_id
+            ORDER BY date, hour, cell_id
+            """.format(
+                precision=LIVING_POPULATION_COMPACT_DECIMAL_PRECISION,
+                scale=LIVING_POPULATION_COMPACT_DECIMAL_SCALE,
+            )
         )
         missing_cells = [
             row[0]
@@ -340,18 +477,45 @@ def compact_living_population(
                 "allowlist cells missing from source "
                 f"({len(missing_cells)}/{len(cell_ids)}): {', '.join(sample)}{suffix}"
             )
-        filtered_row = connection.execute(
-            "SELECT count(*), count(*) FILTER (WHERE masked) FROM selected_rows"
+        fragment_counts = connection.execute(
+            """
+            SELECT count(*), count(*) FILTER (WHERE masked)
+            FROM selected_fragments
+            """
         ).fetchone()
-        assert filtered_row is not None
-        filtered_rows, masked_rows = filtered_row
+        assert fragment_counts is not None
+        filtered_fragments, masked_fragments = fragment_counts
+        cell_counts = connection.execute(
+            """
+            SELECT
+                count(*),
+                count(*) FILTER (WHERE fragment_count > 1),
+                count(*) FILTER (
+                    WHERE masked_fragment_count > 0
+                      AND masked_fragment_count < fragment_count
+                ),
+                count(*) FILTER (
+                    WHERE masked_fragment_count = fragment_count
+                ),
+                coalesce(max(fragment_count), 0)
+            FROM selected_rows
+            """
+        ).fetchone()
+        assert cell_counts is not None
+        (
+            filtered_cells,
+            multi_fragment_cells,
+            partially_masked_cells,
+            all_masked_cells,
+            max_fragments_per_cell,
+        ) = cell_counts
         rows_by_source = dict(
             connection.execute(
-                "SELECT source_path, count(*) FROM source_rows GROUP BY source_path"
+                "SELECT source_file, count(*) FROM source_rows GROUP BY source_file"
             ).fetchall()
         )
         for item in input_metadata:
-            item["row_count"] = int(rows_by_source.get(item["path"], 0))
+            item["row_count"] = int(rows_by_source.get(item["source_file"], 0))
 
         output_schema = [
             {"name": row[0], "type": row[1], "nullable": row[2] == "YES"}
@@ -373,8 +537,46 @@ def compact_living_population(
             },
             "row_counts": {
                 "input": total_rows,
-                "filtered": int(filtered_rows),
-                "masked_filtered": int(masked_rows),
+                "fragment_rows_filtered": int(filtered_fragments),
+                "cell_observations_filtered": int(filtered_cells),
+                "masked_fragments_filtered": int(masked_fragments),
+                "multi_fragment_cell_observations": int(multi_fragment_cells),
+                "partially_masked_cell_observations": int(partially_masked_cells),
+                "all_masked_cell_observations": int(all_masked_cells),
+                "max_fragments_per_cell": int(max_fragments_per_cell),
+            },
+            "aggregation_contract": {
+                "source_normalization": {
+                    "source_encoding": CSV_ENCODING,
+                    "decoder": "python-codecs-csv-strict",
+                    "duckdb_input_encoding": "utf-8",
+                    "temporary_files": "deleted-before-return",
+                },
+                "source_fragment_identity": [
+                    "date",
+                    "hour",
+                    "administrative_dong_code",
+                    "cell_id",
+                ],
+                "output_cell_identity": ["date", "hour", "cell_id"],
+                "known_total": (
+                    "exact decimal sum of unmasked known_value fragments; "
+                    "zero when every fragment is masked"
+                ),
+                "masking": (
+                    "masked fragments are counted separately; no imputation "
+                    "and no whole-cell mask collapse"
+                ),
+                "fragment_provenance": (
+                    "deterministic JSON array sorted by administrative_dong_code, "
+                    "source_file, total_raw; known_value is an exact decimal string "
+                    "or null"
+                ),
+                "decimal": {
+                    "precision": LIVING_POPULATION_COMPACT_DECIMAL_PRECISION,
+                    "scale": LIVING_POPULATION_COMPACT_DECIMAL_SCALE,
+                    "rounding": "forbidden; excessive source scale fails",
+                },
             },
             "output": {
                 "path": str(output_path),
@@ -428,7 +630,9 @@ def compact_living_population(
     except duckdb.Error as exc:
         raise LivingPopulationCompactionError(f"DuckDB compaction failed: {exc}") from exc
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
+        normalization_directory.cleanup()
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

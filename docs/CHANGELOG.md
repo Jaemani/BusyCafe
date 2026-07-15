@@ -51,6 +51,11 @@
   offline artifact builder. 버전이 명시된 달력과 source를 입력으로 받고, 마스킹·결측·
   기준선 부족을 임의 보간하지 않으며, 결정적 직렬화와 dry-run 기본·원자적 게시·기존
   결과 덮어쓰기 거부를 적용한다
+- OA-22784 행정동 경계 fragment와 부분 마스킹을 손실 없이 유지하는 compact schema v2.
+  exact Decimal 합·canonical fragment JSON·sidecar manifest를 원자 게시하고 consumer가
+  schema/query/hash/count를 재검증한다. 부분·전부 마스킹된 현재값은 suppression bound를
+  가정한 점·구간으로 대치하지 않고 `baseline_only`/`unsupported`로 abstain하며 공개 v1은
+  변경하지 않는다
 - BusyCafe 자체 코드에 Apache License 2.0을 적용하고, 외부 데이터의 제공자별
   라이선스·출처표시 조건과 명확히 구분
 - live health의 complete-cycle freshness를 이용한 프론트 갱신 지연 표시
