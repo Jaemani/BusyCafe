@@ -1165,5 +1165,18 @@
   - TypeScript `tsc --noEmit` PASS
   - Vite production build PASS; `dist/about.html`, `dist/privacy.html` 존재 확인
   - 상세 회귀 테스트에서 raw timestamp·`장소 원장 품질` 미노출과 거리·나이 중복 제거 확인
-- 판정: **PASS(로컬 자동 검증)**. 격리 deployment와 production alias의 About 링크,
-  모바일 패널 문구, 기존 지도 attribution은 배포 뒤 smoke한다.
+- 격리 배포:
+  - 대상 커밋 `de617fa`
+  - deployment `busy-cafe-pato8ofcc-jaemanis-projects.vercel.app`, Ready
+  - root와 `/about.html`, `/api/sources`, `/api/health` HTTP 200. Preview에 production
+    secret을 노출하지 않아 snapshot mode·4,933곳인 것도 의도와 일치
+- CI와 production:
+  - GitHub Actions run `29383527901`에서 frontend typecheck/build, backend tests,
+    compileall, PostgreSQL migration과 schema smoke PASS
+  - production deployment `busy-cafe-mmwxys41y-jaemanis-projects.vercel.app`, Ready
+  - immutable URL에서 live DB, 카페 29,917곳과 latest `121/121`, `status=complete` 확인 후
+    `busy-cafe.vercel.app` alias를 전환
+  - canonical root, `/about.html`, `/api/sources`, Analytics script와 health HTTP 200.
+    production JS에서 간결한 혼잡·근거·provider 문구가 포함된 것을 확인
+- 판정: **PASS(배포 포함)**. 기존 MapLibre attribution control은 삭제·강제 숨김 없이
+  유지했다. 모바일에서 실제 패널의 줄바꿈과 스크롤 체감 확인은 HUMAN 수동 점검으로 남긴다.
