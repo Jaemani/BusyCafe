@@ -1127,3 +1127,17 @@
 - 후속 확인: 최적화 뒤 24시간 Supabase Egress 증가량과 Analytics 첫 production pageview는
   `[HUMAN]` dashboard 확인이 필요하다. 결제 주기 누적값 7.306GB 자체는 최적화 뒤에도
   즉시 줄어들지 않는다.
+
+### 서울 API partial cycle과 다음 cycle 자동 복구
+
+- production poll run `29381856691`에서 `수유역`, `쌍문역`이 서울 API no-record
+  응답을 반환했다. worker는 다른 대상을 계속 처리해 `saved=119`, `failed=2`,
+  `status=partial`로 종료했고 monitor run `29381943104`도 latest partial을 정상적으로
+  실패 판정했다.
+- 직전 complete cycle은 계속 보존됐으며 오래된 상태를 새 complete로 위장하지 않았다.
+- 5분 뒤 poll run `29382069570`은 `121/121`, 실패 0으로 자동 복구했다. materialize
+  25.667초, total 56.119초였고 health의 latest cycle은 `complete`로 돌아왔다.
+  후속 monitor run `29382151199`도 PASS했다.
+- 판정: **PASS(실패 격리·감지·자동 회복)**. 한 cycle의 upstream no-record는 기존 partial
+  계약으로 처리됐고 별도 코드 변경이나 수동 DB 보정은 하지 않았다. 반복 빈도가 freshness
+  SLO를 훼손하면 area별 no-record 비율을 집계해 별도 incident로 승격한다.
