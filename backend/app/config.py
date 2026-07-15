@@ -89,6 +89,13 @@ LIVING_POPULATION_COMPACT_PARQUET_COMPRESSION: Final = "zstd"
 LIVING_POPULATION_COMPACT_PARQUET_ROW_GROUP_SIZE: Final = 100_000
 LIVING_POPULATION_COMPACT_MISSING_CELL_AUDIT_LIMIT: Final = 20
 
+# Offline-only purpose-labelled metropolitan movement OD experiment
+# (Seoul Open Data OA-22300). These versions and the hash read size are kept
+# separate from living population so either contract can evolve independently.
+PURPOSE_OD_CENTROID_SCHEMA_VERSION: Final = "purpose-od-centroids-v1"
+PURPOSE_OD_SHADOW_MODEL_VERSION: Final = "v1-purpose-od-movement-shadow"
+PURPOSE_OD_HASH_CHUNK_BYTES: Final = 1024 * 1024
+
 # Kakao Local is an offline catalog-enrichment source. It is never called from
 # the map request path. Sweep tuning lives here so completeness/cost changes
 # are explicit and testable.
