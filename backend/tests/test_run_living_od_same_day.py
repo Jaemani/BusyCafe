@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from decimal import Decimal
 from pathlib import Path
 
@@ -327,6 +330,33 @@ def test_deterministic_dry_run_atomic_apply_and_overwrite_refusal(
     assert not (tmp_path / "report.json.part").exists()
     with pytest.raises(same_day.LivingOdSameDayError, match="overwrite"):
         _run(tmp_path, living=living, purpose=purpose)
+
+
+def test_report_is_stable_across_python_hash_seeds(tmp_path: Path) -> None:
+    living, purpose = _inputs(tmp_path)
+    script = Path(same_day.__file__)
+    hashes: list[str] = []
+    for seed in ("1", "2"):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--living-population-csv",
+                str(living),
+                "--purpose-od-artifact",
+                str(purpose),
+                "--output",
+                str(tmp_path / f"report-{seed}.json"),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+        )
+        summary = json.loads(completed.stdout.strip())
+        hashes.append(summary["report_sha256"])
+
+    assert hashes[0] == hashes[1]
 
 
 def test_average_tie_spearman_and_verdict_thresholds() -> None:

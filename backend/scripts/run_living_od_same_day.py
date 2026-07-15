@@ -366,7 +366,7 @@ def _paired_zone_stocks(
         union_pairs += len(cells)
         left_total = 0.0
         right_total = 0.0
-        for cell_id in cells:
+        for cell_id in sorted(cells):
             left = partitions.get((code, cell_id, left_hour))
             right = partitions.get((code, cell_id, right_hour))
             if left is None:
