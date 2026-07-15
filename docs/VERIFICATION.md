@@ -1468,6 +1468,9 @@ INC-2026-018에 기록했다.
 - frontend: TypeScript PASS, production build PASS. 기존 500kB chunk 경고만 존재하며 이번
   offline 변경과 무관하다.
 - `git diff --check` PASS
+- 기준 커밋 `98a9cea`의 GitHub Actions CI run `29393332962`에서 frontend
+  typecheck/build, backend pytest·compileall, 실제 PostgreSQL migration·schema smoke가
+  모두 PASS했다.
 
 판정: **PASS(repeatability pilot only)**. OD의 동일 화요일 목적 구성과 거친 합성 방향은
 반복됐지만, 한낮 순유입 순위는 불안정했고 실제 활동도·보행 혼잡·카페 좌석 정확도는 아직
