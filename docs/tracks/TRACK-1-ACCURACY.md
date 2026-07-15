@@ -74,11 +74,34 @@
 - 시간 평활은 급증 탐지와 함께 평가해 실제 변화가 지워지지 않게 한다.
 - 서울시 예측값은 실측 신호와 분리해 저장하고, 예측 시점별 정확도를 독립 평가한다.
 
+서울시 source의 공식 산출 근거와 production 지연 측정값은
+[검증 기록](../VERIFICATION.md)이 소유한다. 엔진은 다음 시각 계약과 개선 순서를 따른다.
+
+1. `observed_at`은 timezone이 없는 `PPLTN_TIME`을 KST로 해석한 원천 관측시각,
+   `fetched_at`은 서버 수신시각으로 분리한다. 관측 나이, source 제공 지연,
+   worker/HTTP 수행시간을 하나의 지연값으로 합치지 않는다.
+2. 서울시의 최근 28일 기준선·장소 유형·밀집도·교통 보정은 이미 4단계 레벨에 포함된
+   upstream feature로 취급한다. 같은 레벨과 자체 요일×시간 기준선을 근거 없이 다시
+   결합해 효과를 이중 계산하지 않는다.
+3. 지연 보정 challenger는 `observed_at`에서 실제 요청/수신시각까지의 horizon을 명시하고,
+   순서형 레벨보다 `AREA_PPLTN_MIN/MAX`의 연속 구간을 먼저 예측한다. 서울시 12시간
+   forecast는 같은 source에서 만든 예측이므로 독립 feature 또는 정답으로 간주하지 않는다.
+4. rolling-origin holdout에서 delayed baseline, forecast interpolation, 자체 temporal
+   challenger를 동일 표본으로 paired 비교한다. 전체 평균 외에 장소 유형, 시간대,
+   평일/주말, 관측 지연 구간, 급증 구간을 분리하고 표본 수를 함께 보고한다.
+5. Phase 6 관측은 관측 시작·종료시각과 관측자 기기 시각을 기록해 5분 bin에 정렬한다.
+   서울시 snapshot과의 offset·분산을 별도로 추정하고, ±시간 허용폭을 결과를 본 뒤
+   넓히지 않는다. 지역 보행 관측과 매장 좌석 관측은 계속 다른 정답 라벨로 유지한다.
+
 **Gate C:** 연속 7일은 파이프라인·상관 방향을 확인하는 탐색 gate일 뿐 승격 근거가 아니다.
 최소 4주 연속 snapshot과 결측률 보고서가 있어야 feature 비교를 시작하며, 공개 승격 후보는
 권장 8~12주와 Phase 6 관측을 요구한다. 시간대별 지표가 v1보다 개선되고 급증 구간 recall이
 악화되지 않아야 한다. 생활인구와 citydata는 통신 기반 upstream이 겹칠 수 있으므로 둘의
 상관은 독립 정확도 증거가 아니라 fusion compatibility 증거로만 사용한다.
+Nowcast는 holdout 인구 WAPE와 4단계 exact/adjacent accuracy를 함께 개선해야 하며,
+한 지표라도 악화되면 공개 레벨에 반영하지 않는다. source 제공 지연은 동적 분포로
+계속 측정하고, 공식 설명의 약 15분과 production 분포 차이가 해소되기 전에는 고정 지연
+보정값을 가정하지 않는다.
 
 ### A4. 신뢰도 V2와 캘리브레이션
 
