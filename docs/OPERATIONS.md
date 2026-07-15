@@ -2,18 +2,19 @@
 
 ## 목적과 현재 상태
 
-이 문서는 관리형 PostgreSQL을 사용하는 준실시간 production의 최초 전환, 정상 운영,
-장애 복구와 검증 절차를 정의한다. 공개 `busy-cafe.vercel.app`은 `DATABASE_URL`이 설정되기
-전까지 배포 시점의 읽기 전용 SQLite 스냅샷을 사용한다. 관리형 DB와 자동 수집이 실제로
-검증되기 전에는 실시간 또는 준실시간 production으로 승격하지 않는다.
+이 문서는 관리형 PostgreSQL을 사용하는 준실시간 production의 전환, 정상 운영, 비용,
+보안, 장애 복구와 검증 절차를 정의한다. 2026-07-15 현재 공개
+`busy-cafe.vercel.app`은 Supabase PostgreSQL을 읽고, Supabase `pg_cron`이 5분마다 GitHub
+one-shot worker를 dispatch한다. SQLite snapshot은 DB 장애 시 제한된 rollback 후보일 뿐
+현재 production 원장이 아니다.
 
 필수 비밀값은 다음 두 개다.
 
 - Vercel: `DATABASE_URL`만 저장한다. serverless 연결에는 공급자가 권장하는 pooled TLS
   URL을 사용한다.
-- GitHub Actions: `DATABASE_URL`, `SEOUL_API_KEY`를 저장한다. migration과 worker에는
-  공급자가 권장하는 direct/write TLS URL을 사용한다. 두 URL은 같은 production DB를
-  가리켜야 한다.
+- GitHub Actions: `DATABASE_URL`, `SEOUL_API_KEY`를 저장한다. runner에서 검증된 pooled TLS
+  URL을 사용하며, direct URL을 쓸 때에는 IPv6 도달성과 connection 제한을 먼저 확인한다.
+  Vercel과 GitHub URL은 같은 production DB를 가리켜야 한다.
 
 GitHub secrets는 repository의 `Production` environment에 저장하고 poll job도 같은
 environment를 명시한다. GitHub repository variable `PRODUCTION_POLL_ENABLED`와
@@ -111,7 +112,7 @@ curl --fail --silent http://127.0.0.1:8190/api/health
 - latest cycle이 `complete`이거나, 직전 complete가 fresh한 상태에서 현재 cycle이 `running`
 - bbox 카페 응답에 현재 `model_version`, coverage와 evidence 존재
 
-### 4. 수집 worker 연결
+### 4. 수집 scheduler와 worker 연결
 
 GitHub repository secret에 `DATABASE_URL`, `SEOUL_API_KEY`를 설정한다. 값을 출력하지 않고
 secret 이름만 확인한다.
@@ -122,14 +123,22 @@ gh workflow run poll-production.yml
 gh run list --workflow poll-production.yml --limit 3
 ```
 
-GitHub workflow는 read-only canary와 장애 시 수동 fallback에만 사용한다. 2026-07-12
-실측에서 cron event가 약 1시간 간격으로 지연·누락됐고 hosted runner의 서울 API 연결도
-반복 실패했으므로 production 10분 scheduler로 사용하지 않는다. canonical 운영 경로는
-[ADR-0008](adr/ADR-0008-dedicated-production-worker.md)의 `backend/Dockerfile` 상시 worker다.
+GitHub의 자체 cron은 사용하지 않는다. 실측에서 schedule event가 약 1시간 간격으로
+지연·누락됐기 때문이다. canonical 경로는
+[ADR-0012](adr/ADR-0012-supabase-dispatched-production-scheduler.md)의 Supabase
+`pg_cron → pg_net → workflow_dispatch`다. poll은 매 5분 offset 2분, monitor는 각 poll
+2분 뒤 실행한다. `production-citydata-poll` concurrency group으로 write cycle을 직렬화한다.
 
-상시 worker에서 121개 수집과 score materialize가 성공한 뒤 worker의 one-shot exit code와
-`ingest_cycles.status=complete`를 확인한다. 이후 1시간 동안 6개 연속 complete cycle과
-complete age 25분 이내를 검증하기 전 poll 운영 gate를 통과로 표시하지 않는다.
+Supabase Vault에 `busy_cafe_github_pat`가 정확히 한 개 있고 `pg_cron`, `pg_net` extension이
+활성화된 상태에서 다음 workflow를 dry-run한 뒤 적용한다.
+
+```bash
+gh workflow run configure-supabase-scheduler.yml -f apply=false
+gh workflow run configure-supabase-scheduler.yml -f apply=true
+```
+
+적용 run은 두 cron job의 schedule, command와 active 상태가 코드와 exact match인지 확인한다.
+전용 Docker worker는 scheduler 장애·비용 회귀 시 fallback으로만 유지한다.
 
 ### 5. read API 전환
 
@@ -158,12 +167,51 @@ saved=121, failed=0이어야 하고 complete cycle age는 25분을 넘지 않아
 
 ## 정상 운영 점검
 
-- 10분마다 poll workflow 성공 여부
+- 5분마다 poll workflow 성공 여부와 중복 cycle 부재
 - `last_complete_cycle_at`이 25분 이내인지
 - 최근 cycle의 target/saved/failed 수
 - cafe count와 active Overture release의 비정상 급감 여부
 - migration head와 서비스 model version
 - 서울 API schema parse failure와 secret-bearing 로그가 없는지
+
+## Supabase 보안과 사용량
+
+브라우저는 Supabase Data API를 사용하지 않는다. 애플리케이션 public table과
+`alembic_version`은 RLS를 활성화하고 정책을 만들지 않으며, `anon`, `authenticated`의
+table·sequence 권한과 향후 default grant를 회수한다. 서버의 owner/pooler 연결만 유지한다.
+새 migration이 public table을 추가하면 같은 revision에서 RLS와 grant 검사를 함께 추가한다.
+
+Supabase dashboard에서 BusyCafe가 실제 사용하는 핵심 지표는 Database Size와 Egress다.
+Cached Egress는 PostgreSQL query cache가 아니라 Storage CDN 지표이므로 Storage를 사용하지
+않는 현재 구조에서는 0이 정상이다. Auth MAU, Realtime, Edge Function과 Storage도 사용하지
+않으므로 0이 정상이다.
+
+Egress는 다음 순서로 대응한다.
+
+- 월 allowance 60%: 증가 원인과 일평균을 기록
+- 80%: catalog refresh·부하테스트·cache-bust 여부 점검, 신규 대량 작업 중단
+- 100%: 반복 전송 query를 우선 수정하고 plan 제한·서비스 영향 확인
+
+매 5분 materialize에서 전체 history JSON이나 이전 materialized JSON을 다시 읽지 않는다.
+필요한 column projection을 회귀 테스트로 고정한다. connection pool은 지연과 동시성을
+개선하지만 전송 byte를 줄이지 않으므로 egress 해결책으로 설명하지 않는다.
+
+## Analytics와 공개 베타 점검
+
+Vercel dashboard의 enable 표시만으로 Analytics 활성으로 판정하지 않는다.
+`/_vercel/insights/script.js` HTTP 200과 첫 production pageview를 확인한다. custom event는
+현재 plan이 지원하고 `VITE_ENABLE_CUSTOM_ANALYTICS=true`를 명시한 경우에만 활성화한다.
+정확한 위치, bbox, 카페·검색 식별정보는 analytics에 넣지 않는다. 세부 계약은
+`PRODUCT_METRICS.md`, 사용자 안내는 production의 `/privacy.html`이 소유한다.
+
+실사용 홍보 전 다음을 확인한다.
+
+- 위치 허용·거절, 모바일 지도, 상세와 외부 링크
+- API 오류·stale 상황에서 현재값 오인 차단
+- warm edge hit와 cold/cache-bust를 분리한 부하테스트
+- bbox 최대 span, viewport row 상한과 DB pool exhaustion 방어
+- 개인정보·면책·장소 정정과 비공개 보안 제보 경로
+- production security header와 외부 링크 allowlist
 
 주간 점검에서 `docs/INCIDENTS.md`의 미완료 재발 방지 항목도 함께 회수한다. 실패는 원본을
 삭제하거나 마지막 정상값을 현재값처럼 표시하지 않고 stale 상태로 남긴다.

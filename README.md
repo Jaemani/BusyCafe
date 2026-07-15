@@ -108,6 +108,8 @@ uv run python -m app.ingest.worker
 - [설계 결정](docs/DECISIONS.md)
 - [데이터 라이선스·출처표시 감사](docs/LICENSE_ATTRIBUTION_AUDIT.md)
 - [Production 운영·백업·복구 Runbook](docs/OPERATIONS.md)
+- [제품 지표·공개 베타 gate](docs/PRODUCT_METRICS.md)
+- [보안 정책과 비공개 취약점 제보](SECURITY.md)
 - [고도화 로드맵](docs/ROADMAP.md)
 - [기여 가이드](CONTRIBUTING.md)
 

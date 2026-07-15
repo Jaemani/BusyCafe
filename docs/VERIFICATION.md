@@ -312,7 +312,8 @@
 - 초기 수동 alias는 SSO로 HTTP 302를 반환했다. 공개 접근 정책을 복원한 뒤
   `https://busy-cafe.vercel.app/`과 `/api/health`가 인증 리디렉션 없이 HTTP 200임을 확인했다.
 - production HTML의 canonical과 `og:url`은 모두 `https://busy-cafe.vercel.app/`이다.
-  기존 `budy-cafe.vercel.app` alias는 이전 링크 호환용으로 유지한다.
+  기존 `budy-cafe.vercel.app` alias는 당시 이전 링크 호환용으로 유지했다. 2026-07-15
+  정식 URL 검증 뒤 제거한 현재 상태는 최신 검증 기록을 따른다.
 - 배포 모델: `api/data/preview.db`의 카페 4,933개·저장된 혼잡도 점수를 포함한 읽기 전용
   SQLite 스냅샷이다. 요청 중 외부 API를 호출하지 않으며 서울 API 키도 배포하지 않는다.
 - 검증: production에서 `/` HTTP 200, `/api/health` HTTP 200,
@@ -1025,3 +1026,50 @@
   level 2는 67곳이며 confidence와 confidence tier는 전부 `NULL`
 - health: `current_display_max_age_min=120`, 최신 cycle `complete`, 121/121 저장 확인
 - 판정: production에서 delayed 표시 계약 PASS. 원본의 시간대별 정확도는 별도 미검증
+
+## 2026-07-15 — Supabase 보안, egress 최적화와 공개 베타 운영 경계
+
+- production DB 보안:
+  - migration `20260715_0008`로 애플리케이션 table 8개와 `alembic_version`의 RLS를
+    활성화했다. 정책은 만들지 않고 `anon`, `authenticated`의 table·소유 sequence 권한과
+    future default grant를 회수했다. 서버 owner/pooler CRUD는 유지했다.
+  - 관련 커밋: `3c21984`, `b99cec0`; PostgreSQL CI run `29345671857` PASS
+  - migration 뒤 production poll run `29345742950`은 targets/saved/failed
+    `121/121/0`, materialize 34.438초, complete cycle을 기록했다. 공개 health·summary·detail
+    API도 HTTP 200이었다.
+- Supabase 사용량 `[HUMAN: dashboard 확인]`:
+  - Egress `7.306/5GB`, Database Size `0.156/0.5GB`, Cached Egress `0/5GB`
+  - Auth MAU, Storage, Realtime, Edge Function은 모두 0이며 현재 아키텍처에서 정상이다.
+    Cached Egress는 PostgreSQL cache가 아니라 Storage CDN이므로 DB query 최적화 지표로
+    사용하지 않는다.
+- egress 원인과 1차 조치:
+  - 매 5분 materialize가 12시간 history의 모든 `forecast_json`을 전송하고 최신 121개만
+    사용했다. local preview의 forecast JSON 2,847개는 평균 1,482.7 bytes였다.
+  - 121곳 × 12시간 × 5분 cadence의 최대 17,424개는 회당 약 25.8MB, 하루 약 7.4GB의
+    반복 전송 가능성이 있어 dashboard 증가량의 주된 구조적 원인으로 판정했다.
+  - 커밋 `cd28cb3`에서 latest query만 forecast를 읽고 history는 시각·레벨만 읽도록 변경.
+    CI run `29380064332` PASS, 첫 production poll `29380185039`은 `121/121/0`, materialize
+    27.937초, total 66.820초였다. 직전 34.438초/74.283초보다 각각 18.9%/10.0% 짧았으나
+    단일 cycle timing은 보조 증거로만 사용한다.
+- egress 2차 조치와 public hardening:
+  - 덮어쓸 기존 `hotspot_serving_states`는 PK만 projection하고 과거 trend/forecast JSON을
+    읽지 않도록 변경했다. 실제 144-point trend 구조 기준 약 1.02MB/cycle,
+    291MB/day, 8.7GB/30일의 불필요한 전송 제거를 예상한다.
+  - frontend의 canonical z10 이상 tile보다 넓은 0.5도 초과 bbox를 HTTP 422로 거부한다.
+    viewport 5천 건 상한과 함께 arbitrary cache-bust의 광범위 DB scan을 제한한다.
+  - `nosniff`, `DENY` frame, `no-referrer`, 최소 Permissions Policy header와 공개
+    `/privacy.html`, 비공개 취약점 제보 경로를 추가했다.
+- 수익화·측정 결정:
+  - ADR-0013에 따라 정확도와 사용량 gate 전에는 광고하지 않는다. 후원은 확인된 URL을
+    받은 뒤 정보 영역 텍스트 링크 한 개만 허용하며, 향후 스폰서도 점수·색·순위를
+    변경할 수 없다.
+  - 사용자가 Vercel Web Analytics를 enable했지만 재배포 전
+    `/_vercel/insights/script.js`는 HTTP 404였다. dashboard toggle이 아니라 script HTTP
+    200과 첫 pageview를 활성 gate로 고정했다.
+- 로컬 검증:
+  - backend `731 passed, 1 skipped`, compileall PASS
+  - frontend `4 passed`, typecheck와 production build PASS
+  - JSON config와 `git diff --check` PASS
+- 배포 전 판정: 코드·문서·자동 회귀는 PASS. Analytics endpoint, security header,
+  privacy page와 egress 2차 최적화의 production timing은 새 격리 배포와 연속 poll에서
+  추가 확인한다.

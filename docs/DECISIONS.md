@@ -50,10 +50,12 @@
 - [ADR-0005: 관리형 PostgreSQL과 분리 worker 기반 실시간 운영](adr/ADR-0005-live-production-runtime.md) — 2026-07-11, Accepted
 - [ADR-0006: 세 개 제품 트랙과 유니버설 혼잡 데이터 계약](adr/ADR-0006-universal-expansion-tracks.md) — 2026-07-11, Accepted
 - [ADR-0007: 구현 병렬화와 공개·승격 게이트 분리](adr/ADR-0007-parallel-implementation-release-gates.md) — 2026-07-12, Accepted
-- [ADR-0008: 운영 수집은 전용 상시 worker에서 실행](adr/ADR-0008-dedicated-production-worker.md) — 2026-07-12, Accepted
+- [ADR-0008: 운영 수집은 전용 상시 worker에서 실행](adr/ADR-0008-dedicated-production-worker.md) — 2026-07-12, Superseded by ADR-0012
 - [ADR-0009: 생활인구 베이스라인 단위로 250m 격자 채택](adr/ADR-0009-living-population-250m-grid.md) — 2026-07-12, Accepted
 - [ADR-0010: 지역 확장은 두 번째 공급자 실측 후 최소 계약 확정](adr/ADR-0010-evidence-first-regional-expansion.md) — 2026-07-13, Accepted
 - [ADR-0011: 도시 활동도를 코어로 두고 카페를 첫 overlay로 사용](adr/ADR-0011-urban-activity-core-cafe-overlay.md) — 2026-07-13, Accepted
+- [ADR-0012: Supabase가 production poll과 monitor workflow를 예약 실행](adr/ADR-0012-supabase-dispatched-production-scheduler.md) — 2026-07-15, Accepted
+- [ADR-0013: 검증 전에는 광고하지 않고 후원부터 제한적으로 도입](adr/ADR-0013-validation-first-monetization.md) — 2026-07-15, Accepted
 
 ## 현재 제품 경로 요약
 
@@ -61,7 +63,7 @@
 |---|---|---|
 | 지도 | MapLibre GL + OpenFreeMap | Kakao Maps SDK는 제품 런타임에서 로드하지 않음 |
 | 카페 원장 | Overture Places release를 PostgreSQL에 cache, 서울 인허가로 보정 | viewport마다 외부 POI 검색 금지 |
-| 혼잡도 | 서울 공식 121개 장소, 10분 non-overlapping polling | 과거 `≤12곳` 범위는 legacy 결정 |
+| 혼잡도 | 서울 공식 121개 장소, Supabase가 dispatch하는 5분 non-overlapping polling | 과거 `≤12곳`·10분 범위는 legacy 결정 |
 | 외부 매장 링크 | 검증된 provider ID/canonical direct detail URL만 표시 | 이름/좌표 검색 링크·스크레이핑·추측 매칭 금지 |
 | 제품 모드 | 카페 찾기·지역 밀집도·데이터 커버리지 | 데이터 없는 영역의 임의 보간 금지 |
 | 제품 코어 | 도시 활동도 surface + 카페 첫 overlay | 지역 활동도를 매장 좌석 점유율로 표현 금지 |

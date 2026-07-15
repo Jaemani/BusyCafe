@@ -1,8 +1,12 @@
 # ADR-0008: 운영 수집은 전용 상시 worker에서 실행한다
 
-- 상태: Accepted (worker provider 배포 대기)
+- 상태: Superseded by ADR-0012
 - 날짜: 2026-07-12
 - 대체 범위: ADR-0005의 GitHub Actions 기본 scheduler 결정
+
+> 이 문서는 GitHub 자체 cron의 지연을 확인한 당시 결정의 역사적 근거다. 2026-07-15부터
+> Supabase `pg_cron`이 one-shot GitHub workflow를 dispatch하는 ADR-0012가 canonical
+> production scheduler를 소유한다. 전용 container는 fallback 후보로 남는다.
 
 ## 맥락
 

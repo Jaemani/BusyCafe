@@ -6,6 +6,15 @@
 
 ### Added
 
+- Supabase public table RLS와 `anon`/`authenticated` table·sequence grant 차단. 서버의
+  PostgreSQL owner/pooler 경로는 유지하면서 브라우저 Data API 접근을 fail-closed 처리한다
+- Supabase `pg_cron`이 5분 poll과 후속 freshness monitor를 GitHub workflow로 dispatch하는
+  production scheduler와 exact configuration verifier
+- Vercel 익명 pageview와 privacy-safe custom event allowlist, 공개 개인정보·운영 안내,
+  취약점 비공개 제보 정책과 기본 보안 header
+- 공개 bbox 최대 span 제한으로 고카디널 cache-bust와 광범위 DB scan을 fail-closed 처리
+- 제품 지표 단일 정본과 검증 우선 수익화 ADR. 공개 베타에는 광고를 넣지 않고, 후원과
+  향후 스폰서가 혼잡 점수·색·순위에 영향을 주지 않도록 고정
 - 도시 활동도를 제품 코어, 카페를 첫 활용 레이어로 정의한 ADR-0011. 서울을 우선
   검증 지역으로 유지하고, 공개 모델 승격 전에는 카페 내부 좌석 점유율과 지역 활동도를
   구분한다
@@ -73,6 +82,8 @@
 
 ### Changed
 
+- materialize가 최근 12시간 모든 snapshot의 forecast JSON과 이전 serving-state JSON을
+  반복 전송하지 않고 최신 forecast와 필요한 PK만 조회하도록 축소
 - 관측 신선도를 `fresh`/`delayed`/`stale`로 분리했다. 운영상 fresh 경계는 25분으로
   유지하고, 25분 초과 120분 이하는 level·score만 낮은 시각적 비중으로 표시하면서
   `지연 데이터 · 참고용`으로 명시한다. 이 구간의 confidence·등급·forecast는 숨기며,
