@@ -103,6 +103,16 @@
       </div>
 
       <aside id="cafe-panel" class="cafe-panel" aria-live="polite" hidden>
+        <button
+          id="cafe-panel-sheet-toggle"
+          class="cafe-panel-sheet-toggle"
+          type="button"
+          aria-controls="cafe-panel-expanded-content"
+          aria-expanded="false"
+          aria-label="카페 상세 펼치기"
+        >
+          <span aria-hidden="true"></span>
+        </button>
         <button id="panel-close" class="panel-close" type="button" aria-label="닫기">×</button>
         <p class="panel-label">선택한 카페</p>
         <h2 id="cafe-name"></h2>
@@ -122,6 +132,7 @@
             </div>
           </div>
         </div>
+        <div id="cafe-panel-expanded-content" class="cafe-panel-expanded-content">
         <section id="crowd-feedback" class="crowd-feedback" aria-labelledby="crowd-feedback-title" hidden>
           <strong id="crowd-feedback-title">지금 상태를 알려주세요</strong>
           <div class="feedback-question" role="group" aria-labelledby="street-feedback-prompt">
@@ -163,6 +174,7 @@
           <a id="map-link-kakao" data-analytics-provider="kakao" target="_blank" rel="noopener noreferrer" hidden>카카오맵에서 보기</a>
           <a id="map-link-google" data-analytics-provider="google" target="_blank" rel="noopener noreferrer" hidden>Google 지도에서 보기</a>
         </nav>
+        </div>
       </aside>
 
       <div id="map-legend" class="legend" data-state="preview" aria-label="지도 안내">

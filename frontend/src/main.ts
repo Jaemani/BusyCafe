@@ -10,15 +10,21 @@ import {
 import { initializeCafeMap } from "./map";
 import { hideCafePanel, initializeCrowdFeedback } from "./panel";
 import { initializeCommuteNotice } from "./commute-notice";
+import { initializeCafePanelSheet } from "./cafe-panel-sheet";
 
 const status = document.querySelector<HTMLElement>("#search-status");
 const closeButton = document.querySelector<HTMLButtonElement>("#panel-close");
+const cafePanel = document.querySelector<HTMLElement>("#cafe-panel");
+const cafePanelSheetToggle = document.querySelector<HTMLButtonElement>(
+  "#cafe-panel-sheet-toggle",
+);
 
-if (!status || !closeButton) {
+if (!status || !closeButton || !cafePanel || !cafePanelSheetToggle) {
   throw new Error("Required map UI elements were not found");
 }
 
 closeButton.addEventListener("click", hideCafePanel);
+initializeCafePanelSheet(cafePanel, cafePanelSheetToggle);
 initializeProductAnalytics();
 initializeCrowdFeedback();
 initializeCommuteNotice();

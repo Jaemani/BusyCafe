@@ -16,10 +16,12 @@ import {
   showCafePanel,
   updateOpenCafePanel,
 } from "./panel";
+import { initializeCafePanelSheet } from "./cafe-panel-sheet";
 
 function panelMarkup(): string {
   return `
     <aside id="cafe-panel" hidden>
+      <button id="cafe-panel-sheet-toggle" aria-expanded="false">상세</button>
       <h2 id="cafe-name"></h2><p id="cafe-address"></p><span id="cafe-phone"></span>
       <a id="cafe-website"></a><span id="cafe-level"></span>
       <span id="cafe-coverage"></span><span id="cafe-confidence"></span>
@@ -93,6 +95,10 @@ describe("crowd feedback", () => {
     document.body.innerHTML = panelMarkup();
     analyticsMocks.trackCrowdFeedback.mockClear();
     contributionApi = createContributionApi();
+    initializeCafePanelSheet(
+      document.querySelector<HTMLElement>("#cafe-panel")!,
+      document.querySelector<HTMLButtonElement>("#cafe-panel-sheet-toggle")!,
+    );
     initializeCrowdFeedback(contributionApi);
   });
 
@@ -269,6 +275,21 @@ describe("crowd feedback", () => {
     showCafePanel(cafe("next"));
     expect(feedback.hidden).toBe(true);
     expect(panel.dataset.feedbackState).toBe("collapsed");
+  });
+
+  it("returns the sheet to compact when a different cafe is selected", () => {
+    showCafePanel(cafe("sheet-first"));
+    const panel = document.querySelector<HTMLElement>("#cafe-panel")!;
+    const toggle = document.querySelector<HTMLButtonElement>(
+      "#cafe-panel-sheet-toggle",
+    )!;
+
+    toggle.click();
+    expect(panel.dataset.sheetState).toBe("expanded");
+
+    showCafePanel(cafe("sheet-second"));
+    expect(panel.dataset.sheetState).toBe("compact");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("does not let incomplete or older summaries erase current detail evidence", () => {

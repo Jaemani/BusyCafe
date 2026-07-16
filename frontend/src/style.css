@@ -500,6 +500,10 @@ h1 {
   animation: panel-in 180ms ease-out;
 }
 
+.cafe-panel-sheet-toggle {
+  display: none;
+}
+
 @keyframes panel-in {
   from { opacity: 0; transform: translateY(0.8rem); }
 }
@@ -805,18 +809,53 @@ h1 {
     border-left: 0;
     border-radius: 1.5rem 1.5rem 0 0;
     padding:
-      1.4rem
+      2.2rem
       max(1.2rem, calc(env(safe-area-inset-right, 0px) + 0.7rem))
       max(1.4rem, calc(env(safe-area-inset-bottom, 0px) + 0.7rem))
       max(1.2rem, calc(env(safe-area-inset-left, 0px) + 0.7rem));
-    max-height: min(82vh, 42rem);
+    max-height: min(54vh, 28rem);
     max-height: min(
-      82dvh,
+      54dvh,
       calc(100dvh - env(safe-area-inset-top, 0px) - 0.7rem),
-      42rem
+      28rem
     );
     overflow-y: auto;
     overscroll-behavior: contain;
+    transition: max-height 180ms ease-out;
+  }
+  .cafe-panel[data-sheet-state="expanded"] {
+    max-height: 90vh;
+    max-height: min(
+      90dvh,
+      calc(100dvh - env(safe-area-inset-top, 0px) - 0.7rem)
+    );
+  }
+  .cafe-panel-sheet-toggle {
+    position: absolute;
+    top: 0.25rem;
+    left: 50%;
+    display: grid;
+    width: 3.25rem;
+    height: 2rem;
+    transform: translateX(-50%);
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .cafe-panel-sheet-toggle > span {
+    width: 2.25rem;
+    height: 0.28rem;
+    border-radius: 999px;
+    background: #b6bdb8;
+  }
+  .cafe-panel-sheet-toggle:hover > span,
+  .cafe-panel-sheet-toggle:focus-visible > span {
+    background: var(--forest);
+  }
+  .cafe-panel[data-sheet-state="compact"] .cafe-panel-expanded-content {
+    display: none;
   }
   .maplibregl-ctrl-bottom-right {
     right: max(0.3rem, env(safe-area-inset-right, 0px));
@@ -830,5 +869,5 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cafe-panel { animation: none; }
+  .cafe-panel { animation: none; transition: none; }
 }

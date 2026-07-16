@@ -9,6 +9,7 @@ import {
   type SeatFeedback,
   type StreetFeedback,
 } from "./api";
+import { collapseCafePanelSheet } from "./cafe-panel-sheet";
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -370,6 +371,7 @@ function renderCafePanel(cafe: CafeProperties): void {
 
 export function showCafePanel(cafe: CafeProperties): void {
   if (openCafeId !== cafe.id) {
+    collapseCafePanelSheet();
     resetCrowdFeedback();
     resetPlaceReport();
   }
@@ -379,6 +381,7 @@ export function showCafePanel(cafe: CafeProperties): void {
 }
 
 export function showCafePanelLoading(cafe: CafeMapProperties): void {
+  if (openCafeId !== cafe.id) collapseCafePanelSheet();
   openCafeId = cafe.id;
   openCafeDetail = null;
   resetCrowdFeedback();
@@ -460,6 +463,7 @@ export function getOpenCafeId(): string | null {
 }
 
 export function hideCafePanel(): void {
+  collapseCafePanelSheet();
   openCafeId = null;
   openCafeDetail = null;
   resetCrowdFeedback();
