@@ -366,6 +366,15 @@ NOWCAST_SHADOW_LAG_BUCKET_EDGES_MIN: Final = (15.0, 30.0, 60.0, 120.0)
 # days preserve twice the minimum gate span while preventing an unbounded JSON
 # forecast transfer from PostgreSQL on every manual backtest.
 NOWCAST_SHADOW_BACKTEST_WINDOW_DAYS: Final = 14
+SOURCE_DELAY_SHADOW_MODEL_VERSION: Final = (
+    "v1-source-delay-persistence-shadow"
+)
+# Offline-only persistence horizons. They test how quickly saved Seoul source
+# observations lose value; they never change public freshness or score policy.
+SOURCE_DELAY_SHADOW_HORIZONS_MIN: Final = (10, 30, 60, 90, 120)
+SOURCE_DELAY_SHADOW_ACTUAL_TOLERANCE_MIN: Final = 2.5
+SOURCE_DELAY_SHADOW_MIN_SLOT_HOTSPOTS: Final = 2
+SOURCE_DELAY_SHADOW_MIN_TEMPORAL_SAMPLES: Final = 3
 # Promotion requires both broad historical support and no regression against
 # the uncorrected delayed observation.  Thresholds are deliberately strict;
 # this hotspot-forecast gate cannot replace Phase 6 cafe ground truth.
