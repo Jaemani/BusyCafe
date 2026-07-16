@@ -1,9 +1,14 @@
 import type { CafeMapProperties, CafeProperties } from "./cafe-provider";
 import {
-  isCustomAnalyticsEnabled,
   trackCrowdFeedback,
-  type CrowdFeedback,
 } from "./analytics";
+import {
+  HttpCafeContributionApi,
+  type CafeContributionApi,
+  type CafeReportType,
+  type SeatFeedback,
+  type StreetFeedback,
+} from "./api";
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -70,7 +75,10 @@ function formatObservationBadge(
 
 let openCafeId: string | null = null;
 let openCafeDetail: CafeProperties | null = null;
-let crowdFeedbackSubmitted = false;
+let streetFeedback: StreetFeedback | null = null;
+let seatFeedback: SeatFeedback | null = null;
+let feedbackState: "idle" | "submitting" | "submitted" = "idle";
+let reportState: "idle" | "submitting" | "submitted" = "idle";
 
 function setExternalLink(selector: string, href: string | null): boolean {
   const link = requiredElement<HTMLAnchorElement>(selector);
@@ -98,55 +106,154 @@ function setNaverLink(
 }
 
 function resetCrowdFeedback(): void {
-  crowdFeedbackSubmitted = false;
+  streetFeedback = null;
+  seatFeedback = null;
+  feedbackState = "idle";
   const section = requiredElement<HTMLElement>("#crowd-feedback");
   section.hidden = true;
-  requiredElement<HTMLElement>("#crowd-feedback-prompt").textContent =
-    "지금 주변 분위기와 비교해 주세요";
-  section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
+  requiredElement<HTMLElement>("#crowd-feedback-status").textContent = "";
+  const submit = requiredElement<HTMLButtonElement>("#crowd-feedback-submit");
+  submit.textContent = "피드백 보내기";
+  submit.disabled = true;
+  section.querySelectorAll<HTMLButtonElement>(
+    "[data-street-feedback], [data-seat-feedback]",
+  ).forEach((button) => {
+    button.disabled = false;
+    button.setAttribute("aria-pressed", "false");
+  });
+}
+
+function resetPlaceReport(): void {
+  reportState = "idle";
+  const section = requiredElement<HTMLDetailsElement>("#place-report");
+  section.hidden = true;
+  section.open = false;
+  requiredElement<HTMLElement>("#place-report-status").textContent = "";
+  section.querySelectorAll<HTMLButtonElement>("[data-place-report]").forEach(
     (button) => {
       button.disabled = false;
-      button.setAttribute("aria-pressed", "false");
     },
   );
 }
 
-export function initializeCrowdFeedback(): void {
+function updateFeedbackControls(): void {
   const section = requiredElement<HTMLElement>("#crowd-feedback");
-  if (!isCustomAnalyticsEnabled()) {
-    section.hidden = true;
-    return;
-  }
-  section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
-    (button) => {
-      button.addEventListener("click", () => {
-        const feedback = button.dataset.crowdFeedback;
-        if (
-          crowdFeedbackSubmitted ||
-          openCafeDetail === null ||
-          (feedback !== "similar" && feedback !== "busier" && feedback !== "quieter")
-        ) return;
+  const locked = feedbackState !== "idle";
+  section.querySelectorAll<HTMLButtonElement>(
+    "[data-street-feedback], [data-seat-feedback]",
+  ).forEach((button) => {
+    button.disabled = locked;
+    const selected = button.dataset.streetFeedback === streetFeedback ||
+      button.dataset.seatFeedback === seatFeedback;
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  const submit = requiredElement<HTMLButtonElement>("#crowd-feedback-submit");
+  submit.disabled = locked || streetFeedback === null || seatFeedback === null;
+}
 
-        crowdFeedbackSubmitted = true;
-        trackCrowdFeedback(
-          feedback as CrowdFeedback,
-          openCafeDetail.level,
-          openCafeDetail.coverage,
-        );
-        requiredElement<HTMLElement>("#crowd-feedback-prompt").textContent =
-          "피드백을 반영했어요";
-        section.querySelectorAll<HTMLButtonElement>("[data-crowd-feedback]").forEach(
-          (candidate) => {
-            candidate.disabled = true;
-            candidate.setAttribute(
-              "aria-pressed",
-              candidate === button ? "true" : "false",
-            );
-          },
-        );
-      });
+function validStreetFeedback(value: string | undefined): value is StreetFeedback {
+  return value === "busier" || value === "similar" || value === "quieter";
+}
+
+function validSeatFeedback(value: string | undefined): value is SeatFeedback {
+  return value === "available" || value === "limited" || value === "full" ||
+    value === "not_entered";
+}
+
+function validCafeReportType(value: string | undefined): value is CafeReportType {
+  return value === "missing" || value === "wrong_details" || value === "closed";
+}
+
+export function initializeCrowdFeedback(
+  api: CafeContributionApi = new HttpCafeContributionApi(),
+): void {
+  const section = requiredElement<HTMLElement>("#crowd-feedback");
+  section.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || feedbackState !== "idle") return;
+    const button = target.closest<HTMLButtonElement>(
+      "[data-street-feedback], [data-seat-feedback]",
+    );
+    if (!button || !section.contains(button)) return;
+    if (validStreetFeedback(button.dataset.streetFeedback)) {
+      streetFeedback = button.dataset.streetFeedback;
+    }
+    if (validSeatFeedback(button.dataset.seatFeedback)) {
+      seatFeedback = button.dataset.seatFeedback;
+    }
+    updateFeedbackControls();
+  });
+
+  requiredElement<HTMLButtonElement>("#crowd-feedback-submit").addEventListener(
+    "click",
+    async () => {
+      if (
+        feedbackState !== "idle" || openCafeDetail === null ||
+        streetFeedback === null || seatFeedback === null
+      ) return;
+      const cafe = openCafeDetail;
+      const submittedStreet = streetFeedback;
+      const submittedSeat = seatFeedback;
+      feedbackState = "submitting";
+      requiredElement<HTMLElement>("#crowd-feedback-status").textContent =
+        "피드백 보내는 중…";
+      updateFeedbackControls();
+      try {
+        await api.submitCafeFeedback(cafe.id, submittedStreet, submittedSeat);
+        if (openCafeId !== cafe.id) return;
+        feedbackState = "submitted";
+        requiredElement<HTMLElement>("#crowd-feedback-status").textContent =
+          "고마워요. 확인 자료로 반영할게요.";
+        requiredElement<HTMLButtonElement>("#crowd-feedback-submit").textContent =
+          "제출 완료";
+        trackCrowdFeedback(submittedStreet, cafe.level, cafe.coverage);
+      } catch {
+        if (openCafeId !== cafe.id) return;
+        feedbackState = "idle";
+        requiredElement<HTMLElement>("#crowd-feedback-status").textContent =
+          "전송하지 못했어요. 다시 시도해 주세요.";
+      }
+      updateFeedbackControls();
     },
   );
+
+  const reportSection = requiredElement<HTMLDetailsElement>("#place-report");
+  reportSection.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof Element) || reportState !== "idle") return;
+    const button = target.closest<HTMLButtonElement>("[data-place-report]");
+    const reportType = button?.dataset.placeReport;
+    if (
+      !button || !reportSection.contains(button) || openCafeDetail === null ||
+      !validCafeReportType(reportType)
+    ) return;
+    const cafeId = openCafeDetail.id;
+    reportState = "submitting";
+    requiredElement<HTMLElement>("#place-report-status").textContent =
+      "신고 보내는 중…";
+    reportSection.querySelectorAll<HTMLButtonElement>("[data-place-report]").forEach(
+      (candidate) => {
+        candidate.disabled = true;
+      },
+    );
+    try {
+      await api.reportCafe(cafeId, reportType);
+      if (openCafeId !== cafeId) return;
+      reportState = "submitted";
+      requiredElement<HTMLElement>("#place-report-status").textContent =
+        "접수했어요. 원장 확인 후 반영할게요.";
+    } catch {
+      if (openCafeId !== cafeId) return;
+      reportState = "idle";
+      requiredElement<HTMLElement>("#place-report-status").textContent =
+        "전송하지 못했어요. 다시 시도해 주세요.";
+      reportSection.querySelectorAll<HTMLButtonElement>("[data-place-report]").forEach(
+        (candidate) => {
+          candidate.disabled = false;
+        },
+      );
+    }
+  });
 }
 
 function renderCrowdEstimate(
@@ -207,13 +314,17 @@ function renderCafePanel(cafe: CafeProperties): void {
   if (!googleLink.hidden) googleLink.dataset.analyticsLinkType = "direct";
   requiredElement<HTMLElement>("#external-map-links").hidden = !hasExternalLink;
   requiredElement<HTMLElement>("#crowd-feedback").hidden =
-    !isCustomAnalyticsEnabled() || cafe.level === null || cafe.freshness === "stale";
+    cafe.level === null || cafe.freshness === "stale";
+  requiredElement<HTMLElement>("#place-report").hidden = false;
   requiredElement<HTMLElement>("#cafe-panel").hidden = false;
   document.body.classList.add("panel-open");
 }
 
 export function showCafePanel(cafe: CafeProperties): void {
-  if (openCafeId !== cafe.id) resetCrowdFeedback();
+  if (openCafeId !== cafe.id) {
+    resetCrowdFeedback();
+    resetPlaceReport();
+  }
   openCafeId = cafe.id;
   openCafeDetail = cafe;
   renderCafePanel(cafe);
@@ -223,6 +334,7 @@ export function showCafePanelLoading(cafe: CafeMapProperties): void {
   openCafeId = cafe.id;
   openCafeDetail = null;
   resetCrowdFeedback();
+  resetPlaceReport();
   requiredElement<HTMLElement>("#cafe-address").textContent = "상세 정보 불러오는 중";
   requiredElement<HTMLElement>("#cafe-phone").textContent = "";
   const website = requiredElement<HTMLAnchorElement>("#cafe-website");
@@ -242,6 +354,7 @@ export function showCafePanelError(
   if (openCafeId !== cafe.id) return;
   openCafeDetail = null;
   resetCrowdFeedback();
+  resetPlaceReport();
   requiredElement<HTMLElement>("#cafe-address").textContent = message;
   requiredElement<HTMLElement>("#cafe-phone").textContent = "잠시 후 다시 선택해 주세요";
   requiredElement<HTMLElement>("#cafe-source").textContent = "장소 상세를 불러오지 못했어요";
@@ -268,6 +381,8 @@ export function getOpenCafeId(): string | null {
 export function hideCafePanel(): void {
   openCafeId = null;
   openCafeDetail = null;
+  resetCrowdFeedback();
+  resetPlaceReport();
   requiredElement<HTMLElement>("#cafe-panel").hidden = true;
   document.body.classList.remove("panel-open");
 }

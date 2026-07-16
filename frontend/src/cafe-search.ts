@@ -6,10 +6,15 @@ import {
   trackCafeSearchSelect,
   type CafeSearchMode,
 } from "./analytics";
+import {
+  HttpCafeContributionApi,
+  type CafeContributionApi,
+} from "./api";
 
 const DEFAULT_DEBOUNCE_MS = 300;
 const SEARCH_LIMIT = 50;
 const MIN_QUERY_LENGTH = 2;
+const MISSING_REPORT_MAX_LENGTH = 80;
 const SERVER_ORIGIN_DECIMALS = 3;
 
 export interface CafeDistanceOrigin {
@@ -44,6 +49,7 @@ interface CafeSearchOptions {
   distanceOrigin?: CafeDistanceOrigin;
   apiBaseUrl?: string;
   api?: CafeSearchApi;
+  contributionApi?: CafeContributionApi;
   debounceMs?: number;
 }
 
@@ -258,7 +264,17 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   const popover = requiredElement<HTMLElement>("#cafe-search-popover");
   const message = requiredElement<HTMLElement>("#cafe-search-message");
   const resultList = requiredElement<HTMLUListElement>("#cafe-search-results");
+  const missingReportForm = requiredElement<HTMLFormElement>("#missing-cafe-report");
+  const missingReportInput = requiredElement<HTMLInputElement>("#missing-cafe-name");
+  const missingReportStatus = requiredElement<HTMLElement>(
+    "#missing-cafe-report-status",
+  );
+  const missingReportSubmit = requiredElement<HTMLButtonElement>(
+    '#missing-cafe-report button[type="submit"]',
+  );
   const api = options.api ?? new HttpCafeSearchApi(options.apiBaseUrl);
+  const contributionApi = options.contributionApi ??
+    new HttpCafeContributionApi(options.apiBaseUrl);
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
 
   let selectedBrand: string | null = null;
@@ -268,6 +284,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   let results: CafeSearchResult[] = [];
   let resultMode: CafeSearchMode = "text";
   let distanceOrigin = options.distanceOrigin;
+  let missingReportState: "idle" | "submitting" | "submitted" = "idle";
 
   const setPopoverOpen = (open: boolean): void => {
     popover.hidden = !open;
@@ -277,6 +294,23 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   const clearResults = (): void => {
     results = [];
     resultList.replaceChildren();
+  };
+
+  const resetMissingReport = (): void => {
+    missingReportState = "idle";
+    missingReportForm.hidden = true;
+    missingReportInput.disabled = false;
+    missingReportSubmit.disabled = false;
+    missingReportStatus.textContent = "";
+  };
+
+  const showMissingReport = (query: string): void => {
+    missingReportState = "idle";
+    missingReportForm.hidden = false;
+    missingReportInput.disabled = false;
+    missingReportSubmit.disabled = false;
+    missingReportInput.value = query.slice(0, MISSING_REPORT_MAX_LENGTH);
+    missingReportStatus.textContent = "";
   };
 
   const cancelPending = (): void => {
@@ -337,6 +371,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     if (selectedBrand === null && query.length < MIN_QUERY_LENGTH) {
       cancelPending();
       clearResults();
+      resetMissingReport();
       options.onResultsChange?.(null);
       if (query.length > 0) {
         message.textContent = "두 글자 이상 입력해 주세요";
@@ -355,6 +390,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     const mode = searchMode(query, selectedBrand);
     message.textContent = "카페를 찾는 중…";
     clearResults();
+    resetMissingReport();
     options.onResultsChange?.(null);
     setPopoverOpen(true);
 
@@ -374,9 +410,11 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
       message.textContent = items.length === 0
         ? "일치하는 카페를 찾지 못했어요"
         : resultCountMessage();
+      if (items.length === 0) showMissingReport(query);
     } catch (error) {
       if (activeController.signal.aborted || sequence !== requestSequence) return;
       clearResults();
+      resetMissingReport();
       options.onResultsChange?.(null);
       message.textContent = error instanceof Error
         ? error.message
@@ -447,6 +485,32 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
     trackCafeSearchSelect(resultMode);
     options.onSelect(results[index]);
   };
+  const onMissingReportSubmit = async (event: SubmitEvent): Promise<void> => {
+    event.preventDefault();
+    if (missingReportState !== "idle") return;
+    const reportedName = missingReportInput.value.trim();
+    if (
+      reportedName.length < MIN_QUERY_LENGTH ||
+      reportedName.length > MISSING_REPORT_MAX_LENGTH
+    ) {
+      missingReportStatus.textContent = "카페 이름을 2~80자로 입력해 주세요.";
+      return;
+    }
+    missingReportState = "submitting";
+    missingReportInput.disabled = true;
+    missingReportSubmit.disabled = true;
+    missingReportStatus.textContent = "제보 보내는 중…";
+    try {
+      await contributionApi.reportMissingCafe(reportedName);
+      missingReportState = "submitted";
+      missingReportStatus.textContent = "고마워요. 장소 원장을 확인할게요.";
+    } catch {
+      missingReportState = "idle";
+      missingReportInput.disabled = false;
+      missingReportSubmit.disabled = false;
+      missingReportStatus.textContent = "전송하지 못했어요. 다시 시도해 주세요.";
+    }
+  };
   const onDocumentPointerDown = (event: PointerEvent): void => {
     const target = event.target;
     if (target instanceof Node && !form.parentElement?.contains(target)) {
@@ -467,6 +531,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
   form.addEventListener("submit", onSubmit);
   filters.addEventListener("click", onFilterClick);
   resultList.addEventListener("click", onResultClick);
+  missingReportForm.addEventListener("submit", onMissingReportSubmit);
   document.addEventListener("pointerdown", onDocumentPointerDown);
   document.addEventListener("keydown", onKeyDown);
 
@@ -484,6 +549,7 @@ export function initializeCafeSearch(options: CafeSearchOptions): CafeSearchCont
       form.removeEventListener("submit", onSubmit);
       filters.removeEventListener("click", onFilterClick);
       resultList.removeEventListener("click", onResultClick);
+      missingReportForm.removeEventListener("submit", onMissingReportSubmit);
       document.removeEventListener("pointerdown", onDocumentPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     },

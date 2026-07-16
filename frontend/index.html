@@ -68,6 +68,24 @@
           <div id="cafe-search-popover" class="cafe-search-popover" hidden>
             <p id="cafe-search-message" class="cafe-search-message" role="status"></p>
             <ul id="cafe-search-results" class="cafe-search-results" aria-label="카페 검색 결과"></ul>
+            <form id="missing-cafe-report" class="missing-cafe-report" hidden>
+              <label for="missing-cafe-name">찾는 카페가 없어요</label>
+              <p>카페 이름만 알려주시면 원장을 확인할게요.</p>
+              <div>
+                <input
+                  id="missing-cafe-name"
+                  name="reported_name"
+                  type="text"
+                  minlength="2"
+                  maxlength="80"
+                  autocomplete="off"
+                  placeholder="카페 이름"
+                  required
+                />
+                <button type="submit">알려주기</button>
+              </div>
+              <p id="missing-cafe-report-status" role="status"></p>
+            </form>
           </div>
         </section>
         <p class="source-line">
@@ -97,14 +115,38 @@
             </div>
           </div>
         </div>
-        <section id="crowd-feedback" class="crowd-feedback" aria-labelledby="crowd-feedback-prompt" hidden>
-          <p id="crowd-feedback-prompt">지금 주변 분위기와 비교해 주세요</p>
-          <div>
-            <button type="button" data-crowd-feedback="similar" aria-pressed="false">비슷해요</button>
-            <button type="button" data-crowd-feedback="busier" aria-pressed="false">더 붐벼요</button>
-            <button type="button" data-crowd-feedback="quieter" aria-pressed="false">더 한산해요</button>
+        <section id="crowd-feedback" class="crowd-feedback" aria-labelledby="crowd-feedback-title" hidden>
+          <strong id="crowd-feedback-title">지금 상태를 알려주세요</strong>
+          <div class="feedback-question" role="group" aria-labelledby="street-feedback-prompt">
+            <p id="street-feedback-prompt">표시된 주변 혼잡도와 비교하면?</p>
+            <div>
+              <button type="button" data-street-feedback="busier" aria-pressed="false">더 붐벼요</button>
+              <button type="button" data-street-feedback="similar" aria-pressed="false">비슷해요</button>
+              <button type="button" data-street-feedback="quieter" aria-pressed="false">더 한산해요</button>
+            </div>
           </div>
+          <div class="feedback-question seat-feedback-question" role="group" aria-labelledby="seat-feedback-prompt">
+            <p id="seat-feedback-prompt">매장 좌석은 어떤가요?</p>
+            <div>
+              <button type="button" data-seat-feedback="available" aria-pressed="false">여유 있어요</button>
+              <button type="button" data-seat-feedback="limited" aria-pressed="false">얼마 안 남았어요</button>
+              <button type="button" data-seat-feedback="full" aria-pressed="false">만석이에요</button>
+              <button type="button" data-seat-feedback="not_entered" aria-pressed="false">안 들어갔어요</button>
+            </div>
+          </div>
+          <button id="crowd-feedback-submit" class="feedback-submit" type="button" disabled>피드백 보내기</button>
+          <p id="crowd-feedback-status" class="feedback-status" role="status"></p>
         </section>
+        <details id="place-report" class="place-report" hidden>
+          <summary>장소 정보가 다른가요?</summary>
+          <p>자동 수정되지 않으며, 원장을 확인한 뒤 반영해요.</p>
+          <div>
+            <button type="button" data-place-report="missing">카페가 아니에요</button>
+            <button type="button" data-place-report="wrong_details">이름·위치가 달라요</button>
+            <button type="button" data-place-report="closed">폐업했어요</button>
+          </div>
+          <p id="place-report-status" role="status"></p>
+        </details>
         <p class="cafe-source">
           <span id="cafe-source"></span>
           <a href="/about.html">데이터 안내</a>

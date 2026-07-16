@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CafeContributionApi } from "./api";
 import type { CafeProperties } from "./cafe-provider";
 
 const analyticsMocks = vi.hoisted(() => ({
@@ -7,7 +8,6 @@ const analyticsMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./analytics", () => ({
-  isCustomAnalyticsEnabled: () => true,
   trackCrowdFeedback: analyticsMocks.trackCrowdFeedback,
 }));
 
@@ -21,15 +21,38 @@ function panelMarkup(): string {
       <span id="cafe-coverage"></span><span id="cafe-confidence"></span>
       <span id="estimate-dot"></span><p id="cafe-evidence"></p><p id="cafe-source"></p>
       <section id="crowd-feedback" hidden>
-        <p id="crowd-feedback-prompt"></p>
-        <button data-crowd-feedback="similar" aria-pressed="false">비슷해요</button>
-        <button data-crowd-feedback="busier" aria-pressed="false">더 붐벼요</button>
-        <button data-crowd-feedback="quieter" aria-pressed="false">더 한산해요</button>
+        <button data-street-feedback="similar" aria-pressed="false">비슷해요</button>
+        <button data-street-feedback="busier" aria-pressed="false">더 붐벼요</button>
+        <button data-street-feedback="quieter" aria-pressed="false">더 한산해요</button>
+        <button data-seat-feedback="available" aria-pressed="false">여유</button>
+        <button data-seat-feedback="limited" aria-pressed="false">조금</button>
+        <button data-seat-feedback="full" aria-pressed="false">만석</button>
+        <button data-seat-feedback="not_entered" aria-pressed="false">안 들어감</button>
+        <button id="crowd-feedback-submit" disabled>보내기</button>
+        <p id="crowd-feedback-status"></p>
       </section>
+      <details id="place-report" hidden>
+        <button data-place-report="missing">카페 아님</button>
+        <button data-place-report="wrong_details">정보 오류</button>
+        <button data-place-report="closed">폐업</button>
+        <p id="place-report-status"></p>
+      </details>
       <nav id="external-map-links" hidden>
         <a id="map-link-naver"></a><a id="map-link-kakao"></a><a id="map-link-google"></a>
       </nav>
     </aside>`;
+}
+
+function createContributionApi(): CafeContributionApi & {
+  submitCafeFeedback: ReturnType<typeof vi.fn>;
+  reportCafe: ReturnType<typeof vi.fn>;
+  reportMissingCafe: ReturnType<typeof vi.fn>;
+} {
+  return {
+    submitCafeFeedback: vi.fn().mockResolvedValue(undefined),
+    reportCafe: vi.fn().mockResolvedValue(undefined),
+    reportMissingCafe: vi.fn().mockResolvedValue(undefined),
+  };
 }
 
 function cafe(id: string): CafeProperties {
@@ -60,20 +83,41 @@ function cafe(id: string): CafeProperties {
 }
 
 describe("crowd feedback", () => {
+  let contributionApi: ReturnType<typeof createContributionApi>;
+
   beforeEach(() => {
     document.body.innerHTML = panelMarkup();
     analyticsMocks.trackCrowdFeedback.mockClear();
-    initializeCrowdFeedback();
+    contributionApi = createContributionApi();
+    initializeCrowdFeedback(contributionApi);
   });
 
-  it("accepts only one response and resets for a newly selected cafe", () => {
+  it("requires both answers, submits once, and resets for a new cafe", async () => {
     showCafePanel(cafe("first"));
     const quieter = document.querySelector<HTMLButtonElement>(
-      '[data-crowd-feedback="quieter"]',
+      '[data-street-feedback="quieter"]',
+    )!;
+    const available = document.querySelector<HTMLButtonElement>(
+      '[data-seat-feedback="available"]',
+    )!;
+    const submit = document.querySelector<HTMLButtonElement>(
+      "#crowd-feedback-submit",
     )!;
     quieter.click();
-    quieter.click();
+    expect(submit.disabled).toBe(true);
+    available.click();
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    submit.click();
+    await Promise.resolve();
+    await Promise.resolve();
 
+    expect(contributionApi.submitCafeFeedback).toHaveBeenCalledOnce();
+    expect(contributionApi.submitCafeFeedback).toHaveBeenCalledWith(
+      "first",
+      "quieter",
+      "available",
+    );
     expect(analyticsMocks.trackCrowdFeedback).toHaveBeenCalledOnce();
     expect(analyticsMocks.trackCrowdFeedback).toHaveBeenCalledWith(
       "quieter",
@@ -82,14 +126,79 @@ describe("crowd feedback", () => {
     );
     expect(quieter.getAttribute("aria-pressed")).toBe("true");
     expect(quieter.disabled).toBe(true);
+    expect(document.querySelector("#crowd-feedback-status")?.textContent).toContain(
+      "고마워요",
+    );
 
     showCafePanel(cafe("second"));
     const similar = document.querySelector<HTMLButtonElement>(
-      '[data-crowd-feedback="similar"]',
+      '[data-street-feedback="similar"]',
     )!;
     expect(similar.disabled).toBe(false);
-    similar.click();
-    expect(analyticsMocks.trackCrowdFeedback).toHaveBeenCalledTimes(2);
+    expect(similar.getAttribute("aria-pressed")).toBe("false");
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("submits a selected-place report and locks duplicate clicks", async () => {
+    showCafePanel(cafe("reported"));
+    const details = document.querySelector<HTMLDetailsElement>("#place-report")!;
+    expect(details.hidden).toBe(false);
+    const closed = document.querySelector<HTMLButtonElement>(
+      '[data-place-report="closed"]',
+    )!;
+
+    closed.click();
+    closed.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(contributionApi.reportCafe).toHaveBeenCalledOnce();
+    expect(contributionApi.reportCafe).toHaveBeenCalledWith("reported", "closed");
+    expect(document.querySelector("#place-report-status")?.textContent).toContain(
+      "접수했어요",
+    );
+    expect(closed.disabled).toBe(true);
+  });
+
+  it("shows a feedback error and enables retry", async () => {
+    contributionApi.submitCafeFeedback.mockRejectedValueOnce(new Error("offline"));
+    showCafePanel(cafe("retry"));
+    const street = document.querySelector<HTMLButtonElement>(
+      '[data-street-feedback="similar"]',
+    )!;
+    const seat = document.querySelector<HTMLButtonElement>(
+      '[data-seat-feedback="not_entered"]',
+    )!;
+    const submit = document.querySelector<HTMLButtonElement>(
+      "#crowd-feedback-submit",
+    )!;
+    street.click();
+    seat.click();
+    submit.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(document.querySelector("#crowd-feedback-status")?.textContent).toContain(
+      "전송하지 못했어요",
+    );
+    expect(submit.disabled).toBe(false);
+    expect(street.disabled).toBe(false);
+  });
+
+  it("hides model comparison when no current estimate is displayed", () => {
+    showCafePanel({ ...cafe("uncovered"), level: null, freshness: "n/a" });
+
+    expect(
+      document.querySelector<HTMLElement>("#crowd-feedback")?.hidden,
+    ).toBe(true);
+    expect(
+      document.querySelector<HTMLElement>("#place-report")?.hidden,
+    ).toBe(false);
+
+    showCafePanel({ ...cafe("stale"), level: null, freshness: "stale" });
+    expect(
+      document.querySelector<HTMLElement>("#crowd-feedback")?.hidden,
+    ).toBe(true);
   });
 
   it("shows concise evidence once and hides raw catalog metadata", () => {

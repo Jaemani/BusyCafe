@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CafeContributionApi } from "./api";
 
 const analyticsMocks = vi.hoisted(() => ({
   trackBrandFilter: vi.fn(),
@@ -54,6 +55,11 @@ function searchMarkup(): string {
       <div id="cafe-search-popover" hidden>
         <p id="cafe-search-message"></p>
         <ul id="cafe-search-results"></ul>
+        <form id="missing-cafe-report" hidden>
+          <input id="missing-cafe-name" />
+          <button type="submit">알려주기</button>
+          <p id="missing-cafe-report-status"></p>
+        </form>
       </div>
     </section>`;
 }
@@ -82,6 +88,18 @@ function createApi(items: CafeSearchResult[] = [result()]): CafeSearchApi & {
 } {
   return {
     search: vi.fn().mockResolvedValue(items),
+  };
+}
+
+function createContributionApi(): CafeContributionApi & {
+  submitCafeFeedback: ReturnType<typeof vi.fn>;
+  reportCafe: ReturnType<typeof vi.fn>;
+  reportMissingCafe: ReturnType<typeof vi.fn>;
+} {
+  return {
+    submitCafeFeedback: vi.fn().mockResolvedValue(undefined),
+    reportCafe: vi.fn().mockResolvedValue(undefined),
+    reportMissingCafe: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -155,9 +173,11 @@ describe("cafe search", () => {
 
   it("shows empty and error states without stale result rows", async () => {
     const api = createApi([]);
+    const contributionApi = createContributionApi();
     const onResultsChange = vi.fn();
     initializeCafeSearch({
       api,
+      contributionApi,
       onSelect: vi.fn(),
       onBrandChange: vi.fn(),
       onResultsChange,
@@ -172,6 +192,27 @@ describe("cafe search", () => {
       "일치하는 카페를 찾지 못했어요",
     );
     expect(onResultsChange).toHaveBeenLastCalledWith(null);
+    const missingReport = document.querySelector<HTMLFormElement>(
+      "#missing-cafe-report",
+    )!;
+    expect(missingReport.hidden).toBe(false);
+    expect(document.querySelector<HTMLInputElement>("#missing-cafe-name")?.value).toBe(
+      "없는카페",
+    );
+
+    missingReport.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    missingReport.dispatchEvent(
+      new SubmitEvent("submit", { bubbles: true, cancelable: true }),
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(contributionApi.reportMissingCafe).toHaveBeenCalledOnce();
+    expect(contributionApi.reportMissingCafe).toHaveBeenCalledWith("없는카페");
+    expect(document.querySelector("#missing-cafe-report-status")?.textContent).toContain(
+      "고마워요",
+    );
 
     api.search.mockRejectedValueOnce(new Error("검색 서버 점검 중"));
     input.value = "오류카페";
@@ -182,6 +223,7 @@ describe("cafe search", () => {
       "검색 서버 점검 중",
     );
     expect(document.querySelectorAll("[data-search-result-index]")).toHaveLength(0);
+    expect(missingReport.hidden).toBe(true);
     expect(onResultsChange).toHaveBeenLastCalledWith(null);
   });
 

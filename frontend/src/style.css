@@ -364,6 +364,61 @@ h1 {
 .cafe-search-results small[data-level="3"] { color: #8a4c20; background: #f8e8dc; }
 .cafe-search-results small[data-level="4"] { color: #8a3934; background: #f7e3e1; }
 
+.missing-cafe-report {
+  border-top: 1px solid var(--line);
+  padding: 0.75rem 0.8rem 0.85rem;
+}
+
+.missing-cafe-report > label {
+  display: block;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 820;
+}
+
+.missing-cafe-report > p {
+  margin: 0.2rem 0 0.55rem;
+  color: var(--ink-muted);
+  font-size: 0.66rem;
+}
+
+.missing-cafe-report > div {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.missing-cafe-report input {
+  min-width: 0;
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.missing-cafe-report button,
+.feedback-submit {
+  border: 0;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.7rem;
+  color: #fff;
+  background: var(--forest);
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.missing-cafe-report button:disabled,
+.feedback-submit:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#missing-cafe-report-status:not(:empty) { margin-bottom: 0; }
+
 .source-line {
   flex: 1 0 100%;
   margin: -0.35rem 0 0;
@@ -488,19 +543,35 @@ h1 {
 
 .crowd-feedback {
   margin-top: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  padding: 0.75rem;
 }
 
-.crowd-feedback p {
+.crowd-feedback > strong {
+  display: block;
+  margin-bottom: 0.65rem;
+  color: var(--ink);
+  font-size: 0.76rem;
+}
+
+.feedback-question + .feedback-question { margin-top: 0.65rem; }
+
+.feedback-question > p {
   margin: 0 0 0.4rem;
   color: var(--ink-muted);
   font-size: 0.7rem;
   font-weight: 750;
 }
 
-.crowd-feedback div {
+.feedback-question > div {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.4rem;
+}
+
+.seat-feedback-question > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .crowd-feedback button {
@@ -528,6 +599,53 @@ h1 {
 .crowd-feedback button[aria-pressed="true"]:disabled {
   opacity: 1;
 }
+
+.feedback-submit {
+  width: 100%;
+  margin-top: 0.7rem;
+  border-radius: 999px;
+}
+
+.feedback-status,
+.place-report p,
+#place-report-status {
+  margin: 0.45rem 0 0;
+  color: var(--ink-muted);
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.place-report {
+  margin-top: 0.7rem;
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+}
+
+.place-report summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 760;
+}
+
+.place-report > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.place-report button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.42rem 0.55rem;
+  color: #65584f;
+  background: #f7f5f2;
+  font-size: 0.65rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.place-report button:disabled { cursor: default; opacity: 0.55; }
 
 .external-map-links {
   display: grid;
