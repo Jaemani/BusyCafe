@@ -2117,6 +2117,17 @@ Production 검증:
 - `cd frontend && npm run build`: passed, gzip CSS 14.18kB, JavaScript 299.76kB. 기존 500kB
   chunk warning 유지
 
-판정: **PASS(code and automated UI contract), PENDING(device/production verification)**.
-safe-area 수치와 상태 갱신 계약은 코드와 테스트에서 확인했다. 노치가 있는 실제 iOS·Android
-기기의 세로·가로 회전, 가상 키보드와 production asset 배포는 이번 검증에서 측정하지 않았다.
+Production 확인(2026-07-16 19:54 KST):
+
+- GitHub `main` 기준 커밋 `4ff42ab`; CI run `29492382659` passed
+- Vercel deployment `dpl_CGhSThQFEYcFy9pAKVm7dmZGz9VH`가 `Ready`이고 canonical
+  `https://busy-cafe.vercel.app`이 해당 배포를 가리키는 것을 확인
+- production HTML에서 `viewport-fit=cover`, `cafe-panel-sheet-toggle`,
+  `/about.html#recent-updates`를 확인했고, 안내 페이지에서 최근 업데이트 anchor와 출구 배지·
+  safe-area 안내를 확인
+- `/api/health`: `data_mode=live`, `last_cycle_status=complete`, targets/saved/failed
+  `121/121/0`, `cafes_count=30483`. 이 값은 확인 시점의 운영 상태이며 성능·정확도 주장이 아니다.
+
+판정: **PASS(code, automated UI contract, production smoke), PENDING(real-device
+verification)**. safe-area 수치와 상태 갱신 계약, production asset 배포는 확인했다. 노치가 있는
+실제 iOS·Android 기기의 세로·가로 회전과 가상 키보드 동작은 아직 측정하지 않았다.
