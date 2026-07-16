@@ -521,6 +521,14 @@ MAX_POLLED_HOTSPOTS: Final = OFFICIAL_HOTSPOT_COUNT
 # verification item.
 SEOUL_BBOX: Final = (126.76, 37.41, 127.20, 37.72)
 
+# Offline Seoul subway overlay generation. Station rows sharing a normalized
+# name are merged only when their official coordinates are close enough to be
+# the same interchange. OSM exits without usable station text are associated
+# only when an official station lies within this conservative radius.
+SUBWAY_STATION_CLUSTER_MAX_M: Final = 350.0
+SUBWAY_EXIT_MATCH_MAX_M: Final = 700.0
+SUBWAY_COORDINATE_DECIMALS: Final = 6
+
 # Overture is fetched only by an operator-run monthly ingest. User requests
 # never touch this source: the result is materialized in PostgreSQL first.
 OVERTURE_RELEASE: Final = "2026-06-17.0"

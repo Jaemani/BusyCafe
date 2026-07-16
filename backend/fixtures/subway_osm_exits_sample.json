@@ -1,0 +1,12 @@
+{
+  "version": 0.6,
+  "osm3s": {"timestamp_osm_base": "2026-07-16T00:00:00Z"},
+  "elements": [
+    {"type": "node", "id": 10, "lat": 37.500200, "lon": 127.000200, "tags": {"railway": "subway_entrance", "description": "테스트역 1번출구", "ref": "1"}},
+    {"type": "node", "id": 20, "lat": 37.500200, "lon": 127.000200, "tags": {"railway": "subway_entrance", "description": "테스트역 1번출구", "ref": "1"}},
+    {"type": "node", "id": 30, "lat": 37.510100, "lon": 127.000100, "tags": {"railway": "subway_entrance", "description": "테스트역 2번출구", "ref": "2"}},
+    {"type": "node", "id": 35, "lat": 37.510200, "lon": 127.000200, "tags": {"railway": "subway_entrance", "ref": "3"}},
+    {"type": "node", "id": 40, "lat": 37.500300, "lon": 127.000300, "tags": {"railway": "subway_entrance", "ref": "엘리베이터"}},
+    {"type": "node", "id": 50, "lat": 35.179600, "lon": 129.075600, "tags": {"railway": "subway_entrance", "ref": "3"}}
+  ]
+}

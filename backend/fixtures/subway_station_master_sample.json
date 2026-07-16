@@ -1,0 +1,14 @@
+{
+  "subwayStationMaster": {
+    "list_total_count": 6,
+    "RESULT": {"CODE": "INFO-000", "MESSAGE": "정상 처리되었습니다"},
+    "row": [
+      {"BLDN_ID": "0100", "BLDN_NM": "테스트역", "ROUTE": "1호선", "LAT": "37.500000", "LOT": "127.000000"},
+      {"BLDN_ID": "0200", "BLDN_NM": "테스트역", "ROUTE": "2호선", "LAT": "37.500100", "LOT": "127.000100"},
+      {"BLDN_ID": "0300", "BLDN_NM": "테스트역", "ROUTE": "1호선", "LAT": "37.510000", "LOT": "127.000000"},
+      {"BLDN_ID": "0400", "BLDN_NM": "서울밖", "ROUTE": "1호선", "LAT": "35.179600", "LOT": "129.075600"},
+      {"BLDN_ID": "0500", "BLDN_NM": "좌표오류", "ROUTE": "1호선", "LAT": "bad", "LOT": "127.010000"},
+      {"BLDN_ID": "0600", "BLDN_NM": "미지원", "ROUTE": "인천1호선", "LAT": "37.520000", "LOT": "127.020000"}
+    ]
+  }
+}

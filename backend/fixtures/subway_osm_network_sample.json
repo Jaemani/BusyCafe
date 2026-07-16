@@ -1,0 +1,49 @@
+{
+  "version": 0.6,
+  "osm3s": {"timestamp_osm_base": "2026-07-16T00:00:00Z"},
+  "elements": [
+    {
+      "type": "relation",
+      "id": 1,
+      "members": [
+        {"type": "way", "ref": 10, "role": ""},
+        {"type": "way", "ref": 11, "role": ""},
+        {"type": "way", "ref": 12, "role": ""}
+      ],
+      "tags": {"type": "route", "route": "subway", "network:wikidata": "Q16950", "ref": "1"}
+    },
+    {
+      "type": "relation",
+      "id": 2,
+      "members": [{"type": "way", "ref": 10, "role": ""}],
+      "tags": {"type": "route", "route": "train", "network:wikidata": "Q16950", "ref": "unsupported"}
+    },
+    {
+      "type": "way",
+      "id": 10,
+      "geometry": [
+        {"lat": 37.500000, "lon": 127.000000},
+        {"lat": 37.501000, "lon": 127.001000},
+        {"lat": 37.502000, "lon": 127.002000}
+      ]
+    },
+    {
+      "type": "way",
+      "id": 11,
+      "geometry": [
+        {"lat": 37.502000, "lon": 127.002000},
+        {"lat": 37.501000, "lon": 127.001000},
+        {"lat": 37.500000, "lon": 127.000000}
+      ]
+    },
+    {
+      "type": "way",
+      "id": 12,
+      "geometry": [
+        {"lat": 37.500000, "lon": 127.000000},
+        {"lat": 35.179600, "lon": 129.075600},
+        {"lat": "bad", "lon": 127.003000}
+      ]
+    }
+  ]
+}
