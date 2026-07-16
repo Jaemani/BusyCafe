@@ -12,6 +12,7 @@ import { hideCafePanel, initializeCrowdFeedback } from "./panel";
 import { initializeCommuteNotice } from "./commute-notice";
 import { initializeCafePanelSheet } from "./cafe-panel-sheet";
 import { initializeAppViewport } from "./visual-viewport";
+import { initializeTopPanel } from "./top-panel";
 
 initializeAppViewport();
 
@@ -21,8 +22,25 @@ const cafePanel = document.querySelector<HTMLElement>("#cafe-panel");
 const cafePanelSheetToggle = document.querySelector<HTMLButtonElement>(
   "#cafe-panel-sheet-toggle",
 );
+const mapTopShell = document.querySelector<HTMLElement>("#map-top-shell");
+const mapHeader = document.querySelector<HTMLElement>("#map-header");
+const topPanelCollapse = document.querySelector<HTMLButtonElement>(
+  "#top-panel-collapse",
+);
+const topPanelExpand = document.querySelector<HTMLButtonElement>(
+  "#top-panel-expand",
+);
 
-if (!status || !closeButton || !cafePanel || !cafePanelSheetToggle) {
+if (
+  !status ||
+  !closeButton ||
+  !cafePanel ||
+  !cafePanelSheetToggle ||
+  !mapTopShell ||
+  !mapHeader ||
+  !topPanelCollapse ||
+  !topPanelExpand
+) {
   throw new Error("Required map UI elements were not found");
 }
 
@@ -31,6 +49,12 @@ initializeCafePanelSheet(cafePanel, cafePanelSheetToggle);
 initializeProductAnalytics();
 initializeCrowdFeedback();
 initializeCommuteNotice();
+initializeTopPanel(
+  mapTopShell,
+  mapHeader,
+  topPanelCollapse,
+  topPanelExpand,
+);
 
 document.addEventListener("click", (event) => {
   const target = event.target;

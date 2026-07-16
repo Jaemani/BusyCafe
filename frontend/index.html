@@ -26,8 +26,8 @@
       <div id="map" aria-label="서울 카페 지도"></div>
 
       <div id="viewport-ui" class="viewport-ui">
-      <div class="map-top-shell">
-        <header class="map-header">
+      <div id="map-top-shell" class="map-top-shell" data-collapsed="false">
+        <header id="map-header" class="map-header">
           <div class="brand">
             <img class="brand-mark" src="/logo.png" alt="" />
             <div>
@@ -103,7 +103,28 @@
             · <a href="/about.html">서비스·데이터 안내</a>
             · <a href="/privacy.html">개인정보</a>
           </p>
+          <button
+            id="top-panel-collapse"
+            class="top-panel-collapse"
+            type="button"
+            aria-controls="map-header"
+            aria-expanded="true"
+            aria-label="상단 검색 패널 접기"
+          >
+            <span aria-hidden="true">⌃</span>
+          </button>
         </header>
+        <button
+          id="top-panel-expand"
+          class="top-panel-expand"
+          type="button"
+          aria-controls="map-header"
+          aria-expanded="true"
+          aria-label="상단 검색 패널 펼치기"
+          hidden
+        >
+          <img class="brand-mark" src="/logo.png" alt="" />
+        </button>
         <aside id="commute-notice" class="commute-notice" role="note" hidden>
           <p>출퇴근시간에는 유동인구가 많아 정확도가 낮아질 수 있습니다.</p>
           <button id="commute-notice-close" type="button" aria-label="출퇴근시간 안내 닫기">×</button>
