@@ -26,6 +26,8 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -34,18 +36,29 @@ body {
   background: #e8ebe6;
 }
 
-#app,
-#map {
+#app {
   position: fixed;
-  inset: 0;
+  top: var(--app-viewport-offset-top, 0px);
+  left: var(--app-viewport-offset-left, 0px);
+  width: 100%;
+  width: var(--app-viewport-width, 100%);
+  height: 100%;
+  height: var(--app-viewport-height, 100dvh);
   min-width: 0;
   overflow: hidden;
 }
 
-#map { position: absolute; }
+#map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
 
 .map-top-shell {
-  position: fixed;
+  position: absolute;
   z-index: 10;
   top: max(1.1rem, env(safe-area-inset-top, 0px));
   right: max(1.1rem, env(safe-area-inset-right, 0px));
@@ -478,7 +491,7 @@ h1 {
 }
 
 .cafe-panel {
-  position: fixed;
+  position: absolute;
   z-index: 20;
   right: max(1.1rem, env(safe-area-inset-right, 0px));
   bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
@@ -490,12 +503,7 @@ h1 {
   max-width: 25rem;
   min-width: 0;
   max-height: calc(
-    100vh
-    - max(1.1rem, env(safe-area-inset-top, 0px))
-    - max(1.1rem, env(safe-area-inset-bottom, 0px))
-  );
-  max-height: calc(
-    100dvh
+    100%
     - max(1.1rem, env(safe-area-inset-top, 0px))
     - max(1.1rem, env(safe-area-inset-bottom, 0px))
   );
@@ -780,7 +788,7 @@ h1 {
 .external-map-links a:focus-visible { background: #e8eee9; }
 
 .legend {
-  position: fixed;
+  position: absolute;
   z-index: 10;
   bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
   left: max(1.1rem, env(safe-area-inset-left, 0px));
@@ -818,9 +826,7 @@ h1 {
 
 /* Required map attribution stays accessible, but does not compete with map UI. */
 .maplibregl-ctrl-attrib.maplibregl-compact {
-  position: fixed;
-  right: 0;
-  bottom: 0;
+  position: relative;
   margin: 0 !important;
   border-radius: 0.65rem 0 0 0;
   box-shadow: 0 0 0.7rem rgb(25 40 31 / 12%);
@@ -867,8 +873,8 @@ h1 {
       max(1.2rem, env(safe-area-inset-left, 0px));
     max-height: min(54vh, 28rem);
     max-height: min(
-      54dvh,
-      calc(100dvh - max(0.7rem, env(safe-area-inset-top, 0px))),
+      54%,
+      calc(100% - max(0.7rem, env(safe-area-inset-top, 0px))),
       28rem
     );
     transition: max-height 180ms ease-out;
@@ -876,8 +882,8 @@ h1 {
   .cafe-panel[data-sheet-state="expanded"] {
     max-height: 90vh;
     max-height: min(
-      90dvh,
-      calc(100dvh - max(0.7rem, env(safe-area-inset-top, 0px)))
+      90%,
+      calc(100% - max(0.7rem, env(safe-area-inset-top, 0px)))
     );
   }
   .cafe-panel-sheet-toggle {
@@ -915,8 +921,7 @@ h1 {
     bottom: max(3.8rem, calc(env(safe-area-inset-bottom, 0px) + 3.1rem));
   }
   .maplibregl-ctrl-attrib.maplibregl-compact {
-    right: env(safe-area-inset-right, 0px);
-    bottom: env(safe-area-inset-bottom, 0px);
+    margin: 0 !important;
   }
   .panel-open .maplibregl-ctrl-bottom-right { display: none; }
 }

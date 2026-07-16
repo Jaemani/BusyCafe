@@ -10,10 +10,28 @@ describe("responsive map layout", () => {
     expect(styles).not.toContain("min-width: 20rem");
     expect(styles).not.toContain("100vw");
     expect(styles).toMatch(/body\s*{[\s\S]*?min-width:\s*0;/);
+    expect(styles).toMatch(/-webkit-text-size-adjust:\s*100%;/);
+    expect(styles).toMatch(/text-size-adjust:\s*100%;/);
   });
 
-  it("bounds the base cafe panel in short landscape viewports", () => {
-    expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?max-height:\s*calc\([\s\S]*?100dvh/);
+  it("binds the app to VisualViewport dimensions with safe fallbacks", () => {
+    expect(styles).toMatch(
+      /#app\s*{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*var\(--app-viewport-offset-top, 0px\);[\s\S]*?left:\s*var\(--app-viewport-offset-left, 0px\);/,
+    );
+    expect(styles).toMatch(/width:\s*var\(--app-viewport-width, 100%\);/);
+    expect(styles).toMatch(/height:\s*var\(--app-viewport-height, 100dvh\);/);
+  });
+
+  it("keeps the map and overlays in the app coordinate system", () => {
+    expect(styles).toMatch(/#map\s*{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/);
+    expect(styles).toMatch(/\.map-top-shell\s*{[\s\S]*?position:\s*absolute;/);
+    expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?position:\s*absolute;/);
+    expect(styles).toMatch(/\.legend\s*{[\s\S]*?position:\s*absolute;/);
+    expect(styles).not.toMatch(/\.maplibregl-ctrl-attrib\.maplibregl-compact\s*{[\s\S]*?position:\s*fixed;/);
+  });
+
+  it("bounds the base cafe panel to its app container in short landscapes", () => {
+    expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?max-height:\s*calc\([\s\S]*?100%/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?overflow-x:\s*hidden;/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?overflow-y:\s*auto;/);
   });
@@ -30,6 +48,15 @@ describe("responsive map layout", () => {
     );
     expect(styles).toMatch(
       /padding:[\s\S]*?max\(1\.2rem, env\(safe-area-inset-right, 0px\)\)[\s\S]*?max\(1\.4rem, env\(safe-area-inset-bottom, 0px\)\)[\s\S]*?max\(1\.2rem, env\(safe-area-inset-left, 0px\)\)/,
+    );
+  });
+
+  it("sizes compact and expanded sheets from the live app height", () => {
+    expect(styles).toMatch(
+      /@media \(max-width: 40rem\)[\s\S]*?\.cafe-panel\s*{[\s\S]*?max-height:\s*min\([\s\S]*?54%/,
+    );
+    expect(styles).toMatch(
+      /\.cafe-panel\[data-sheet-state="expanded"\]\s*{[\s\S]*?max-height:\s*min\([\s\S]*?90%/,
     );
   });
 });
