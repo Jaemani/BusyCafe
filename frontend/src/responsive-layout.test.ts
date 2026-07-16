@@ -30,6 +30,15 @@ describe("responsive map layout", () => {
     expect(styles).not.toMatch(/\.maplibregl-ctrl-attrib\.maplibregl-compact\s*{[\s\S]*?position:\s*fixed;/);
   });
 
+  it("prevents grid min-content from widening the top shell", () => {
+    expect(styles).toMatch(
+      /\.map-top-shell\s*{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
+    );
+    expect(styles).toMatch(
+      /\.map-header\s*{[\s\S]*?max-width:\s*100%;[\s\S]*?min-width:\s*0;/,
+    );
+  });
+
   it("bounds the base cafe panel to its app container in short landscapes", () => {
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?max-height:\s*calc\([\s\S]*?100%/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?overflow-x:\s*hidden;/);
