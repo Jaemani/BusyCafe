@@ -23,4 +23,13 @@ describe("responsive map layout", () => {
       /@media \(max-width: 40rem\)[\s\S]*?\.cafe-panel\s*{[\s\S]*?left:\s*0;[\s\S]*?width:\s*auto;[\s\S]*?max-width:\s*none;/,
     );
   });
+
+  it("uses the larger of base spacing and each safe-area inset", () => {
+    expect(styles).toMatch(
+      /\.map-top-shell\s*{[\s\S]*?top:\s*max\(1\.1rem, env\(safe-area-inset-top, 0px\)\);[\s\S]*?right:\s*max\(1\.1rem, env\(safe-area-inset-right, 0px\)\);[\s\S]*?left:\s*max\(1\.1rem, env\(safe-area-inset-left, 0px\)\);/,
+    );
+    expect(styles).toMatch(
+      /padding:[\s\S]*?max\(1\.2rem, env\(safe-area-inset-right, 0px\)\)[\s\S]*?max\(1\.4rem, env\(safe-area-inset-bottom, 0px\)\)[\s\S]*?max\(1\.2rem, env\(safe-area-inset-left, 0px\)\)/,
+    );
+  });
 });

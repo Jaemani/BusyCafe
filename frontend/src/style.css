@@ -47,9 +47,9 @@ body {
 .map-top-shell {
   position: fixed;
   z-index: 10;
-  top: max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem));
-  right: max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem));
-  left: max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem));
+  top: max(1.1rem, env(safe-area-inset-top, 0px));
+  right: max(1.1rem, env(safe-area-inset-right, 0px));
+  left: max(1.1rem, env(safe-area-inset-left, 0px));
   display: grid;
   width: auto;
   max-width: 38rem;
@@ -480,24 +480,24 @@ h1 {
 .cafe-panel {
   position: fixed;
   z-index: 20;
-  right: max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem));
-  bottom: max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem));
+  right: max(1.1rem, env(safe-area-inset-right, 0px));
+  bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
   width: calc(
     100%
-    - max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem))
-    - max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem))
+    - max(1.1rem, env(safe-area-inset-left, 0px))
+    - max(1.1rem, env(safe-area-inset-right, 0px))
   );
   max-width: 25rem;
   min-width: 0;
   max-height: calc(
     100vh
-    - max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem))
-    - max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem))
+    - max(1.1rem, env(safe-area-inset-top, 0px))
+    - max(1.1rem, env(safe-area-inset-bottom, 0px))
   );
   max-height: calc(
     100dvh
-    - max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem))
-    - max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem))
+    - max(1.1rem, env(safe-area-inset-top, 0px))
+    - max(1.1rem, env(safe-area-inset-bottom, 0px))
   );
   overflow-x: hidden;
   overflow-y: auto;
@@ -521,7 +521,7 @@ h1 {
 .panel-close {
   position: absolute;
   top: 0.85rem;
-  right: max(0.85rem, calc(env(safe-area-inset-right, 0px) + 0.45rem));
+  right: max(0.85rem, env(safe-area-inset-right, 0px));
   width: 2.75rem;
   height: 2.75rem;
   border: 0;
@@ -782,8 +782,8 @@ h1 {
 .legend {
   position: fixed;
   z-index: 10;
-  bottom: max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem));
-  left: max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem));
+  bottom: max(1.1rem, env(safe-area-inset-bottom, 0px));
+  left: max(1.1rem, env(safe-area-inset-left, 0px));
   display: flex;
   flex-wrap: wrap;
   gap: 0.7rem;
@@ -828,9 +828,9 @@ h1 {
 
 @media (max-width: 40rem) {
   .map-top-shell {
-    top: max(0.7rem, calc(env(safe-area-inset-top, 0px) + 0.55rem));
-    right: max(0.7rem, calc(env(safe-area-inset-right, 0px) + 0.55rem));
-    left: max(0.7rem, calc(env(safe-area-inset-left, 0px) + 0.55rem));
+    top: max(0.7rem, env(safe-area-inset-top, 0px));
+    right: max(0.7rem, env(safe-area-inset-right, 0px));
+    left: max(0.7rem, env(safe-area-inset-left, 0px));
     width: auto;
     gap: 0.45rem;
   }
@@ -843,9 +843,9 @@ h1 {
   .cafe-search-results { max-height: min(19rem, 44vh); }
   .commute-notice { width: calc(100% - 0.5rem); }
   .legend {
-    right: max(0.7rem, calc(env(safe-area-inset-right, 0px) + 0.55rem));
-    bottom: max(0.7rem, calc(env(safe-area-inset-bottom, 0px) + 0.55rem));
-    left: max(0.7rem, calc(env(safe-area-inset-left, 0px) + 0.55rem));
+    right: max(0.7rem, env(safe-area-inset-right, 0px));
+    bottom: max(0.7rem, env(safe-area-inset-bottom, 0px));
+    left: max(0.7rem, env(safe-area-inset-left, 0px));
     justify-content: center;
     border-radius: 1rem;
   }
@@ -862,13 +862,13 @@ h1 {
     border-radius: 1.5rem 1.5rem 0 0;
     padding:
       2.2rem
-      max(1.2rem, calc(env(safe-area-inset-right, 0px) + 0.7rem))
-      max(1.4rem, calc(env(safe-area-inset-bottom, 0px) + 0.7rem))
-      max(1.2rem, calc(env(safe-area-inset-left, 0px) + 0.7rem));
+      max(1.2rem, env(safe-area-inset-right, 0px))
+      max(1.4rem, env(safe-area-inset-bottom, 0px))
+      max(1.2rem, env(safe-area-inset-left, 0px));
     max-height: min(54vh, 28rem);
     max-height: min(
       54dvh,
-      calc(100dvh - env(safe-area-inset-top, 0px) - 0.7rem),
+      calc(100dvh - max(0.7rem, env(safe-area-inset-top, 0px))),
       28rem
     );
     transition: max-height 180ms ease-out;
@@ -877,7 +877,7 @@ h1 {
     max-height: 90vh;
     max-height: min(
       90dvh,
-      calc(100dvh - env(safe-area-inset-top, 0px) - 0.7rem)
+      calc(100dvh - max(0.7rem, env(safe-area-inset-top, 0px)))
     );
   }
   .cafe-panel-sheet-toggle {
