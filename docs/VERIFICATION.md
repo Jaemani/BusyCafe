@@ -2258,12 +2258,21 @@ Galaxy)**. 일반 Safari 탭에서 관측한 browser chrome 동작과 제품의 
 검증:
 
 - `cd frontend && npm test -- --run src/responsive-layout.test.ts`: 1 file, 15 tests passed
+- `cd frontend && npm test`: 9 files, 50 tests passed
 - `cd frontend && npm run typecheck`: passed
 - `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
 - iPhone 12 Simulator screenshots: `/tmp/iphone12-busycafe-edge-final.png`,
   `/tmp/iphone12-busycafe-panel-compact.png`. 두 번째 화면은 placeholder 상세을 강제로 열어
   compact panel의 좌우·하단 경계가 현재 viewport 안에 있음을 확인한 임시 로컬 증거다.
   저장소 artifact나 물리 기기 증거로 취급하지 않는다.
+- GitHub `main` 기준 구현 커밋 `526ea56`.
+- Vercel deployment `dpl_52hBwF4Kqspz785cVHCyiL93sncN`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 명시적으로 연결했다. canonical HTML에서 `viewport-ui`,
+  `theme-color=#f2f3f0`, 두 web-app-capable metadata와 `black-translucent`를 확인했고,
+  manifest의 background/theme도 같은 색임을 확인했다.
+- canonical production을 iPhone 12 Simulator에서 다시 열어 지도·상단 shell·범례·왼쪽
+  최하단의 접힌 attribution·오른쪽 control이 현재 화면 안에 있음을 확인했다. screenshot은
+  `/tmp/iphone12-busycafe-production-526ea56.png`이며 임시 로컬 증거다.
 
-판정: **PASS(local iPhone 12 Simulator geometry and visual continuity),
-PENDING(production deployment, physical iPhone standalone and Galaxy)**.
+판정: **PASS(iPhone 12 Simulator geometry, visual continuity and production asset),
+PENDING(physical iPhone standalone and Galaxy)**.
