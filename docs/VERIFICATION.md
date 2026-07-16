@@ -2176,6 +2176,9 @@ production deployment)**. `bc9054e`, `5c572b8`, `aca0ff3`, `2efcaa7`의 selector
 - `grid-template-columns:minmax(0, 1fr)`와 header의 `min-width:0; max-width:100%` 적용 뒤
   동일 Safari에서 shell/header 380px, 검색 영역 352px가 됐고 검색 버튼·서비스 안내·
   개인정보 링크가 402px viewport 안에 들어왔다.
+- production cache-bust 재검증에서 `#app`, `#map`, MapLibre canvas는 모두 `402×714`,
+  canvas backing buffer는 DPR 3에 맞는 `1206×2142`였다. 문서의 `scrollWidth`와
+  `clientWidth`도 모두 402px였고 Safari를 종료한 뒤 다시 열어도 같은 경계를 유지했다.
 - 앱 container는 VisualViewport의 width·height·offset을 CSS 변수로 받고, resize·scroll·
   orientationchange·pageshow·visibilitychange를 한 animation frame으로 합친다. 변화 뒤
   MapLibre `resize()`를 호출하되 기존 카페 패널을 닫거나 bbox를 불필요하게 다시 읽지 않는다.
@@ -2190,5 +2193,7 @@ production deployment)**. `bc9054e`, `5c572b8`, `aca0ff3`, `2efcaa7`의 selector
   `grid-template-columns:minmax(0,1fr)`을 확인했다.
 
 판정: **PASS(iOS Simulator portrait geometry and production asset), PENDING(physical
-iPhone/Galaxy, landscape and keyboard verification)**. 시뮬레이터 관측을 물리 기기 전체의
-성공으로 확대하지 않는다.
+iPhone/Galaxy, real selected-cafe panel, landscape and keyboard verification)**. 강제로 연
+빈 패널은 안정 상태에서 402px 폭과 54% compact 높이 제한을 지켰지만, 검증 경유 API가
+카페 상세을 반환하지 않아 실제 데이터가 든 패널은 자동 계측하지 못했다. 시뮬레이터
+관측을 물리 기기 전체의 성공으로 확대하지 않는다.
