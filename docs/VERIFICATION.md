@@ -2276,3 +2276,40 @@ Galaxy)**. 일반 Safari 탭에서 관측한 browser chrome 동작과 제품의 
 
 판정: **PASS(iPhone 12 Simulator geometry, visual continuity and production asset),
 PENDING(physical iPhone standalone and Galaxy)**.
+
+### iPhone 상단 카드·하단 control 배치와 page scale 실험
+
+2026-07-17에 iPhone 12 Simulator, iOS 26.5 Safari에서 상단 카드 접기와 모바일 하단
+배치를 확인하고, 사용자 제안에 따라 page scale과 지도 overscan을 분리해 실험했다.
+
+- 상단 카드 우하단 접기 버튼을 누르면 header와 출퇴근 안내를 숨기고 왼쪽 화면 edge에
+  로고 버튼만 남긴다. 로고를 누르면 다시 펼쳐지며 상태는 local storage에 보존한다.
+  storage 접근이 차단된 경우에도 현재 탭의 접기·펼치기 동작은 유지한다.
+- 모바일 혼잡도 범례 bottom을 `2.5rem`에서 `1.8rem`으로 내려 아래 빈 공간을 줄였다.
+  MapLibre 오른쪽 control bottom은 `3.8rem`에서 `6.5rem`으로 올려 `+`와 `-`가 모두
+  범례 위에 보이게 했다. Safari `VisualViewport` offset과 홈 화면 safe-area 계산은
+  유지한다.
+- `initial-scale=1`의 inner/visual viewport는 `390×699`, scale 1이었다.
+  `initial-scale=1.05`는 `371×666`, scale 1.05가 됐고 UI도 물리 화면에서 약 5% 커졌지만
+  browser chrome에 새 canvas 영역을 만들지 않았다.
+- 지도 element에 40px overscan을 주면 rect는 `0,0,390,699`에서
+  `-40,-40,430,739`로 늘었지만 browser chrome 영역에는 계속 root 배경만 표시됐다.
+  canvas 면적과 bbox를 불필요하게 늘리는 대신 현재 full-bleed 지도와 root tint를 유지한다.
+- 강제 page scale 뒤 UI 역스케일은 접근성 확대를 무력화하고 좌표계를 복잡하게 만드는 데
+  비해 화면 사용 영역을 늘리지 않아 제품 코드에 넣지 않았다. 사용자의 수동 pinch zoom은
+  제한하지 않는다.
+
+검증:
+
+- `cd frontend && npm test`: 10 files, 54 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- iPhone 12 Simulator screenshots: `/tmp/iphone12-current-ui-expanded.png`,
+  `/tmp/iphone12-current-ui-collapsed.png`. 펼친 화면에서 `+/-` 전체와 낮아진 범례를,
+  접힌 화면에서 왼쪽 edge의 로고만 남는 것을 확인했다. 임시 로컬 증거이며 물리 기기
+  증거로 취급하지 않는다.
+- page scale 비교 screenshots: `/tmp/iphone12-scale100-over0.png`,
+  `/tmp/iphone12-scale105-over0.png`, `/tmp/iphone12-scale100-over40.png`.
+
+판정: **PASS(local iPhone 12 Simulator layout and scale experiment),
+PENDING(production deployment and physical devices)**.

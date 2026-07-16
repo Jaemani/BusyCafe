@@ -54,6 +54,22 @@ describe("responsive map layout", () => {
     );
   });
 
+  it("collapses the top panel to a logo attached to the left edge", () => {
+    const expandButton = indexHtml.match(
+      /<button[^>]*id="top-panel-expand"[\s\S]*?<\/button>/,
+    )?.[0];
+
+    expect(indexHtml).toContain('id="top-panel-collapse"');
+    expect(expandButton).toContain('src="/logo.png"');
+    expect(expandButton).not.toContain("BUSY CAFE");
+    expect(styles).toMatch(
+      /\.map-top-shell\[data-collapsed="true"\]\s*{[\s\S]*?right:\s*auto;[\s\S]*?left:\s*0;/,
+    );
+    expect(styles).toMatch(
+      /\.map-top-shell\[data-collapsed="true"\] \.top-panel-expand\s*{[\s\S]*?display:\s*grid;/,
+    );
+  });
+
   it("bounds the base cafe panel to its app container in short landscapes", () => {
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?max-height:\s*calc\([\s\S]*?100%/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?overflow-x:\s*hidden;/);
@@ -128,9 +144,12 @@ describe("responsive map layout", () => {
     );
   });
 
-  it("keeps mobile controls above the live viewport bottom", () => {
+  it("keeps mobile controls above the lowered legend", () => {
     expect(styles).toMatch(
-      /@media \(max-width: 40rem\)[\s\S]*?\.maplibregl-ctrl-bottom-right\s*{[\s\S]*?var\(--app-viewport-height, 100%\)[\s\S]*?max\(3\.8rem/,
+      /@media \(max-width: 40rem\)[\s\S]*?\.legend\s*{[\s\S]*?bottom:\s*max\(1\.8rem,[\s\S]*?safe-area-inset-bottom[\s\S]*?1\.6rem/,
+    );
+    expect(styles).toMatch(
+      /@media \(max-width: 40rem\)[\s\S]*?\.maplibregl-ctrl-bottom-right\s*{[\s\S]*?var\(--app-viewport-height, 100%\)[\s\S]*?max\(6\.5rem/,
     );
   });
 

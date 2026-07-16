@@ -85,6 +85,7 @@ body {
 }
 
 .map-header {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   width: 100%;
@@ -495,6 +496,7 @@ h1 {
 .source-line {
   flex: 1 0 100%;
   margin: -0.35rem 0 0;
+  padding-right: 2rem;
   color: #748078;
   font-size: 0.625rem;
   line-height: 1.35;
@@ -505,6 +507,69 @@ h1 {
   text-decoration-color: rgb(116 128 120 / 45%);
   text-underline-offset: 0.12em;
 }
+
+.top-panel-collapse {
+  position: absolute;
+  right: 0.42rem;
+  bottom: 0.32rem;
+  display: grid;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border: 1px solid rgb(37 77 62 / 12%);
+  border-radius: 999px;
+  padding: 0;
+  color: #607169;
+  background: rgb(238 242 238 / 92%);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 850;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.top-panel-collapse:hover,
+.top-panel-collapse:focus-visible { color: #fff; background: var(--forest); }
+
+.top-panel-expand { display: none; }
+
+.map-top-shell[data-collapsed="true"] {
+  right: auto;
+  left: 0;
+  width: auto;
+  max-width: none;
+}
+
+.map-top-shell[data-collapsed="true"] .map-header,
+.map-top-shell[data-collapsed="true"] .commute-notice { display: none; }
+
+.map-top-shell[data-collapsed="true"] .top-panel-expand {
+  display: grid;
+  min-width: calc(3.35rem + env(safe-area-inset-left, 0px));
+  height: 3.35rem;
+  place-items: center end;
+  border: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0 1rem 1rem 0;
+  padding:
+    0.35rem
+    0.42rem
+    0.35rem
+    max(0.35rem, env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  box-shadow: 0 0.8rem 2.2rem rgb(21 41 32 / 14%);
+  cursor: pointer;
+  backdrop-filter: blur(1.1rem) saturate(0.8);
+}
+
+.top-panel-expand img {
+  width: 2.55rem;
+  height: 2.55rem;
+  border-radius: 0.8rem;
+  object-fit: cover;
+}
+
+.top-panel-expand:focus-visible { outline: 3px solid rgb(37 77 62 / 35%); outline-offset: 2px; }
 
 .cafe-panel {
   position: absolute;
@@ -899,7 +964,7 @@ h1 {
   .commute-notice { width: calc(100% - 0.5rem); }
   .legend {
     right: max(0.7rem, env(safe-area-inset-right, 0px));
-    bottom: max(2.5rem, calc(env(safe-area-inset-bottom, 0px) + 2rem));
+    bottom: max(1.8rem, calc(env(safe-area-inset-bottom, 0px) + 1.6rem));
     left: max(0.7rem, env(safe-area-inset-left, 0px));
     justify-content: center;
     border-radius: 1rem;
@@ -972,7 +1037,7 @@ h1 {
     );
     bottom: calc(
       max(0px, 100% - var(--app-viewport-offset-top, 0px) - var(--app-viewport-height, 100%))
-      + max(3.8rem, calc(env(safe-area-inset-bottom, 0px) + 3.1rem))
+      + max(6.5rem, calc(env(safe-area-inset-bottom, 0px) + 6rem))
     );
   }
   .maplibregl-ctrl-attrib.maplibregl-compact {

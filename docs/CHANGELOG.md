@@ -202,6 +202,12 @@
 
 ### Fixed
 
+- 상단 검색 카드를 우하단 버튼으로 접을 수 있게 했다. 접힌 상태에서는 왼쪽 화면 edge에
+  로고만 남고 로고를 누르면 다시 펼쳐진다. 선택은 local storage에 보존하되 storage가
+  차단된 환경에서도 UI 동작은 유지한다
+- iPhone 좁은 화면에서 혼잡도 범례 아래 여백을 줄여 하단으로 내리고, 오른쪽 지도 control은
+  범례 높이 위로 올려 `-` 축소 버튼까지 가려지지 않게 했다. 홈 화면 safe-area와 Safari
+  `VisualViewport` bottom offset은 계속 반영한다
 - 지도 canvas를 large viewport 전체에 유지하고 상단 shell·상세 패널·범례만 현재
   `VisualViewport`를 따르도록 좌표계를 분리했다. Safari chrome이 변해도 지도를 다시
   잘라내지 않으며 control은 현재 보이는 화면의 오른쪽·아래 경계를 따른다. iPhone 일반
