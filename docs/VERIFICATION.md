@@ -2026,3 +2026,39 @@ stale 경계는 변경하지 않았다.
 지속성을 본 것이므로 일반적인 요일·야간·계절 성능이나 실제 거리·카페 정확도로 확대하지
 않는다. 최소 4주 연속 이력의 시간대·평일/주말·급증 구간 분해와 Phase 6 독립 관측 전에는
 공개 모델 또는 지연 경계를 승격하지 않는다.
+
+## 2026-07-16 — 서울 지하철 지도 맥락 정적 자산
+
+역 중심점은 서울 열린데이터광장 OA-21232 `subwayStationMaster`의 실응답 784행을 사용했다.
+서울 bbox 안의 운영 노선 별칭을 정규화하고, 같은 이름·350m 이내 역사만 환승역으로 병합해
+380개 역 점을 만들었다. 전체 출구 좌표와 노선 형상을 함께 제공하는 최신 서울시 공식
+데이터는 확인하지 못했다. OA-21699는 16,786개 일반 시설 보행자 출입구이며 지하철 출구를
+신뢰성 있게 식별할 수 없어 사용하지 않았다. 노선과 출구는 2026-07-16 OpenStreetMap
+Overpass 원본을 고정해 생성했다.
+
+- 노선: 1~9호선, 신분당, 공항철도, 경의·중앙, 경춘, 수인·분당, 우이신설, 신림, 서해,
+  김포 골드라인, GTX-A의 19개 Feature. 원본에 없는 노선을 조용히 누락하지 않도록
+  `missing_line_ids=[]`을 자산 metadata에 고정했다.
+- 출구: 원본 2,138개 중 출구 번호가 없는 12개만 제외해 2,126개를 게시했다. 서울시 역명과
+  원본 이름이 일치한 1,666개만 official station에 연결했다. 나머지 460개는 위치와 번호를
+  보존하되 `association=unlinked`로 두어 최근접 역명을 추정하지 않았다.
+- 표시: 노선은 zoom 9, 역 점은 11.5, 역명은 13, 출구 점은 15.5, 출구 번호는 16.5부터
+  보인다. 라벨 충돌을 허용하지 않고 모든 지하철 layer를 카페 marker 아래에 둔다.
+- 전송: 원본 JSON 938,066 bytes, 개별 gzip 합계 약 157KB다. `/data/*`는 브라우저 1시간,
+  CDN 7일과 stale-while-revalidate 1일 정책으로 캐시한다. 파일별 로딩 실패는 해당 layer만
+  생략하고 카페 지도는 유지한다.
+- SHA-256: lines `4c51dbaf03879f01ef7cb9554bcad3aa96b1d3e2fec464137a2608e003d6a375`,
+  stations `856f2309dfeea62359cd8585cdacf208f519639e9b9e37ed7f8a90c2be4f2e8d`,
+  exits `7dc5336956bad5faf323bb09c0e54daedd96440e7348dbcf6575746b9806c0e4`.
+
+검증:
+
+- `cd backend && uv run pytest -q tests/test_build_subway_assets.py`: 7 passed
+- `cd frontend && npm test`: 6 files, 26 tests PASS. 지하철 optional loading·layer order·zoom·오류 격리 포함
+- `cd frontend && npm run typecheck`: PASS
+- `cd frontend && npm run build`: PASS
+
+판정: **PASS(static overlay), VERIFY(460 unlinked exits)**. 역 점은 서울시 공식 좌표고 노선·출구
+위치는 OSM ODbL 파생물이다. `unlinked` 출구를 임의의 역에 귀속하지 않으며, 표본 수동 대조
+전에는 전체 출구 완전성이나 역 연결 정확도를 주장하지 않는다. 지하철 맥락은 탐색 편의
+기능이며 혼잡도 점수 입력에는 사용하지 않는다.
