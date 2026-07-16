@@ -1983,3 +1983,46 @@ control for broad promotion)**. PostgreSQL global cap은 DB 증가와 poisoning 
 connection-level DDoS 방어는 아니다. 광범위한 홍보 전 [HUMAN] edge/shared 방어와 429 뒤 GET
 무회귀 smoke가 필요하며, 그 전에도 `USER_CONTRIBUTIONS_ENABLED=false`로 쓰기 경로를 즉시
 닫을 수 있다.
+
+## 2026-07-16 — 서울 source 고정 horizon persistence shadow
+
+기준 구현은 `d3d8df2`다. 이 실험은 저장된 서울 source 관측이 일정 시간이 지난 뒤 같은
+source의 후속 관측을 얼마나 재현하는지 측정한다. 카페 내부 상태, 실제 거리 보행량 또는
+독립 정답 데이터에 대한 정확도 평가가 아니다. 공개 `v1-idw-point`, API 응답, freshness와
+stale 경계는 변경하지 않았다.
+
+입력과 방법:
+
+- artifact: `backend/data/preview.db`, SHA-256
+  `bdce186700bfde078ac26bc0b0a83a6abe4d30cecbf1ca99b6ccc5ccc26cd8eb`
+- 표본: 2,847 snapshots, 121 hotspots, `2026-07-11 09:25`~`15:55 UTC`, 명목상 6.5시간
+- 수집 공백: `12:30`~`15:10 UTC` 사이 160분. `t+h`의 ±2.5분 안에 실제 관측이 없으면
+  결측으로 처리해 이 공백을 건너뛰지 않았다.
+- 인구는 `AREA_PPLTN_MIN/MAX` 중간값을 사용했다. 서로 규모가 다른 장소의 원시 인구를
+  순위 비교하지 않고, 각 hotspot 안에서 시간에 따른 origin과 actual의 Spearman만 계산했다.
+  source가 장소별 기준으로 정규화한 4단계 레벨은 동일 target slot의 장소 간 순위 보존을
+  별도 보조 지표로 계산했다.
+
+| horizon | 대응 표본 | 레벨 완전 일치 | 한 단계 이내 | 인구 WAPE | 레벨 순위 rho 중앙값 | 장소내 인구 rho 중앙값 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10분 | 2,420 | 91.94% | 100.00% | 2.35% | 0.953 | 0.931 (118곳) |
+| 30분 | 1,936 | 84.56% | 99.90% | 5.65% | 0.923 | 0.798 (118곳) |
+| 60분 | 1,452 | 71.63% | 98.14% | 10.97% | 0.849 | 0.675 (100곳) |
+| 90분 | 1,089 | 61.80% | 94.77% | 16.35% | 0.777 | 0.630 (88곳) |
+| 120분 | 726 | 54.96% | 91.18% | 22.57% | 0.709 | 0.632 (69곳) |
+
+검증:
+
+- `cd backend && uv run pytest -q`: passed, 2 skipped
+- `cd backend && uvx ruff check ...`: passed
+- `cd backend && uvx ruff format --check ...`: passed
+- `cd backend && uv run --with mypy mypy ...`: passed
+- `python -m compileall -q backend/app backend/scripts`: passed
+
+판정: **PASS(결정적 offline 진단), FAIL(120분을 현재 레벨로 간주), PENDING(독립 정확도)**.
+같은 source의 120분 전 레벨은 한 단계 이내 비율은 높지만 완전 일치가 54.96%에 불과하고
+인구 WAPE도 22.57%로 커졌다. 따라서 2시간 이내 stale 값을 현재 혼잡도로 확정하거나 높은
+신뢰도로 노출할 근거가 없다. 다만 이 표본은 하루 중 6.5시간뿐이고 같은 source의 자기
+지속성을 본 것이므로 일반적인 요일·야간·계절 성능이나 실제 거리·카페 정확도로 확대하지
+않는다. 최소 4주 연속 이력의 시간대·평일/주말·급증 구간 분해와 Phase 6 독립 관측 전에는
+공개 모델 또는 지연 경계를 승격하지 않는다.

@@ -39,7 +39,9 @@
 - A2: `v2-polygon-shadow` 순수 scorer와 공식 geometry loader 구현 완료. 공개 v1, DB와 API는
   변경하지 않았다. 구조 비교는 `docs/SHADOW_REPORT.md`에 기록했다.
 - A3: 7일 탐색 gate와 최소 4주 비교 gate를 분리한다. 공개 승격 후보는 권장
-  8~12주 연속 snapshot과 Phase 6 관측 전에는 만들지 않는다.
+  8~12주 연속 snapshot과 Phase 6 관측 전에는 만들지 않는다. 같은 source의 고정 horizon
+  persistence shadow는 구현했으며, 현재 6.5시간 표본에서 120분 후 레벨 완전 일치는
+  54.96%였다. 이는 지연 허용 정책의 위험 진단일 뿐 실제 카페·거리 정확도가 아니다.
 - A4: 공간 적합성, contributor별 신선도, level·시각 합의도, cycle 건강도와 검증 표본
   충분도를 분리한 Confidence V2 shadow 구현 완료. `calibrated_probability=None`이다.
 - A5: Phase 6 정답 데이터와 최소 2주 shadow 비교가 없어 대기다.
@@ -92,6 +94,10 @@
 5. Phase 6 관측은 관측 시작·종료시각과 관측자 기기 시각을 기록해 5분 bin에 정렬한다.
    서울시 snapshot과의 offset·분산을 별도로 추정하고, ±시간 허용폭을 결과를 본 뒤
    넓히지 않는다. 지역 보행 관측과 매장 좌석 관측은 계속 다른 정답 라벨로 유지한다.
+6. 고정 horizon persistence shadow는 장소별 `t` 관측과 `t+h` 관측을 직접 대응해
+   10·30·60·90·120분의 열화를 측정한다. 장소 규모가 다른 원시 인구를 횡단 비교하지 않고,
+   인구 순위 상관은 같은 장소의 시간축 안에서만 계산한다. source가 이미 정규화한 4단계
+   레벨만 동일 target slot의 장소 간 순위 보존을 보조 지표로 계산한다.
 
 **Gate C:** 연속 7일은 파이프라인·상관 방향을 확인하는 탐색 gate일 뿐 승격 근거가 아니다.
 최소 4주 연속 snapshot과 결측률 보고서가 있어야 feature 비교를 시작하며, 공개 승격 후보는
