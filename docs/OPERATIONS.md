@@ -261,12 +261,18 @@ PostgreSQL에만 기록하며, bundled SQLite snapshot과 `CAFE_CROWD_SNAPSHOT=1
 score materialize 입력으로 연결하지 않는다. 애플리케이션 DB에는 IP, user-agent, 계정,
 정확한 사용자 좌표와 검색어를 추가하지 않는다.
 
-광범위한 홍보 전에는 [HUMAN] Vercel Firewall/WAF에서 POST endpoint의 IP별 rate limit과
-global spike rule을 실제 설정하고 429 응답 뒤 GET 지도 API가 정상인지 확인한다. serverless
-instance의 메모리 limiter는 인스턴스 사이에서 공유되지 않으므로 대체 수단이 아니다. 해당
-플랜에서 shared rate limit을 제공하지 않으면 Turnstile 또는 외부 shared limiter를 붙일
-때까지 `USER_CONTRIBUTIONS_ENABLED=false`를 유지한다. 2KB body 제한과 UI 중복 클릭 차단은
-보조 방어일 뿐 rate limit을 대신하지 않는다.
+현재 Vercel 플랜은 custom Firewall을 제공하지 않는다. 서버는 PostgreSQL의
+`user_contribution_rate_limits` 두 aggregate row로 feedback 분당 120건, 장소 신고 분당
+30건의 global cap을 원자적으로 적용한다. row에는 kind, minute epoch와 count만 있고 IP,
+사용자 token이나 위치는 없다. 과거 minute 요청이 새 bucket을 되돌릴 수 없으며 초과 응답은
+429 `no-store`다. 이 cap은 DB row 증가와 대량 data poisoning을 제한하지만 serverless
+connection 폭주나 분산 공격 자체를 edge에서 차단하지는 않는다.
+
+광범위한 홍보 전에는 [HUMAN] custom Firewall이 가능한 plan, Turnstile 또는 외부 shared
+limiter를 검토하고 429 응답 뒤 GET 지도 API가 정상인지 확인한다. serverless instance의
+메모리 limiter는 인스턴스 사이에서 공유되지 않으므로 대체 수단이 아니다. 현재 global cap,
+2KB body 제한과 UI 중복 클릭 차단을 유지하고, 비정상 429·DB connection·function invocation
+증가 시 `USER_CONTRIBUTIONS_ENABLED=false`로 즉시 닫는다.
 
 원시 제출은 최대 12개월 보관한다. 첫 삭제 시점 전에는 backup을 확인하고 다음 count를
 기록한 뒤 승인된 maintenance transaction에서 같은 조건의 row만 삭제한다.

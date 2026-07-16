@@ -15,6 +15,9 @@
 - 익명 제출용 PostgreSQL migration과 Supabase RLS·client role 권한 회수, 2KB body 제한,
   PostgreSQL 전용 write guard, runtime kill switch와 모든 POST 응답의 `no-store` 정책
   (`0a0702f`)
+- Vercel 플랜에 custom Firewall이 없는 상태에서도 익명 쓰기 폭주를 제한하는 PostgreSQL
+  shared minute bucket. 사용자·IP 식별자 없이 고정된 두 aggregate row만 사용하며 feedback은
+  분당 120건, 장소 신고는 분당 30건을 넘으면 429로 거부한다(`dd63ecf`)
 
 - 평일 서울시간 07:00~10:00·17:00~20:00에 페이지에 진입하면 표시되는 출퇴근시간
   정확도 안내. 현재 방문에서 닫을 수 있고 다음 방문에는 다시 표시하며, 토·일과 버전이

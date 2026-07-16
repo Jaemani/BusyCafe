@@ -1923,7 +1923,8 @@ revision을 검증하는 경로가 생기기 전에는 매년 수동 갱신 gate
 
 ## 2026-07-16 — 장소 신고와 익명 혼잡도 피드백
 
-기준 구현은 backend `0a0702f`, frontend `72fd31d`다. 카페 상세에서는 주변 거리 혼잡 비교
+기준 구현은 backend `0a0702f`, frontend `72fd31d`, shared write cap `dd63ecf`다. 카페
+상세에서는 주변 거리 혼잡 비교
 `busier/similar/quieter`와 매장 좌석 `available/limited/full/not_entered`를 별도 질문으로
 받고, 둘 다 선택한 경우에만 제출한다. 분석 plan과 무관하게 FastAPI POST를 사용하며
 정확한 사용자 좌표·검색어·IP·user-agent를 애플리케이션 DB에 저장하지 않는다.
@@ -1942,12 +1943,15 @@ source observation time을 immutable snapshot으로 보존하고 `unverified`로
   503으로 거부한다.
 - 요청 body는 2,048 bytes로 제한하고 schema 밖 field와 좌표 field는 422로 거부한다.
   성공과 모든 오류 응답은 `Cache-Control: no-store`다.
+- PostgreSQL shared minute bucket은 사용자 식별자 없이 두 aggregate row만 유지한다.
+  feedback 120건/분, 장소 신고 30건/분을 원자적으로 제한하고, 이전 minute 요청이 최신
+  bucket을 되돌리려 하면 429로 거부한다.
 - 장소 신고는 원장을 자동 수정하지 않고 혼잡도 피드백은 검증 전 정확도 정답으로 쓰지
   않는다. 원시 제출의 공개 정책상 보관 상한은 12개월이다.
 
 검증:
 
-- `cd backend && rtk proxy uv run pytest -q`: exit 0, 1,024 tests collected,
+- `cd backend && rtk proxy uv run pytest -q`: exit 0, 1,028 tests collected,
   PostgreSQL service가 필요한 2 tests skipped
 - `cd frontend && rtk npm test -- --run`: 5 files, 23 tests passed
 - `cd frontend && rtk npm run typecheck`: passed
@@ -1956,8 +1960,26 @@ source observation time을 immutable snapshot으로 보존하고 `unverified`로
 - `rtk python -m compileall -q backend/app backend/scripts api`: passed
 - `rtk git diff --check`: passed
 
-판정: **PASS(local persistence/UI contract), PENDING(production migration and shared rate
-limit)**. 실제 PostgreSQL migration·RLS test는 push 뒤 CI service container에서 통과해야
-한다. Vercel serverless instance별 메모리 limiter는 shared abuse control이 아니므로,
-광범위한 홍보 전 [HUMAN] Firewall/WAF rate rule과 429 뒤 GET 무회귀 smoke가 필요하다.
-이 gate 전에도 `USER_CONTRIBUTIONS_ENABLED=false`로 쓰기 경로를 즉시 닫을 수 있다.
+Production 검증:
+
+- CI run [`29477116080`](https://github.com/Jaemani/BusyCafe/actions/runs/29477116080)은
+  PostgreSQL service container에 migration head를 실제 적용하고 schema smoke, backend와
+  frontend test/build를 모두 통과했다.
+- Production poll run
+  [`29477194713`](https://github.com/Jaemani/BusyCafe/actions/runs/29477194713)은 migration
+  `20260716_0011` 적용 뒤 121/121 hotspot 수집을 완료했다.
+- Vercel deployment `dpl_FcuAW3JhRCyyf1LGRPCKLNX678yE`가 Ready인 것을 확인한 뒤
+  `busy-cafe.vercel.app` alias를 해당 deployment로 명시적으로 연결했다. canonical health는
+  `data_mode=live`, cafes 30,483, 직전 complete cycle 121/121을 반환했다.
+- canonical POST의 1자 누락 카페명은 HTTP 422와 `Cache-Control: no-store`를 반환했고 DB
+  mutation은 일어나지 않았다. HTML cache-bust에서 장소 신고와 두 축 피드백 UI를 확인했다.
+- feedback POST rule을 draft로 만들 수는 있었지만 두 번째 rate-limit rule 추가는
+  `Rate limiting is not available for this plan` 401을 반환했다. 미게시 draft 두 건은 즉시
+  discard했고 `vercel firewall diff`는 pending 0건, `rules list`는 published rule 0건임을
+  확인했다. 따라서 custom edge rule이 있다고 주장하지 않는다.
+
+판정: **PASS(persistence/UI/shared write cap/production migration), PENDING(edge abuse
+control for broad promotion)**. PostgreSQL global cap은 DB 증가와 poisoning 폭주를 제한하지만
+connection-level DDoS 방어는 아니다. 광범위한 홍보 전 [HUMAN] edge/shared 방어와 429 뒤 GET
+무회귀 smoke가 필요하며, 그 전에도 `USER_CONTRIBUTIONS_ENABLED=false`로 쓰기 경로를 즉시
+닫을 수 있다.
