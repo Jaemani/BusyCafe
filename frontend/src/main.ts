@@ -11,6 +11,9 @@ import { initializeCafeMap } from "./map";
 import { hideCafePanel, initializeCrowdFeedback } from "./panel";
 import { initializeCommuteNotice } from "./commute-notice";
 import { initializeCafePanelSheet } from "./cafe-panel-sheet";
+import { initializeAppViewport } from "./visual-viewport";
+
+initializeAppViewport();
 
 const status = document.querySelector<HTMLElement>("#search-status");
 const closeButton = document.querySelector<HTMLButtonElement>("#panel-close");

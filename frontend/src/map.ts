@@ -42,6 +42,7 @@ import {
   type CafeSearchResult,
 } from "./cafe-search";
 import { addSeoulSubwayOverlay } from "./subway-overlay";
+import { initializeAppViewport } from "./visual-viewport";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const INITIAL_CENTER: [number, number] = [126.9237, 37.5563];
@@ -55,6 +56,7 @@ const MIN_CAFE_ZOOM = 11;
 const DELAY_TICK_MS = 30_000;
 const CAFE_BACKGROUND_REFRESH_MS = 5 * 60_000;
 const RESUME_REFRESH_MIN_AGE_MS = 60_000;
+const APP_VIEWPORT_RESIZE_EVENT = "busyCafeViewportResize";
 
 const EMPTY_COLLECTION: CafeFeatureCollection = {
   type: "FeatureCollection",
@@ -309,6 +311,10 @@ export async function initializeCafeMap(
       "GeolocateControl.FindMyLocation": "내 위치 찾기",
       "GeolocateControl.LocationNotAvailable": "현재 위치를 확인할 수 없음",
     },
+  });
+  const viewportController = initializeAppViewport();
+  const stopViewportResize = viewportController.subscribe(() => {
+    map.resize({ [APP_VIEWPORT_RESIZE_EVENT]: true });
   });
 
   map.addControl(
@@ -585,7 +591,10 @@ export async function initializeCafeMap(
     }
   };
 
-  map.on("movestart", () => {
+  map.on("movestart", (event) => {
+    if ((event as unknown as Record<string, unknown>)[APP_VIEWPORT_RESIZE_EVENT] === true) {
+      return;
+    }
     requestController?.abort();
     requestSequence += 1;
     detailController?.abort();
@@ -599,7 +608,10 @@ export async function initializeCafeMap(
     statusElement.textContent = "지도 이동 중";
     statusElement.dataset.state = "moving";
   });
-  map.on("moveend", () => {
+  map.on("moveend", (event) => {
+    if ((event as unknown as Record<string, unknown>)[APP_VIEWPORT_RESIZE_EVENT] === true) {
+      return;
+    }
     if (userDistanceOrigin === null) {
       const center = map.getCenter();
       searchController?.updateDistanceOrigin({
@@ -695,5 +707,6 @@ export async function initializeCafeMap(
     searchController?.destroy();
     document.removeEventListener("visibilitychange", refreshAfterResume);
     window.removeEventListener("focus", refreshAfterResume);
+    stopViewportResize();
   });
 }
