@@ -202,6 +202,17 @@
 
 ### Fixed
 
+- iPhone 12 Safari에서 일반 탭의 status/browser chrome 영역을 웹 콘텐츠의 safe area로
+  오인하던 안내를 바로잡았다. 일반 Safari 탭은 해당 영역에 지도 타일을 그릴 수 없으며,
+  홈 화면에서 standalone으로 실행할 때만 `black-translucent` status bar와
+  `viewport-fit=cover`로 노치 뒤까지 앱 배경이 확장된다. 이를 위해 web app manifest와
+  Apple standalone metadata를 추가했다(`f92502f`)
+- 지도 attribution을 오른쪽 control stack 위가 아니라 왼쪽 최하단으로 옮기고 최초에는
+  정보 아이콘만 보이도록 접었다. 모바일 범례는 attribution 위에 분리했다. 카페 cluster의
+  흰 외곽선은 3px에서 1.5px, 개별 카페는 covered 2px→1px, fringe 4px→1.5px,
+  uncovered 1px→0.75px로 줄였다(`f92502f`)
+- 상단 카드 오른쪽의 중복 `서비스 안내`·`개인정보` 링크를 제거하고, 카드 하단의
+  `서비스·데이터 안내` 옆에 `개인정보`를 배치했다(`f92502f`)
 - iOS Safari의 브라우저 주소창이 만드는 실제 `VisualViewport`와 고정 앱 좌표계가 어긋나
   지도·상단 검색·상세 패널이 잘리던 문제. 앱 컨테이너를 현재 viewport의 폭·높이·offset에
   맞추고 주소창 변화·화면 회전·탭 복귀 때 MapLibre canvas를 다시 계산한다. 별도로 상단

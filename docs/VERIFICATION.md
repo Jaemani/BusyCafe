@@ -2197,3 +2197,38 @@ iPhone/Galaxy, real selected-cafe panel, landscape and keyboard verification)**.
 빈 패널은 안정 상태에서 402px 폭과 54% compact 높이 제한을 지켰지만, 검증 경유 API가
 카페 상세을 반환하지 않아 실제 데이터가 든 패널은 자동 계측하지 못했다. 시뮬레이터
 관측을 물리 기기 전체의 성공으로 확대하지 않는다.
+
+### iPhone 12 브라우저 chrome과 지도 장식 교정
+
+기준 구현은 `f92502f`다. iPhone 12 Simulator를 별도로 만들어 iOS 26.5 Safari의 canonical
+production과 로컬 변경을 비교했다. 화면 상단의 상태 표시줄 영역은 일반 Safari 탭의 browser
+chrome이며 페이지의 `VisualViewport` 밖이다. `viewport-fit=cover`나 CSS safe-area만으로 이
+영역에 지도 canvas를 그리는 것은 불가능하다. 이전 기록처럼 이를 앱의 inset 누락으로
+설명하지 않는다.
+
+- 일반 Safari 탭: browser chrome 아래의 전체 VisualViewport를 지도와 overlay가 사용한다.
+  상단 상태 표시줄에는 지도 타일을 표시할 수 없다.
+- 홈 화면 실행: manifest의 `display=standalone`, Apple web app metadata와
+  `black-translucent` status bar를 함께 제공해 standalone 실행에서 노치 뒤까지 앱 배경을
+  확장한다. 이 동작을 일반 Safari 탭의 전체 화면 지원으로 표현하지 않는다.
+- 상단 카드의 오른쪽에는 동적 데이터 상태만 남겼다. `서비스·데이터 안내`와 `개인정보`는
+  카드 하단 source line에서 한 번씩만 노출한다.
+- MapLibre attribution은 `bottom-left`에 두고 초기 `compact-show`를 제거한다. 라이선스
+  표시는 숨기지 않으며 정보 아이콘을 누르면 원문이 열린다. 모바일 범례는 2.5rem 이상 위로
+  띄워 두 요소가 겹치지 않게 했다.
+- cluster와 개별 카페의 외곽선은 coverage 구분을 유지하는 범위에서 각각 1.5px와
+  0.75~1.5px로 줄였다.
+
+검증:
+
+- `cd frontend && npm test`: 9 files, 47 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- iPhone 12 Simulator production cache-bust에서 상단 중복 링크 제거, 얇아진 cluster 외곽선,
+  범례 아래 왼쪽 최하단의 접힌 attribution 아이콘을 화면으로 확인했다.
+- Vercel deployment `dpl_EnQZyD1rwUuPwChUd7PsAKfPssyR`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 명시적으로 연결했다.
+
+판정: **PASS(iPhone 12 Simulator Safari tab/UI), PENDING(physical iPhone 12 standalone,
+Galaxy)**. 일반 Safari 탭의 browser chrome은 제품 결함으로 숨기지 않고 플랫폼 경계로
+기록한다. 물리 기기 standalone 상태 표시줄은 확인 전 완료로 주장하지 않는다.
