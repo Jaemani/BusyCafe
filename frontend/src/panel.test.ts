@@ -22,10 +22,10 @@ function panelMarkup(): string {
   return `
     <aside id="cafe-panel" hidden>
       <button id="cafe-panel-sheet-toggle" aria-expanded="false">상세</button>
-      <h2 id="cafe-name"></h2><p id="cafe-address"></p><span id="cafe-phone"></span>
+      <h2 id="cafe-name"></h2><span id="cafe-address"></span><span id="cafe-phone"></span>
       <a id="cafe-website"></a><span id="cafe-level"></span>
       <span id="cafe-coverage"></span><span id="cafe-confidence"></span>
-      <span id="estimate-dot"></span><p id="cafe-evidence"></p><p id="cafe-source"></p>
+      <span id="estimate-dot"></span><p id="cafe-evidence"></p><p class="cafe-source" hidden><span id="cafe-source"></span></p>
       <section id="crowd-feedback" hidden>
         <button data-street-feedback="similar" aria-pressed="false">비슷해요</button>
         <button data-street-feedback="busier" aria-pressed="false">더 붐벼요</button>
@@ -44,7 +44,9 @@ function panelMarkup(): string {
         <p id="place-report-status"></p>
       </details>
       <nav id="external-map-links" hidden>
-        <a id="map-link-naver"></a><a id="map-link-kakao"></a><a id="map-link-google"></a>
+        <a id="map-link-naver" hidden></a><a id="map-link-kakao" hidden></a>
+        <button id="crowd-feedback-disclosure" aria-controls="crowd-feedback" aria-expanded="false" hidden>피드백 주기</button>
+        <a id="map-link-google" hidden></a>
       </nav>
     </aside>`;
 }
@@ -240,14 +242,13 @@ describe("crowd feedback", () => {
     expect(document.querySelector("#cafe-confidence")?.textContent).toBe(
       "34분 전 · 참고용",
     );
-    expect(document.querySelector("#cafe-source")?.textContent).toBe(
-      "카카오맵에서 확인한 장소",
-    );
+    expect(document.querySelector("#cafe-source")?.textContent).toBe("카카오맵에서 확인한 장소");
+    expect(document.querySelector<HTMLElement>(".cafe-source")?.hidden).toBe(true);
     expect(document.body.textContent).not.toContain("장소 원장 품질");
     expect(document.body.textContent).not.toContain("2026-07-14T12:33");
   });
 
-  it("keeps feedback collapsed until explicit expansion", () => {
+  it("opens the sheet and focuses feedback from the visible panel action", () => {
     showCafePanel(cafe("compact"));
 
     const panel = document.querySelector<HTMLElement>("#cafe-panel")!;
@@ -256,15 +257,20 @@ describe("crowd feedback", () => {
     )!;
     const feedback = document.querySelector<HTMLElement>("#crowd-feedback")!;
     expect(disclosure.hidden).toBe(false);
+    expect(document.querySelector<HTMLElement>("#external-map-links")?.hidden).toBe(false);
     expect(disclosure.getAttribute("aria-expanded")).toBe("false");
     expect(feedback.hidden).toBe(true);
     expect(panel.dataset.feedbackState).toBe("collapsed");
 
     disclosure.click();
+    expect(panel.dataset.sheetState).toBe("expanded");
     expect(disclosure.getAttribute("aria-expanded")).toBe("true");
     expect(feedback.hidden).toBe(false);
     expect(panel.dataset.feedbackState).toBe("expanded");
     expect(panel.classList.contains("feedback-expanded")).toBe(true);
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-street-feedback="similar"]'),
+    );
 
     updateOpenCafePanel({
       ...cafe("compact"),

@@ -61,3 +61,7 @@ export function initializeCafePanelSheet(
 export function collapseCafePanelSheet(): void {
   activeController?.collapse();
 }
+
+export function expandCafePanelSheet(): void {
+  activeController?.expand();
+}

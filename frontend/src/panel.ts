@@ -9,7 +9,10 @@ import {
   type SeatFeedback,
   type StreetFeedback,
 } from "./api";
-import { collapseCafePanelSheet } from "./cafe-panel-sheet";
+import {
+  collapseCafePanelSheet,
+  expandCafePanelSheet,
+} from "./cafe-panel-sheet";
 
 function requiredElement<T extends HTMLElement>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -83,40 +86,27 @@ let reportState: "idle" | "submitting" | "submitted" = "idle";
 let feedbackEligible = false;
 let feedbackExpanded = false;
 
-function ensureFeedbackDisclosure(): HTMLButtonElement {
-  const existing = document.querySelector<HTMLButtonElement>(
-    "#crowd-feedback-disclosure",
-  );
-  if (existing) return existing;
-
-  const section = requiredElement<HTMLElement>("#crowd-feedback");
-  const button = document.createElement("button");
-  button.id = "crowd-feedback-disclosure";
-  button.className = "feedback-disclosure feedback-submit";
-  button.type = "button";
-  button.textContent = "지금 상태 알려주기";
-  button.setAttribute("aria-controls", section.id);
-  button.setAttribute("aria-expanded", "false");
-  button.hidden = true;
-  button.addEventListener("click", () => {
-    if (!feedbackEligible) return;
-    feedbackExpanded = !feedbackExpanded;
-    syncFeedbackVisibility(true);
-  });
-  section.before(button);
-  return button;
+function syncPanelActionsVisibility(): void {
+  const actions = requiredElement<HTMLElement>("#external-map-links");
+  const hasVisibleAction = Array.from(
+    actions.querySelectorAll<HTMLElement>("a, button"),
+  ).some((action) => !action.hidden);
+  actions.hidden = !hasVisibleAction;
 }
 
 function syncFeedbackVisibility(eligible: boolean): void {
   feedbackEligible = eligible;
   if (!eligible) feedbackExpanded = false;
   const section = requiredElement<HTMLElement>("#crowd-feedback");
-  const disclosure = ensureFeedbackDisclosure();
+  const disclosure = requiredElement<HTMLButtonElement>(
+    "#crowd-feedback-disclosure",
+  );
   const expanded = eligible && feedbackExpanded;
   section.hidden = !expanded;
   disclosure.hidden = !eligible;
-  disclosure.textContent = expanded ? "피드백 접기" : "지금 상태 알려주기";
+  disclosure.textContent = expanded ? "피드백 접기" : "피드백 주기";
   disclosure.setAttribute("aria-expanded", String(expanded));
+  syncPanelActionsVisibility();
 
   const panel = requiredElement<HTMLElement>("#cafe-panel");
   panel.dataset.feedbackState = !eligible
@@ -218,6 +208,17 @@ export function initializeCrowdFeedback(
   const section = requiredElement<HTMLElement>("#crowd-feedback");
   feedbackExpanded = false;
   syncFeedbackVisibility(false);
+  requiredElement<HTMLButtonElement>("#crowd-feedback-disclosure")
+    .addEventListener("click", () => {
+      if (!feedbackEligible) return;
+      feedbackExpanded = !feedbackExpanded;
+      syncFeedbackVisibility(true);
+      if (!feedbackExpanded) return;
+      expandCafePanelSheet();
+      section.querySelector<HTMLButtonElement>(
+        "[data-street-feedback]",
+      )?.focus();
+    });
   section.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element) || feedbackState !== "idle") return;
@@ -328,7 +329,7 @@ function resetExternalLinks(): void {
   setNaverLink(null, null);
   setExternalLink("#map-link-kakao", null);
   setExternalLink("#map-link-google", null);
-  requiredElement<HTMLElement>("#external-map-links").hidden = true;
+  syncPanelActionsVisibility();
 }
 
 function showPanelShell(cafe: CafeMapProperties): void {
@@ -353,16 +354,13 @@ function renderCafePanel(cafe: CafeProperties): void {
   renderCrowdEstimate(cafe, cafe.confidenceTier);
   requiredElement<HTMLElement>("#cafe-source").textContent =
     formatSourceLabel(cafe.sourceLabel);
-  const hasExternalLink = [
-    setNaverLink(cafe.naverUrl, cafe.naverSearchUrl),
-    setExternalLink("#map-link-kakao", cafe.kakaoUrl),
-    setExternalLink("#map-link-google", cafe.googleUrl),
-  ].some(Boolean);
+  setNaverLink(cafe.naverUrl, cafe.naverSearchUrl);
+  setExternalLink("#map-link-kakao", cafe.kakaoUrl);
+  setExternalLink("#map-link-google", cafe.googleUrl);
   const kakaoLink = requiredElement<HTMLAnchorElement>("#map-link-kakao");
   if (!kakaoLink.hidden) kakaoLink.dataset.analyticsLinkType = "direct";
   const googleLink = requiredElement<HTMLAnchorElement>("#map-link-google");
   if (!googleLink.hidden) googleLink.dataset.analyticsLinkType = "direct";
-  requiredElement<HTMLElement>("#external-map-links").hidden = !hasExternalLink;
   syncFeedbackVisibility(cafe.level !== null && cafe.freshness !== "stale");
   requiredElement<HTMLElement>("#place-report").hidden = false;
   requiredElement<HTMLElement>("#cafe-panel").hidden = false;

@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   collapseCafePanelSheet,
+  expandCafePanelSheet,
   initializeCafePanelSheet,
 } from "./cafe-panel-sheet";
 
@@ -58,6 +59,10 @@ describe("cafe panel sheet", () => {
     collapseCafePanelSheet();
     expect(panel.dataset.sheetState).toBe("compact");
     expect(panel.scrollTop).toBe(0);
+
+    expandCafePanelSheet();
+    expect(panel.dataset.sheetState).toBe("expanded");
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     controller.destroy();
   });
 });
