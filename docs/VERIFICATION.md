@@ -2081,27 +2081,46 @@ Production 검증:
 ## 2026-07-16 — 모바일 지도 UI와 카페 상세 갱신
 
 기준 구현은 출구 배지 `e600cdd`, safe-area 레이아웃 `8e38aa8`, 상세 접기와 갱신 경쟁 수정
-`101dcfa`, 모바일 상세 시트 `6575cb5`와 외부 지도 링크 보완 `fed7ac2`다. 기존 관측 정보
-축약은 `de617fa`, 출퇴근시간 안내는 `fefa9eb`, 상단 metadata 축약은 `213b2a7`에서
-도입됐다. 이번 판정은 저장소 구현과 자동 테스트에 한정하며 실제 기기나 production 배포
-확인으로 확대하지 않는다.
+`101dcfa`, 모바일 상세 시트 `6575cb5`와 외부 지도 링크 보완 `fed7ac2`, 한 번에 여는 피드백
+동작 `bc9054e`, 좁은 화면 경계 수정 `5c572b8`, safe-area 간격 교정 `aca0ff3`이다. 기존 관측
+정보 축약은 `de617fa`, 출퇴근시간 안내는 `fefa9eb`, 상단 metadata 축약은 `213b2a7`에서
+도입됐다. 패널 닫기 버튼의 중복 inset 제거는 `2efcaa7`이다. 현재 수정의 판정은 저장소
+구현과 자동 테스트에만 한정한다.
+
+표준 근거:
+
+- WebKit의 [iPhone X 웹사이트 설계 안내](https://webkit.org/blog/7929/designing-websites-for-iphone-x/)는
+  `viewport-fit=cover`와 `safe-area-inset-*`을 함께 설명한다.
+- MDN [`env()`](https://developer.mozilla.org/en-US/docs/Web/CSS/env)는 user-agent 환경 변수와
+  fallback 문법을 설명한다. 현재 CSS는 네 방향 `safe-area-inset-*`에 `0px` fallback을 둔다.
+  `aca0ff3`은 기본 간격과 inset을 더하던 식을 `max(기본 간격, env(inset))`로 교체했다.
+- MDN [viewport 기반 상대 길이 단위](https://developer.mozilla.org/en-US/docs/Web/CSS/length#relative_length_units_based_on_viewport)는
+  기본·동적 viewport 단위를 구분한다. 현재 패널은 `vh` 선언을 fallback으로 먼저 두고 같은
+  제약을 `dvh`로 다시 선언한다.
 
 - `frontend/index.html`의 viewport는 `viewport-fit=cover`와
-  `interactive-widget=resizes-content`를 사용한다. CSS는 지원 브라우저에서 `100dvh`를
-  적용하고, 상단 shell·카페 상세·범례·MapLibre control에 상·우·하·좌 safe-area inset을
-  반영한다. 모바일 상세는 내부 세로 스크롤을 유지한다. 상단 metadata는 서비스 안내·
-  개인정보 링크와 현재 상태를 flex-wrap 영역에 배치하고 모바일 상태 폭을 7.5rem으로
-  제한한다. 서비스 안내 링크의 fragment target은 `/about.html`의 `recent-updates`다.
+  `interactive-widget=resizes-content`를 사용한다. `body`의 최소 폭은 0이고 CSS에는 `100vw`
+  계산이 없다. `#app`은 `position: fixed; inset: 0`이고 `#map`은 그 안에서
+  `position: absolute; inset: 0`이다. 상단 shell은 좌우 safe-area inset 사이에서
+  `width: auto`, 최대 38rem을 사용한다. 상단 metadata는 서비스 안내·개인정보 링크와 현재
+  상태를 flex-wrap 영역에 배치하고 모바일 상태 폭을 7.5rem으로 제한한다. 서비스 안내
+  링크의 fragment target은 `/about.html`의 `recent-updates`다.
 - 출구 symbol은 zoom 15.5부터 표시된다. 테스트 fixture는 24×24px 배지의 테두리 RGBA
   `[28, 24, 17, 255]`, 중앙 RGBA `[255, 212, 0, 255]`, 검정 글자, 배지·글자 overlap 금지와
   카페 layer 아래 순서를 확인한다.
 - 카페 상세의 관측 badge는 데이터 나이와 근거 강도 또는 지연·현재값 숨김 상태를 한 문자열로
-  만든다. 40rem 이하의 하단 시트는 처음에 최대 `54dvh`·28rem 범위의 compact 상태로 열리고,
-  손잡이 버튼으로 상단 safe area 아래 최대 `90dvh`까지 펼친다. 버튼의 `aria-expanded`와
-  접근성 이름이 상태에 맞게 바뀌며 Escape, 다른 카페 선택 또는 패널 닫기로 다시 접힌다.
-  피드백 양식도 처음에는 별도로 접혀 있고, 버튼으로 펼친 상태는 같은 카페의 현재 요약 갱신
-  뒤에도 유지되며 다른 카페를 열면 다시 접힌다. 외부 지도 링크는 compact 상태에서도
-  숨겨지는 content wrapper 밖에 둔다.
+  만든다. 기본 패널은 상·하에서 `max(1.1rem, env(inset))`을 뺀 `100vh`와 `100dvh` 최대
+  높이, 가로 숨김과 세로 자동 스크롤을 가진다. 40rem 이하 시트는 `left: 0`, `right: 0`,
+  `width: auto`로 양쪽 edge 사이에 놓이며 처음에는 최대 `54vh`/`54dvh`·28rem, 펼치면 최대
+  `90vh`/`90dvh`다. 버튼의
+  `aria-expanded`와 접근성 이름이 상태에 맞게 바뀌며 Escape, 다른 카페 선택 또는 패널
+  닫기로 다시 접힌다. 기본 패널의 닫기 버튼은 패널 내부 0.85rem을 사용하고, 좌우 edge에
+  붙는 모바일 media query에서만 오른쪽 값을 `max(0.85rem, env(safe-area-inset-right))`로
+  바꾼다.
+- 상세 주소와 전화번호는 한 flex 행에 있고 긴 값은 ellipsis 처리한다. 장소 원장 출처 줄은
+  `hidden` 속성과 CSS로 숨기지만 source 값 자체는 상세 상태에 유지한다. 외부 지도 링크와
+  `피드백 주기`는 같은 action grid에 있으며, 버튼을 한 번 누르면 피드백을 표시하고 시트를
+  펼친 뒤 첫 주변 혼잡 선택 버튼으로 focus를 옮긴다. 다른 카페를 열면 양식은 다시 접힌다.
 - 출퇴근시간 안내는 서울시간의 지원 시간대·2026 비근무일 조건에서만 초기화되며 닫기 버튼을
   누르면 현재 문서에서 숨긴다. storage에는 닫힘 상태를 쓰지 않는다. 이는 시간대별 정확도
   실측 결과가 아니라 안내 노출 계약 검증이다.
@@ -2111,13 +2130,19 @@ Production 검증:
 
 검증:
 
-- `cd frontend && npm test -- --run`: 7 files, 31 tests passed. 출구 배지, 출퇴근 안내,
-  상세 시트·피드백 접기와 불완전/과거 요약 경쟁 회귀 테스트 포함
+- `cd frontend && npm test -- --run`: 8 files, 35 tests passed. 출구 배지, 출퇴근 안내,
+  상세 시트·한 번에 여는 피드백·불완전/과거 요약 경쟁과 좁은 화면 CSS 계약 테스트 포함
 - `cd frontend && npm run typecheck`: passed
-- `cd frontend && npm run build`: passed, gzip CSS 14.18kB, JavaScript 299.76kB. 기존 500kB
+- `cd frontend && npm run build`: passed, gzip CSS 14.30kB, JavaScript 299.73kB. 기존 500kB
   chunk warning 유지
 
-Production 확인(2026-07-16 19:54 KST):
+이전 production asset smoke(2026-07-16 19:54 KST, 현재 수정 검증 아님):
+
+- 아래 확인은 `4ff42ab`까지 배포된 정적 자산과 API 상태만 대상으로 했다. 이후 correction인
+  `bc9054e`, `5c572b8`, `aca0ff3`, `2efcaa7`의 배포, 화면 배치 또는 실제 기기 동작을
+  검증한 기록이 아니다.
+- production HTML에서 문자열과 asset이 보였다는 사실은 safe-area, 좁은 화면, 가로 모드나
+  가상 키보드에서 레이아웃이 올바르다는 증거가 아니다.
 
 - GitHub `main` 기준 커밋 `4ff42ab`; CI run `29492382659` passed
 - Vercel deployment `dpl_CGhSThQFEYcFy9pAKVm7dmZGz9VH`가 `Ready`이고 canonical
@@ -2128,6 +2153,8 @@ Production 확인(2026-07-16 19:54 KST):
 - `/api/health`: `data_mode=live`, `last_cycle_status=complete`, targets/saved/failed
   `121/121/0`, `cafes_count=30483`. 이 값은 확인 시점의 운영 상태이며 성능·정확도 주장이 아니다.
 
-판정: **PASS(code, automated UI contract, production smoke), PENDING(real-device
-verification)**. safe-area 수치와 상태 갱신 계약, production asset 배포는 확인했다. 노치가 있는
-실제 iOS·Android 기기의 세로·가로 회전과 가상 키보드 동작은 아직 측정하지 않았다.
+판정: **PASS(automated contract only), PENDING(real iPhone/Galaxy verification and current
+production deployment)**. `bc9054e`, `5c572b8`, `aca0ff3`, `2efcaa7`의 selector·상태·회귀
+테스트는 통과했지만 실제 iPhone과 Galaxy에서 세로·가로 회전, 노치·홈 영역, 짧은 viewport,
+가상 키보드를 측정하지 않았다. 따라서 현재 단계에서 모바일 기기 성공이나 production 수정
+완료를 주장하지 않는다.
