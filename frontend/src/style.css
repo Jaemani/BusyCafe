@@ -824,6 +824,10 @@ h1 {
   right: max(0.3rem, env(safe-area-inset-right, 0px));
   bottom: max(0.25rem, env(safe-area-inset-bottom, 0px));
 }
+.maplibregl-ctrl-bottom-left {
+  bottom: max(0.2rem, env(safe-area-inset-bottom, 0px));
+  left: max(0.2rem, env(safe-area-inset-left, 0px));
+}
 .maplibregl-ctrl-group { overflow: hidden; border: 1px solid var(--line); border-radius: 0.8rem; box-shadow: 0 0.5rem 1.5rem rgb(22 42 33 / 12%); }
 .maplibregl-ctrl-group button { width: 2.75rem; height: 2.75rem; }
 
@@ -833,6 +837,23 @@ h1 {
   margin: 0 !important;
   border-radius: 0.65rem 0 0 0;
   box-shadow: 0 0 0.7rem rgb(25 40 31 / 12%);
+}
+
+.maplibregl-ctrl-attrib.busy-attribution-collapsed {
+  width: 24px;
+  min-width: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+.maplibregl-ctrl-attrib.busy-attribution-collapsed .maplibregl-ctrl-attrib-inner {
+  display: none !important;
 }
 
 @media (max-width: 40rem) {
@@ -853,7 +874,7 @@ h1 {
   .commute-notice { width: calc(100% - 0.5rem); }
   .legend {
     right: max(0.7rem, env(safe-area-inset-right, 0px));
-    bottom: max(0.7rem, env(safe-area-inset-bottom, 0px));
+    bottom: max(2.5rem, calc(env(safe-area-inset-bottom, 0px) + 2rem));
     left: max(0.7rem, env(safe-area-inset-left, 0px));
     justify-content: center;
     border-radius: 1rem;

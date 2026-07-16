@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 const styles = readFileSync(new URL("./style.css", import.meta.url), "utf8");
+const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+const mapSource = readFileSync(new URL("./map.ts", import.meta.url), "utf8");
 
 describe("responsive map layout", () => {
   it("does not force the document wider than a narrow device viewport", () => {
@@ -67,5 +69,45 @@ describe("responsive map layout", () => {
     expect(styles).toMatch(
       /\.cafe-panel\[data-sheet-state="expanded"\]\s*{[\s\S]*?max-height:\s*min\([\s\S]*?90%/,
     );
+  });
+
+  it("keeps service and privacy links in the header footer only", () => {
+    const headerMeta = indexHtml.match(
+      /<div class="map-header-meta">([\s\S]*?)<\/div>/,
+    )?.[1];
+    const sourceLine = indexHtml.match(
+      /<p class="source-line">([\s\S]*?)<\/p>/,
+    )?.[1];
+
+    expect(headerMeta).not.toContain("서비스 안내");
+    expect(headerMeta).not.toContain("개인정보");
+    expect(sourceLine).toContain("서비스·데이터 안내");
+    expect(sourceLine).toContain("개인정보");
+  });
+
+  it("supports full safe-area use when launched from the iOS home screen", () => {
+    expect(indexHtml).toContain('name="apple-mobile-web-app-capable" content="yes"');
+    expect(indexHtml).toContain(
+      'name="apple-mobile-web-app-status-bar-style" content="black-translucent"',
+    );
+    expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
+  });
+
+  it("starts attribution collapsed at the bottom-left", () => {
+    expect(mapSource).toContain('map.addControl(attributionControl, "bottom-left")');
+    expect(mapSource).toContain('classList.remove("maplibregl-compact-show")');
+    expect(mapSource).toContain('classList.add("busy-attribution-collapsed")');
+    expect(styles).toMatch(
+      /\.maplibregl-ctrl-attrib\.busy-attribution-collapsed[\s\S]*?width:\s*24px/,
+    );
+    expect(styles).toMatch(
+      /\.maplibregl-ctrl-bottom-left\s*{[\s\S]*?bottom:[\s\S]*?left:/,
+    );
+  });
+
+  it("uses restrained cafe and cluster outlines", () => {
+    expect(mapSource).toContain('"circle-stroke-width": 1.5');
+    expect(mapSource).not.toContain('"circle-stroke-width": 3');
+    expect(mapSource).not.toMatch(/"fringe",\s*4,/);
   });
 });

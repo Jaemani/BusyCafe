@@ -159,7 +159,7 @@ function addCafeLayers(map: maplibregl.Map): void {
       ],
       "circle-radius": ["step", ["get", "point_count"], 18, 30, 22, 100, 27],
       "circle-stroke-color": "rgba(255, 255, 255, 0.92)",
-      "circle-stroke-width": 3,
+      "circle-stroke-width": 1.5,
       "circle-opacity": [
         "case",
         ["==", ["get", "delayed_count"], ["get", "point_count"]],
@@ -223,10 +223,10 @@ function addCafeLayers(map: maplibregl.Map): void {
         "match",
         ["get", "coverage"],
         "fringe",
-        4,
+        1.5,
         "uncovered",
+        0.75,
         1,
-        2,
       ],
       "circle-opacity": [
         "case",
@@ -333,7 +333,19 @@ export async function initializeCafeMap(
     .querySelector<HTMLButtonElement>(".maplibregl-ctrl-geolocate")
     ?.addEventListener("click", trackGeolocationClick);
   const attributionControl = new maplibregl.AttributionControl({ compact: true });
-  map.addControl(attributionControl, "bottom-right");
+  map.addControl(attributionControl, "bottom-left");
+  const attributionElement = container.querySelector<HTMLElement>(
+    ".maplibregl-ctrl-attrib",
+  );
+  attributionElement?.classList.remove("maplibregl-compact-show");
+  attributionElement?.classList.add("busy-attribution-collapsed");
+  attributionElement
+    ?.querySelector<HTMLElement>(".maplibregl-ctrl-attrib-button")
+    ?.addEventListener(
+      "click",
+      () => attributionElement.classList.remove("busy-attribution-collapsed"),
+      { once: true },
+    );
 
   const cafeProvider = provider ?? new CachedApiCafeProvider();
 
