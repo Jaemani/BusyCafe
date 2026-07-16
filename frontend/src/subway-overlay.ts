@@ -29,14 +29,21 @@ const SUBWAY_SOURCE_IDS = {
   stations: "seoul-subway-stations-source",
   exits: "seoul-subway-exits-source",
 } as const;
+const EXIT_BADGE_IMAGE_ID = "seoul-subway-exit-badge";
+const EXIT_BADGE_SIZE_PX = 24;
 
 type SubwayAsset = keyof typeof SUBWAY_ASSET_PATHS;
 
 interface SubwayOverlayMap {
   addSource(id: string, source: GeoJSONSourceSpecification): void;
   addLayer(layer: LayerSpecification, beforeId?: string): void;
+  addImage(
+    id: string,
+    image: { width: number; height: number; data: Uint8Array },
+  ): void;
   getSource(id: string): unknown;
   getLayer(id: string): unknown;
+  hasImage(id: string): boolean;
 }
 
 interface SubwayOverlayOptions {
@@ -195,39 +202,60 @@ function addStationLayers(map: SubwayOverlayMap, beforeLayerId?: string): void {
   }, beforeLayerId);
 }
 
+function exitBadgeImage(): { width: number; height: number; data: Uint8Array } {
+  const data = new Uint8Array(EXIT_BADGE_SIZE_PX * EXIT_BADGE_SIZE_PX * 4);
+  for (let y = 0; y < EXIT_BADGE_SIZE_PX; y += 1) {
+    for (let x = 0; x < EXIT_BADGE_SIZE_PX; x += 1) {
+      const offset = (y * EXIT_BADGE_SIZE_PX + x) * 4;
+      const border = x < 2 || y < 2 ||
+        x >= EXIT_BADGE_SIZE_PX - 2 || y >= EXIT_BADGE_SIZE_PX - 2;
+      data[offset] = border ? 28 : 255;
+      data[offset + 1] = border ? 24 : 212;
+      data[offset + 2] = border ? 17 : 0;
+      data[offset + 3] = 255;
+    }
+  }
+  return { width: EXIT_BADGE_SIZE_PX, height: EXIT_BADGE_SIZE_PX, data };
+}
+
+function ensureExitBadgeImage(map: SubwayOverlayMap): boolean {
+  try {
+    if (!map.hasImage(EXIT_BADGE_IMAGE_ID)) {
+      map.addImage(EXIT_BADGE_IMAGE_ID, exitBadgeImage());
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function addExitLayers(map: SubwayOverlayMap, beforeLayerId?: string): void {
-  safeAddLayer(map, {
-    id: SUBWAY_LAYER_IDS.exitPoints,
-    type: "circle",
-    source: SUBWAY_SOURCE_IDS.exits,
-    minzoom: 15.5,
-    paint: {
-      "circle-color": "#ffffff",
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 15.5, 2.5, 18, 4],
-      "circle-stroke-color": "#315b49",
-      "circle-stroke-width": 1.5,
-    },
-  }, beforeLayerId);
+  if (!ensureExitBadgeImage(map)) return;
   safeAddLayer(map, {
     id: SUBWAY_LAYER_IDS.exitLabels,
     type: "symbol",
     source: SUBWAY_SOURCE_IDS.exits,
-    minzoom: 16.5,
+    minzoom: 15.5,
     layout: {
-      "text-field": ["coalesce", ["get", "exit_name"], ["get", "exit_no"], ["get", "name"], ""],
+      "icon-image": EXIT_BADGE_IMAGE_ID,
+      "icon-size": ["interpolate", ["linear"], ["zoom"], 15.5, 0.84, 17, 1, 19, 1.08],
+      "icon-anchor": "center",
+      "icon-padding": 2,
+      "icon-allow-overlap": false,
+      "icon-ignore-placement": false,
+      "text-field": ["coalesce", ["get", "exit_no"], ["get", "exit_name"], ["get", "name"], ""],
       "text-font": ["Noto Sans Regular"],
-      "text-size": 9,
-      "text-offset": [0, 0.9],
-      "text-anchor": "top",
-      "text-padding": 2,
+      "text-size": ["interpolate", ["linear"], ["zoom"], 15.5, 11, 17, 13, 19, 14],
+      "text-anchor": "center",
+      "text-padding": 1,
       "text-allow-overlap": false,
       "text-ignore-placement": false,
       "symbol-sort-key": ["coalesce", ["get", "label_priority"], 100],
     },
     paint: {
-      "text-color": "#315b49",
-      "text-halo-color": "rgba(255, 255, 255, 0.96)",
-      "text-halo-width": 1.25,
+      "text-color": "#111111",
+      "text-halo-color": "#111111",
+      "text-halo-width": 0.25,
     },
   }, beforeLayerId);
 }

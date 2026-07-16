@@ -14,6 +14,10 @@ import {
 class FakeMap {
   readonly sources = new Map<string, GeoJSONSourceSpecification>();
   readonly layers: Array<{ layer: LayerSpecification; beforeId?: string }> = [];
+  readonly images = new Map<
+    string,
+    { width: number; height: number; data: Uint8Array }
+  >();
 
   addSource(id: string, source: GeoJSONSourceSpecification): void {
     this.sources.set(id, source);
@@ -23,12 +27,23 @@ class FakeMap {
     this.layers.push({ layer, beforeId });
   }
 
+  addImage(
+    id: string,
+    image: { width: number; height: number; data: Uint8Array },
+  ): void {
+    this.images.set(id, image);
+  }
+
   getSource(id: string): GeoJSONSourceSpecification | undefined {
     return this.sources.get(id);
   }
 
   getLayer(id: string): LayerSpecification | undefined {
     return this.layers.find(({ layer }) => layer.id === id)?.layer;
+  }
+
+  hasImage(id: string): boolean {
+    return this.images.has(id);
   }
 }
 
@@ -93,7 +108,6 @@ describe("Seoul subway overlay", () => {
       SUBWAY_LAYER_IDS.lines,
       SUBWAY_LAYER_IDS.stationPoints,
       SUBWAY_LAYER_IDS.stationLabels,
-      SUBWAY_LAYER_IDS.exitPoints,
       SUBWAY_LAYER_IDS.exitLabels,
     ]);
     expect(subwayLayers.every(({ beforeId }) => beforeId === "cafe-clusters"))
@@ -108,8 +122,35 @@ describe("Seoul subway overlay", () => {
     expect(stationLabels.minzoom).toBe(13);
     expect(stationLabels.layout?.["text-allow-overlap"]).toBe(false);
     expect(stationLabels.layout?.["text-ignore-placement"]).toBe(false);
-    expect(exitLabels.minzoom).toBe(16.5);
+    expect(exitLabels.minzoom).toBe(15.5);
+    expect(exitLabels.layout?.["icon-image"]).toBe("seoul-subway-exit-badge");
+    expect(exitLabels.layout?.["icon-size"]).toEqual([
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      15.5,
+      0.84,
+      17,
+      1,
+      19,
+      1.08,
+    ]);
+    expect(exitLabels.layout?.["text-field"]).toEqual([
+      "coalesce",
+      ["get", "exit_no"],
+      ["get", "exit_name"],
+      ["get", "name"],
+      "",
+    ]);
     expect(exitLabels.layout?.["text-allow-overlap"]).toBe(false);
+    expect(exitLabels.layout?.["icon-allow-overlap"]).toBe(false);
+    expect(exitLabels.paint?.["text-color"]).toBe("#111111");
+    const badge = [...map.images.values()][0];
+    expect(badge).toMatchObject({ width: 24, height: 24 });
+    expect([...badge.data.slice(0, 4)]).toEqual([28, 24, 17, 255]);
+    const centerOffset = (12 * 24 + 12) * 4;
+    expect([...badge.data.slice(centerOffset, centerOffset + 4)])
+      .toEqual([255, 212, 0, 255]);
   });
 
   it("ignores missing, malformed, and wrong-geometry assets without throwing", async () => {
