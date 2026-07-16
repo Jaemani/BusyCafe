@@ -2158,3 +2158,37 @@ production deployment)**. `bc9054e`, `5c572b8`, `aca0ff3`, `2efcaa7`의 selector
 테스트는 통과했지만 실제 iPhone과 Galaxy에서 세로·가로 회전, 노치·홈 영역, 짧은 viewport,
 가상 키보드를 측정하지 않았다. 따라서 현재 단계에서 모바일 기기 성공이나 production 수정
 완료를 주장하지 않는다.
+
+### 후속 iOS Safari 실측 교정
+
+이전 판정 뒤 실제 Safari 화면 계측으로 원인 가정을 다시 확인했다. 기준 구현은 앱 좌표계
+교정 `b7f3d30`, VisualViewport 추적과 MapLibre resize `f83da42`, grid 최소 폭 교정
+`a9cece4`다. 진단용 overlay는 커밋·배포 전에 제거했다.
+
+- 환경: iPhone 17 Pro Simulator, iOS 26.5 Safari, 화면 `402×874`, DPR 3.
+- 브라우저 chrome을 제외한 `window.innerSize`와 `VisualViewport`는 모두 `402×714`, scale 1,
+  offset `0,0`이었다. 일반 Safari 탭에서 네 방향 `safe-area-inset-*`은 모두 `0px`였고,
+  브라우저가 status bar 아래에서 콘텐츠 viewport를 시작했다. 따라서 이 환경의 직접 원인은
+  노치 inset 누락이 아니었다.
+- 교정 전 production의 상단 shell 폭은 380px인데 내부 header가 604.5px, 검색 영역이
+  577px까지 늘어났다. CSS grid item의 기본 `min-width:auto`가 자식의 intrinsic 폭을
+  유지한 결과였다.
+- `grid-template-columns:minmax(0, 1fr)`와 header의 `min-width:0; max-width:100%` 적용 뒤
+  동일 Safari에서 shell/header 380px, 검색 영역 352px가 됐고 검색 버튼·서비스 안내·
+  개인정보 링크가 402px viewport 안에 들어왔다.
+- 앱 container는 VisualViewport의 width·height·offset을 CSS 변수로 받고, resize·scroll·
+  orientationchange·pageshow·visibilitychange를 한 animation frame으로 합친다. 변화 뒤
+  MapLibre `resize()`를 호출하되 기존 카페 패널을 닫거나 bbox를 불필요하게 다시 읽지 않는다.
+
+검증:
+
+- `cd frontend && npm test`: 9 files, 43 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- Vercel deployment `dpl_AANF7BfTnEqt1NYh4JJCUK8YkCAr`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 명시적으로 연결했다. canonical CSS에서
+  `grid-template-columns:minmax(0,1fr)`을 확인했다.
+
+판정: **PASS(iOS Simulator portrait geometry and production asset), PENDING(physical
+iPhone/Galaxy, landscape and keyboard verification)**. 시뮬레이터 관측을 물리 기기 전체의
+성공으로 확대하지 않는다.
