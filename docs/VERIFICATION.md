@@ -2058,6 +2058,20 @@ Overpass 원본을 고정해 생성했다.
 - `cd frontend && npm run typecheck`: PASS
 - `cd frontend && npm run build`: PASS
 
+Production 검증:
+
+- Vercel deployment `dpl_8MdCFk1vmSwTd5DXngXzgJkXqbf9`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 명시적으로 연결했다.
+- canonical 자산은 노선 19, 역 380, 출구 2,126 Feature를 반환했고 배포 JavaScript에서
+  `seoul-subway-lines.geojson` 참조를 확인했다. `/api/health`는 `data_mode=live`, 카페
+  30,483곳과 최근 ingest를 정상 반환했다.
+- 첫 자산 요청은 `x-vercel-cache: MISS`, 후속 요청은 `HIT`와 `age: 14`를 반환했다.
+  Vercel은 설정의 `s-maxage`를 CDN 내부에서 소비하고 클라이언트에는
+  `Cache-Control: public, max-age=3600`을 반환했다.
+- `.geojson`의 runtime `Content-Type`은 Vercel 정적 파일 기본값 `application/octet-stream`이었다.
+  custom override는 적용되지 않아 제거했다. 현재 코드는 Fetch `response.json()`으로 파싱하고
+  production에서 성공했지만, MIME을 `application/geo+json`이라고 주장하지 않는다.
+
 판정: **PASS(static overlay), VERIFY(460 unlinked exits)**. 역 점은 서울시 공식 좌표고 노선·출구
 위치는 OSM ODbL 파생물이다. `unlinked` 출구를 임의의 역에 귀속하지 않으며, 표본 수동 대조
 전에는 전체 출구 완전성이나 역 연결 정확도를 주장하지 않는다. 지하철 맥락은 탐색 편의
