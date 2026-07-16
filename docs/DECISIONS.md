@@ -69,6 +69,7 @@
 | 제품 모드 | 카페 찾기·지역 밀집도·데이터 커버리지 | 데이터 없는 영역의 임의 보간 금지 |
 | 제품 코어 | 도시 활동도 surface + 카페 첫 overlay | 지역 활동도를 매장 좌석 점유율로 표현 금지 |
 | 지역 확장 | 부산·Melbourne fixture 뒤 실제 최소 교집합만 계약 승격 | 선행 범용화·도시명 기반 코어 분기 금지 |
+| 사용자 입력 | 장소 신고는 pending 검증 대기열, 주변 거리 혼잡과 좌석 피드백은 분리된 unverified 신호로 저장 | 원장·공개 점수·추천 자동 반영 금지; Phase 6 현장 관측 대체 금지 |
 
 Kakao Local의 Phase 0 실응답 fixture와 키 검증은 ADR-0014의 parser·좌표 회귀 근거로
 재사용한다. Kakao Maps JavaScript SDK와 도메인 등록은 현 MapLibre 제품 런타임에 필요 없다.

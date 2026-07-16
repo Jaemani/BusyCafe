@@ -1920,3 +1920,44 @@ DB 부하와 사용자의 지도 조작 예측 가능성을 함께 측정한 뒤
 원장의 provenance를 따르며 이름 substring만으로 본사 인증을 주장하지 않는다. 달력은
 엔진 feature가 아니라 경고 노출 조건이지만, 연도별 공식 공휴일 artifact를 자동 생성하고
 revision을 검증하는 경로가 생기기 전에는 매년 수동 갱신 gate를 유지한다.
+
+## 2026-07-16 — 장소 신고와 익명 혼잡도 피드백
+
+기준 구현은 backend `0a0702f`, frontend `72fd31d`다. 카페 상세에서는 주변 거리 혼잡 비교
+`busier/similar/quieter`와 매장 좌석 `available/limited/full/not_entered`를 별도 질문으로
+받고, 둘 다 선택한 경우에만 제출한다. 분석 plan과 무관하게 FastAPI POST를 사용하며
+정확한 사용자 좌표·검색어·IP·user-agent를 애플리케이션 DB에 저장하지 않는다.
+
+`cafe_crowd_feedback`은 카페 ID와 제출 당시 model version, predicted level, coverage,
+source observation time을 immutable snapshot으로 보존하고 `unverified`로 시작한다.
+`cafe_place_reports`는 선택 카페의 `missing/wrong_details/closed` 또는 검색 0건의 bounded
+카페명만 `pending`으로 저장한다. 두 입력 경로에서 cafe row를 update하는 코드는 없으며,
+공개 score materialize와도 연결하지 않았다.
+
+보안 경계:
+
+- PostgreSQL migration `20260716_0010`이 새 두 table의 RLS를 활성화하고 Supabase
+  `anon`/`authenticated` table·sequence 권한을 회수한다.
+- bundled SQLite snapshot, `CAFE_CROWD_SNAPSHOT=1`, runtime kill switch off에서는 POST를
+  503으로 거부한다.
+- 요청 body는 2,048 bytes로 제한하고 schema 밖 field와 좌표 field는 422로 거부한다.
+  성공과 모든 오류 응답은 `Cache-Control: no-store`다.
+- 장소 신고는 원장을 자동 수정하지 않고 혼잡도 피드백은 검증 전 정확도 정답으로 쓰지
+  않는다. 원시 제출의 공개 정책상 보관 상한은 12개월이다.
+
+검증:
+
+- `cd backend && rtk proxy uv run pytest -q`: exit 0, 1,024 tests collected,
+  PostgreSQL service가 필요한 2 tests skipped
+- `cd frontend && rtk npm test -- --run`: 5 files, 23 tests passed
+- `cd frontend && rtk npm run typecheck`: passed
+- `cd frontend && rtk npm run build`: passed, gzip JavaScript 297.87kB. 기존 500kB chunk
+  warning 유지
+- `rtk python -m compileall -q backend/app backend/scripts api`: passed
+- `rtk git diff --check`: passed
+
+판정: **PASS(local persistence/UI contract), PENDING(production migration and shared rate
+limit)**. 실제 PostgreSQL migration·RLS test는 push 뒤 CI service container에서 통과해야
+한다. Vercel serverless instance별 메모리 limiter는 shared abuse control이 아니므로,
+광범위한 홍보 전 [HUMAN] Firewall/WAF rate rule과 429 뒤 GET 무회귀 smoke가 필요하다.
+이 gate 전에도 `USER_CONTRIBUTIONS_ENABLED=false`로 쓰기 경로를 즉시 닫을 수 있다.
