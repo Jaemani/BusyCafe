@@ -58,7 +58,7 @@
               />
               <button id="cafe-search-submit" type="submit">검색</button>
             </form>
-            <div id="cafe-brand-filters" class="cafe-brand-filters" aria-label="프랜차이즈 필터">
+            <div id="cafe-brand-filters" class="cafe-brand-filters" aria-label="프랜차이즈 필터" hidden>
               <button type="button" data-cafe-brand="스타벅스" aria-pressed="false">스타벅스</button>
               <button type="button" data-cafe-brand="투썸플레이스" aria-pressed="false">투썸</button>
               <button type="button" data-cafe-brand="메가MGC커피" aria-pressed="false">메가MGC</button>
@@ -103,6 +103,16 @@
             · <a href="/about.html">서비스·데이터 안내</a>
             · <a href="/privacy.html">개인정보</a>
           </p>
+          <button
+            id="brand-filter-toggle"
+            class="brand-filter-toggle"
+            type="button"
+            aria-controls="cafe-brand-filters"
+            aria-expanded="false"
+            aria-label="프랜차이즈 필터 열기"
+          >
+            <span aria-hidden="true">브랜드</span>
+          </button>
           <button
             id="top-panel-collapse"
             class="top-panel-collapse"

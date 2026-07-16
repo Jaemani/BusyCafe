@@ -13,6 +13,7 @@ import { initializeCommuteNotice } from "./commute-notice";
 import { initializeCafePanelSheet } from "./cafe-panel-sheet";
 import { initializeAppViewport } from "./visual-viewport";
 import { initializeTopPanel } from "./top-panel";
+import { initializeBrandFilterDisclosure } from "./brand-filter-disclosure";
 
 initializeAppViewport();
 
@@ -30,6 +31,12 @@ const topPanelCollapse = document.querySelector<HTMLButtonElement>(
 const topPanelExpand = document.querySelector<HTMLButtonElement>(
   "#top-panel-expand",
 );
+const cafeBrandFilters = document.querySelector<HTMLElement>(
+  "#cafe-brand-filters",
+);
+const brandFilterToggle = document.querySelector<HTMLButtonElement>(
+  "#brand-filter-toggle",
+);
 
 if (
   !status ||
@@ -39,7 +46,9 @@ if (
   !mapTopShell ||
   !mapHeader ||
   !topPanelCollapse ||
-  !topPanelExpand
+  !topPanelExpand ||
+  !cafeBrandFilters ||
+  !brandFilterToggle
 ) {
   throw new Error("Required map UI elements were not found");
 }
@@ -54,6 +63,11 @@ initializeTopPanel(
   mapHeader,
   topPanelCollapse,
   topPanelExpand,
+);
+initializeBrandFilterDisclosure(
+  cafeBrandFilters,
+  brandFilterToggle,
+  topPanelCollapse,
 );
 
 document.addEventListener("click", (event) => {

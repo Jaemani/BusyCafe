@@ -2321,3 +2321,27 @@ PENDING(physical iPhone standalone and Galaxy)**.
 
 판정: **PASS(iPhone 12 Simulator layout, scale experiment, CI and production asset),
 PENDING(physical devices)**.
+
+### iPhone 브랜드 필터 disclosure와 칩 경계 검증
+
+2026-07-17에 프랜차이즈 칩을 기본 닫힘 disclosure로 바꾸고 iPhone 12 Simulator,
+iOS 26.5 Safari에서 닫힘·열림 상태를 비교했다.
+
+- `cafe-brand-filters`는 초기 HTML부터 `hidden`이며 `브랜드` 버튼의
+  `aria-expanded`와 label을 실제 상태에 맞춰 갱신한다. 방문마다 닫힘으로 시작하고 상단
+  카드를 접을 때도 닫힌다.
+- `브랜드` 버튼은 기존 접기 버튼 바로 왼쪽에 배치했다. 닫힌 상태에서 상단 카드 높이가
+  줄었고 source line, 두 버튼과 카드 아래 경계가 겹치지 않았다.
+- 열린 가로 스크롤 영역에 아래 padding `0.2rem`을 추가했다. 브랜드 칩의 아래 border와
+  선택 상태가 카드 경계에 잘리지 않음을 화면으로 확인했다.
+
+검증:
+
+- `cd frontend && npm test`: 11 files, 58 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- iPhone 12 Simulator screenshots: `/tmp/iphone12-brand-closed.png`,
+  `/tmp/iphone12-brand-open.png`. 임시 로컬 증거이며 물리 기기 증거로 취급하지 않는다.
+
+판정: **PASS(local automated contract and iPhone 12 Simulator layout),
+PENDING(production deployment and physical devices)**.

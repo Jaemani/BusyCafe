@@ -70,6 +70,22 @@ describe("responsive map layout", () => {
     );
   });
 
+  it("keeps brand chips hidden behind a control beside the collapse button", () => {
+    expect(indexHtml).toMatch(
+      /id="cafe-brand-filters"[^>]*hidden/,
+    );
+    expect(indexHtml).toMatch(
+      /id="brand-filter-toggle"[\s\S]*?aria-controls="cafe-brand-filters"/,
+    );
+    expect(styles).toMatch(
+      /\.brand-filter-toggle\s*{[\s\S]*?right:\s*2\.12rem;[\s\S]*?bottom:\s*0\.32rem;/,
+    );
+    expect(styles).toMatch(
+      /\.cafe-brand-filters\s*{[\s\S]*?padding:\s*0\.04rem 0\.04rem 0\.2rem;/,
+    );
+    expect(styles).toMatch(/\.cafe-brand-filters\[hidden\]\s*{\s*display:\s*none;/);
+  });
+
   it("bounds the base cafe panel to its app container in short landscapes", () => {
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?max-height:\s*calc\([\s\S]*?100%/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?overflow-x:\s*hidden;/);
