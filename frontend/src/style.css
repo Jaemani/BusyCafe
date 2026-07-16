@@ -115,10 +115,11 @@ h1 {
 .map-header-meta {
   display: flex;
   min-width: 0;
-  flex: 0 1 12rem;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.2rem;
+  flex: 0 1 18rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem 0.45rem;
   text-align: right;
 }
 
@@ -130,13 +131,13 @@ h1 {
 }
 
 .search-status {
-  max-width: 12rem;
+  max-width: 9rem;
   margin: 0;
   border-radius: 999px;
-  padding: 0.3rem 0.5rem;
+  padding: 0.22rem 0.42rem;
   color: #4d645a;
   background: #e9efeb;
-  font-size: 0.625rem;
+  font-size: 0.58rem;
   font-weight: 750;
   line-height: 1.25;
 }
@@ -787,8 +788,8 @@ h1 {
   .map-header { column-gap: 0.5rem; row-gap: 0.8rem; }
   .brand { flex-basis: 9rem; }
   .brand-mark { width: 2.3rem; height: 2.3rem; }
-  .map-header-meta { max-width: 8.75rem; flex-basis: 7rem; }
-  .search-status { max-width: 8.75rem; }
+  .map-header-meta { max-width: 10.25rem; flex-basis: 8.5rem; }
+  .search-status { max-width: 7.5rem; }
   .cafe-search { margin-top: -0.2rem; }
   .cafe-search-results { max-height: min(19rem, 44vh); }
   .commute-notice { width: calc(100% - 0.5rem); }
