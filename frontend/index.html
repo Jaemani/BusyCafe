@@ -10,7 +10,8 @@
       name="description"
       content="서울 주요 상권에서 상대적으로 한산할 가능성이 높은 카페를 찾는 지도"
     />
-    <meta name="theme-color" content="#e8ebe6" />
+    <meta name="theme-color" content="#f2f3f0" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Busy Cafe" />
@@ -24,6 +25,7 @@
     <main id="app">
       <div id="map" aria-label="서울 카페 지도"></div>
 
+      <div id="viewport-ui" class="viewport-ui">
       <div class="map-top-shell">
         <header class="map-header">
           <div class="brand">
@@ -199,6 +201,7 @@
         <span class="legend-level"><i class="legend-marker level-none"></i>데이터 없음</span>
         <span class="legend-level"><i class="legend-marker level-normal delayed"></i>흐린 색 · 지연 참고용</span>
         <span class="legend-preview"><i class="legend-marker level-none"></i>카페 위치 미리보기 · 혼잡도 연결 중</span>
+      </div>
       </div>
     </main>
     <script type="module" src="/src/main.ts"></script>

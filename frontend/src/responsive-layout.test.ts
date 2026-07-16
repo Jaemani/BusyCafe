@@ -6,6 +6,10 @@ import { readFileSync } from "node:fs";
 const styles = readFileSync(new URL("./style.css", import.meta.url), "utf8");
 const indexHtml = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const mapSource = readFileSync(new URL("./map.ts", import.meta.url), "utf8");
+const manifest = readFileSync(
+  new URL("../public/manifest.webmanifest", import.meta.url),
+  "utf8",
+);
 
 describe("responsive map layout", () => {
   it("does not force the document wider than a narrow device viewport", () => {
@@ -16,20 +20,29 @@ describe("responsive map layout", () => {
     expect(styles).toMatch(/text-size-adjust:\s*100%;/);
   });
 
-  it("binds the app to VisualViewport dimensions with safe fallbacks", () => {
+  it("keeps the map on the large viewport and binds overlays to VisualViewport", () => {
     expect(styles).toMatch(
-      /#app\s*{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*var\(--app-viewport-offset-top, 0px\);[\s\S]*?left:\s*var\(--app-viewport-offset-left, 0px\);/,
+      /#app\s*{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0;[\s\S]*?height:\s*100lvh;/,
     );
-    expect(styles).toMatch(/width:\s*var\(--app-viewport-width, 100%\);/);
-    expect(styles).toMatch(/height:\s*var\(--app-viewport-height, 100dvh\);/);
+    expect(styles).toMatch(
+      /\.viewport-ui\s*{[\s\S]*?top:\s*var\(--app-viewport-offset-top, 0px\);[\s\S]*?left:\s*var\(--app-viewport-offset-left, 0px\);/,
+    );
+    expect(styles).toMatch(/\.viewport-ui\s*{[\s\S]*?width:\s*var\(--app-viewport-width, 100%\);/);
+    expect(styles).toMatch(/\.viewport-ui\s*{[\s\S]*?height:\s*var\(--app-viewport-height, 100%\);/);
   });
 
-  it("keeps the map and overlays in the app coordinate system", () => {
+  it("keeps the map full-bleed and overlays in the live UI coordinate system", () => {
     expect(styles).toMatch(/#map\s*{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;/);
+    expect(indexHtml).toMatch(/<div id="map"[\s\S]*?<div id="viewport-ui"/);
     expect(styles).toMatch(/\.map-top-shell\s*{[\s\S]*?position:\s*absolute;/);
     expect(styles).toMatch(/\.cafe-panel\s*{[\s\S]*?position:\s*absolute;/);
     expect(styles).toMatch(/\.legend\s*{[\s\S]*?position:\s*absolute;/);
     expect(styles).not.toMatch(/\.maplibregl-ctrl-attrib\.maplibregl-compact\s*{[\s\S]*?position:\s*fixed;/);
+  });
+
+  it("lets map gestures pass through the UI container outside real overlays", () => {
+    expect(styles).toMatch(/\.viewport-ui\s*{[\s\S]*?pointer-events:\s*none;/);
+    expect(styles).toMatch(/\.viewport-ui\s*>\s*\*\s*{\s*pointer-events:\s*auto;/);
   });
 
   it("prevents grid min-content from widening the top shell", () => {
@@ -93,6 +106,16 @@ describe("responsive map layout", () => {
     expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
   });
 
+  it("matches Safari chrome and install metadata to the map canvas background", () => {
+    expect(styles).toContain("--map-canvas-background: #f2f3f0");
+    expect(styles).toMatch(
+      /html,\s*body\s*{[\s\S]*?background:\s*var\(--map-canvas-background\);/,
+    );
+    expect(indexHtml).toContain('name="theme-color" content="#f2f3f0"');
+    expect(manifest).toContain('"background_color": "#f2f3f0"');
+    expect(manifest).toContain('"theme_color": "#f2f3f0"');
+  });
+
   it("starts attribution collapsed at the bottom-left", () => {
     expect(mapSource).toContain('map.addControl(attributionControl, "bottom-left")');
     expect(mapSource).toContain('classList.remove("maplibregl-compact-show")');
@@ -102,6 +125,12 @@ describe("responsive map layout", () => {
     );
     expect(styles).toMatch(
       /\.maplibregl-ctrl-bottom-left\s*{[\s\S]*?bottom:[\s\S]*?left:/,
+    );
+  });
+
+  it("keeps mobile controls above the live viewport bottom", () => {
+    expect(styles).toMatch(
+      /@media \(max-width: 40rem\)[\s\S]*?\.maplibregl-ctrl-bottom-right\s*{[\s\S]*?var\(--app-viewport-height, 100%\)[\s\S]*?max\(3\.8rem/,
     );
   });
 

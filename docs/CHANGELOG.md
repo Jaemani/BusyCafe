@@ -202,11 +202,17 @@
 
 ### Fixed
 
+- 지도 canvas를 large viewport 전체에 유지하고 상단 shell·상세 패널·범례만 현재
+  `VisualViewport`를 따르도록 좌표계를 분리했다. Safari chrome이 변해도 지도를 다시
+  잘라내지 않으며 control은 현재 보이는 화면의 오른쪽·아래 경계를 따른다. iPhone 일반
+  Safari가 상단에 사용하는 root 배경은 OpenFreeMap Positron의 canvas 기본색과 맞춰
+  시각적 단절을 줄였다
 - iPhone 12 Safari에서 일반 탭의 status/browser chrome 영역을 웹 콘텐츠의 safe area로
-  오인하던 안내를 바로잡았다. 일반 Safari 탭은 해당 영역에 지도 타일을 그릴 수 없으며,
-  홈 화면에서 standalone으로 실행할 때만 `black-translucent` status bar와
-  `viewport-fit=cover`로 노치 뒤까지 앱 배경이 확장된다. 이를 위해 web app manifest와
-  Apple standalone metadata를 추가했다(`f92502f`)
+  오인하던 안내를 바로잡았다. 시뮬레이터 일반 탭에서는 지도 canvas가 browser chrome
+  아래에서 시작했고 root 배경색이 상단 tint를 결정했다. 이를 모든 Safari 실행 방식의
+  한계로 일반화하지 않으며, 홈 화면 실행에는 `black-translucent` status bar와
+  `viewport-fit=cover`를 제공한다. 이를 위해 web app manifest와 Apple standalone
+  metadata를 추가했다(`f92502f`)
 - 지도 attribution을 오른쪽 control stack 위가 아니라 왼쪽 최하단으로 옮기고 최초에는
   정보 아이콘만 보이도록 접었다. 모바일 범례는 attribution 위에 분리했다. 카페 cluster의
   흰 외곽선은 3px에서 1.5px, 개별 카페는 covered 2px→1px, fringe 4px→1.5px,

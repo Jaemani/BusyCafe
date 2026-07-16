@@ -2201,13 +2201,15 @@ iPhone/Galaxy, real selected-cafe panel, landscape and keyboard verification)**.
 ### iPhone 12 브라우저 chrome과 지도 장식 교정
 
 기준 구현은 `f92502f`다. iPhone 12 Simulator를 별도로 만들어 iOS 26.5 Safari의 canonical
-production과 로컬 변경을 비교했다. 화면 상단의 상태 표시줄 영역은 일반 Safari 탭의 browser
-chrome이며 페이지의 `VisualViewport` 밖이다. `viewport-fit=cover`나 CSS safe-area만으로 이
-영역에 지도 canvas를 그리는 것은 불가능하다. 이전 기록처럼 이를 앱의 inset 누락으로
-설명하지 않는다.
+production과 로컬 변경을 비교했다. 이 실행 환경에서 화면 상단의 상태 표시줄 영역은 일반
+Safari 탭의 browser chrome이었고 페이지의 `VisualViewport` 밖이었다. `viewport-fit=cover`와
+CSS safe-area를 적용한 상태에서도 지도 canvas는 browser chrome 아래에서 시작했다. 이
+관측을 모든 iOS 버전이나 홈 화면 실행 방식의 한계로 일반화하지 않으며, 이전 기록처럼 앱의
+inset 누락으로도 설명하지 않는다.
 
-- 일반 Safari 탭: browser chrome 아래의 전체 VisualViewport를 지도와 overlay가 사용한다.
-  상단 상태 표시줄에는 지도 타일을 표시할 수 없다.
+- 일반 Safari 탭: browser chrome 아래의 전체 VisualViewport를 지도와 overlay가 사용했다.
+  상단에는 root 배경색이 표시됐으며, 이 색을 지도 canvas 기본색과 맞추면 시각적 단절을
+  줄일 수 있었다.
 - 홈 화면 실행: manifest의 `display=standalone`, Apple web app metadata와
   `black-translucent` status bar를 함께 제공해 standalone 실행에서 노치 뒤까지 앱 배경을
   확장한다. 이 동작을 일반 Safari 탭의 전체 화면 지원으로 표현하지 않는다.
@@ -2230,5 +2232,38 @@ chrome이며 페이지의 `VisualViewport` 밖이다. `viewport-fit=cover`나 CS
   `busy-cafe.vercel.app` alias를 명시적으로 연결했다.
 
 판정: **PASS(iPhone 12 Simulator Safari tab/UI), PENDING(physical iPhone 12 standalone,
-Galaxy)**. 일반 Safari 탭의 browser chrome은 제품 결함으로 숨기지 않고 플랫폼 경계로
+Galaxy)**. 일반 Safari 탭에서 관측한 browser chrome 동작과 제품의 시각적 연속성을 구분해
 기록한다. 물리 기기 standalone 상태 표시줄은 확인 전 완료로 주장하지 않는다.
+
+### iPhone 지도·UI viewport 분리와 상단 연속성 검증
+
+2026-07-16에 iPhone 12 Simulator, iOS 26.5 Safari에서 지도와 overlay 좌표계를 다시
+분리했다. 지도는 `100lvh` large viewport에 유지하고 상단 shell·상세 패널·범례는
+`VisualViewport`의 width·height·offset을 사용한다. MapLibre control은 지도 container에
+남아 있으므로 현재 보이는 viewport의 오른쪽·아래 offset을 별도로 반영했다.
+
+- `viewport-fit=auto`와 `cover` 모두 일반 Safari 탭의 `inner/VisualViewport`는
+  `390×699`, 화면은 `390×844`, offset은 `0,0`, safe-area env는 네 방향 `0px`였다.
+- 고정 `theme-color`, theme 제거, 투명 root, 줄무늬 DOM을 비교했다. 상단 browser 영역에는
+  canvas의 줄무늬가 나타나지 않았고 실제 `html/body` 배경색이 tint로 이어졌다.
+- Positron style의 background layer 실값 `rgb(242,243,240)`에 맞춰 root, theme metadata와
+  manifest background를 `#f2f3f0`으로 통일했다. 이는 시각적 연결이며 지도 타일을 상단에
+  복제했다는 주장이 아니다.
+- 1px overflow 뒤 `scrollTo(0,1)`은 scrollY만 1로 바뀌고 viewport 높이는 699px로
+  유지돼 제외했다. iPhone의 Fullscreen API도 이 환경에서 제공되지 않아 제품 코드에 넣지
+  않았다.
+- 홈 화면 실행용 `apple-mobile-web-app-capable=yes`, `black-translucent`,
+  `viewport-fit=cover`는 유지한다. 물리 iPhone standalone 동작은 아직 `[VERIFY][HUMAN]`이다.
+
+검증:
+
+- `cd frontend && npm test -- --run src/responsive-layout.test.ts`: 1 file, 15 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- iPhone 12 Simulator screenshots: `/tmp/iphone12-busycafe-edge-final.png`,
+  `/tmp/iphone12-busycafe-panel-compact.png`. 두 번째 화면은 placeholder 상세을 강제로 열어
+  compact panel의 좌우·하단 경계가 현재 viewport 안에 있음을 확인한 임시 로컬 증거다.
+  저장소 artifact나 물리 기기 증거로 취급하지 않는다.
+
+판정: **PASS(local iPhone 12 Simulator geometry and visual continuity),
+PENDING(production deployment, physical iPhone standalone and Galaxy)**.
