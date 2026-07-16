@@ -521,7 +521,7 @@ h1 {
 .panel-close {
   position: absolute;
   top: 0.85rem;
-  right: max(0.85rem, env(safe-area-inset-right, 0px));
+  right: 0.85rem;
   width: 2.75rem;
   height: 2.75rem;
   border: 0;
@@ -893,6 +893,9 @@ h1 {
     border-radius: 999px;
     background: transparent;
     cursor: pointer;
+  }
+  .panel-close {
+    right: max(0.85rem, env(safe-area-inset-right, 0px));
   }
   .cafe-panel-sheet-toggle > span {
     width: 2.25rem;
