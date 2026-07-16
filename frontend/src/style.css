@@ -21,42 +21,39 @@
 }
 
 html,
-body,
-#app,
-#map {
+body {
   width: 100%;
   height: 100%;
   margin: 0;
-}
-
-@supports (height: 100dvh) {
-  body,
-  #app,
-  #map { height: 100dvh; }
+  overflow: hidden;
 }
 
 body {
-  min-width: 20rem;
-  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
   background: #e8ebe6;
 }
 
-#map { position: absolute; inset: 0; }
+#app,
+#map {
+  position: fixed;
+  inset: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#map { position: absolute; }
 
 .map-top-shell {
   position: fixed;
   z-index: 10;
   top: max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem));
+  right: max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem));
   left: max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem));
   display: grid;
-  width: min(
-    38rem,
-    calc(
-      100vw
-      - max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem))
-      - max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem))
-    )
-  );
+  width: auto;
+  max-width: 38rem;
+  min-width: 0;
   gap: 0.55rem;
 }
 
@@ -485,14 +482,26 @@ h1 {
   z-index: 20;
   right: max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem));
   bottom: max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem));
-  width: min(
-    25rem,
-    calc(
-      100vw
-      - max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem))
-      - max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem))
-    )
+  width: calc(
+    100%
+    - max(1.1rem, calc(env(safe-area-inset-left, 0px) + 0.65rem))
+    - max(1.1rem, calc(env(safe-area-inset-right, 0px) + 0.65rem))
   );
+  max-width: 25rem;
+  min-width: 0;
+  max-height: calc(
+    100vh
+    - max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem))
+    - max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem))
+  );
+  max-height: calc(
+    100dvh
+    - max(1.1rem, calc(env(safe-area-inset-top, 0px) + 0.65rem))
+    - max(1.1rem, calc(env(safe-area-inset-bottom, 0px) + 0.65rem))
+  );
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line);
   border-radius: 1.5rem;
   padding: 1.45rem;
@@ -533,30 +542,49 @@ h1 {
 
 .cafe-panel h2 {
   margin: 0;
+  min-width: 0;
   padding-right: 2rem;
+  overflow-wrap: anywhere;
   font-size: 1.5rem;
   letter-spacing: -0.045em;
 }
 
-.cafe-address { margin: 0.5rem 0 1.15rem; color: var(--ink-muted); font-size: 0.84rem; }
-.cafe-contact {
+.cafe-contact-line {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin: -0.65rem 0 1rem;
+  gap: 0.4rem;
+  min-width: 0;
+  margin: 0.5rem 0 1rem;
   color: var(--ink-muted);
   font-size: 0.74rem;
+  white-space: nowrap;
 }
-.cafe-contact a { color: var(--forest); font-weight: 750; }
+.cafe-address {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.cafe-contact-line #cafe-phone {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+.cafe-contact-line #cafe-phone:not(:empty)::before,
+.cafe-contact-line #cafe-website:not([hidden])::before { content: "·"; margin-right: 0.4rem; }
+.cafe-contact-line a { flex: 0 0 auto; color: var(--forest); font-weight: 750; }
 
 .estimate-placeholder {
   display: flex;
+  min-width: 0;
   gap: 0.75rem;
   border-radius: 1rem;
   padding: 0.95rem;
   background: #edf1ed;
 }
+
+.estimate-placeholder > div { min-width: 0; }
 
 .estimate-dot,
 .legend-marker {
@@ -588,10 +616,12 @@ h1 {
 
 .cafe-source {
   margin: 0.8rem 0 0;
+  overflow-wrap: anywhere;
   color: var(--ink-muted);
   font-size: 0.7rem;
   line-height: 1.45;
 }
+.cafe-source[hidden] { display: none; }
 
 .cafe-source span:not(:empty)::after { content: " · "; }
 .cafe-source a {
@@ -727,6 +757,25 @@ h1 {
   white-space: nowrap;
 }
 
+.external-map-links .panel-feedback-action {
+  overflow: hidden;
+  border: 1px solid var(--forest);
+  border-radius: 0.75rem;
+  padding: 0.62rem 0.45rem;
+  color: #fff;
+  background: var(--forest);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.external-map-links .panel-feedback-action:hover,
+.external-map-links .panel-feedback-action:focus-visible { background: #315946; }
+
 .external-map-links a:hover,
 .external-map-links a:focus-visible { background: #e8eee9; }
 
@@ -804,7 +853,9 @@ h1 {
     right: 0;
     bottom: 0;
     left: 0;
-    width: 100%;
+    width: auto;
+    max-width: none;
+    min-width: 0;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
@@ -820,8 +871,6 @@ h1 {
       calc(100dvh - env(safe-area-inset-top, 0px) - 0.7rem),
       28rem
     );
-    overflow-y: auto;
-    overscroll-behavior: contain;
     transition: max-height 180ms ease-out;
   }
   .cafe-panel[data-sheet-state="expanded"] {
