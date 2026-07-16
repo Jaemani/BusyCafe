@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -515,3 +516,21 @@ class CafeCrowdFeedback(Base):
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP"),
     )
+
+
+class UserContributionRateLimit(Base):
+    """Two aggregate rows; contains no user or network identifier."""
+
+    __tablename__ = "user_contribution_rate_limits"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('feedback', 'place_report')",
+            name="kind_values",
+        ),
+        CheckConstraint("bucket_epoch >= 0", name="bucket_epoch_nonnegative"),
+        CheckConstraint("submission_count > 0", name="submission_count_positive"),
+    )
+
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    bucket_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    submission_count: Mapped[int] = mapped_column(Integer, nullable=False)

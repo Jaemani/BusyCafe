@@ -90,6 +90,12 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
                     "cafe_crowd_feedback"
                 )
             }
+            rate_limit_columns = {
+                item["name"]: item
+                for item in inspect(connection).get_columns(
+                    "user_contribution_rate_limits"
+                )
+            }
             snapshot_indexes = {
                 item["name"]
                 for item in inspect(connection).get_indexes(
@@ -172,6 +178,12 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
             "created_at",
         }
         assert feedback_columns["cafe_id"]["nullable"] is False
+        assert set(rate_limit_columns) == {
+            "kind",
+            "bucket_epoch",
+            "submission_count",
+        }
+        assert rate_limit_columns["kind"]["nullable"] is False
         assert provider_refs == [
             (
                 "naver",

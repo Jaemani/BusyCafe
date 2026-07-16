@@ -20,6 +20,7 @@ from app.models import (
     HotspotParseFailure,
     HotspotSnapshot,
     IngestCycle,
+    UserContributionRateLimit,
 )
 
 
@@ -384,6 +385,24 @@ def test_crowd_feedback_constraints_reject_unverified_snapshot_mismatch(engine):
             )
         )
 
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+@pytest.mark.parametrize(
+    "rate_limit",
+    [
+        UserContributionRateLimit(
+            kind="unknown", bucket_epoch=1, submission_count=1
+        ),
+        UserContributionRateLimit(
+            kind="feedback", bucket_epoch=1, submission_count=0
+        ),
+    ],
+)
+def test_user_contribution_rate_limit_constraints(engine, rate_limit):
+    with Session(engine) as session:
+        session.add(rate_limit)
         with pytest.raises(IntegrityError):
             session.commit()
 

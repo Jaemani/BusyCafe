@@ -403,6 +403,11 @@ CAFE_SEARCH_MAX_LIMIT: Final = 50
 # Anonymous submissions contain only enums or one short cafe name. Reject
 # oversized bodies before JSON parsing; no IP, location, or user token is kept.
 USER_CONTRIBUTION_MAX_BODY_BYTES: Final = 2_048
+# Shared global caps protect the write queue when the hosting plan has no
+# custom edge rate limiting. They intentionally use no IP or user identifier.
+USER_CONTRIBUTION_BUCKET_SEC: Final = 60
+USER_FEEDBACK_MAX_PER_BUCKET: Final = 120
+USER_PLACE_REPORT_MAX_PER_BUCKET: Final = 30
 # Canonical UI labels map to provider-name aliases observed in Korean catalogs.
 # This is a product filter, not a claim that every matching row is corporate-
 # verified; place identity still comes from the cached provider catalog.

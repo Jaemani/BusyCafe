@@ -10,6 +10,8 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, load_only, raiseload, selectinload
 
 from app.config import (
@@ -26,6 +28,9 @@ from app.config import (
     OVERTURE_RELEASE,
     SEOUL_BBOX,
     STALE_WARN_MIN,
+    USER_CONTRIBUTION_BUCKET_SEC,
+    USER_FEEDBACK_MAX_PER_BUCKET,
+    USER_PLACE_REPORT_MAX_PER_BUCKET,
     get_settings,
 )
 from app.database import get_db
@@ -38,6 +43,7 @@ from app.models import (
     HotspotServingState,
     HotspotSnapshot,
     IngestCycle,
+    UserContributionRateLimit,
 )
 from app.schemas import (
     CafeDetailResponse,
@@ -204,6 +210,74 @@ def _require_user_contributions() -> None:
             status_code=503,
             detail="user contributions unavailable",
         )
+
+
+def _claim_user_contribution_slot(
+    db: Session,
+    *,
+    kind: str,
+    limit: int,
+    now: datetime | None = None,
+) -> None:
+    """Atomically claim one global slot without storing a user identifier."""
+
+    current_time = now or datetime.now(UTC)
+    if current_time.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    bucket_epoch = (
+        int(current_time.timestamp()) // USER_CONTRIBUTION_BUCKET_SEC
+    ) * USER_CONTRIBUTION_BUCKET_SEC
+    dialect_name = db.get_bind().dialect.name
+    if dialect_name == "postgresql":
+        statement = postgresql_insert(UserContributionRateLimit)
+    elif dialect_name == "sqlite":
+        statement = sqlite_insert(UserContributionRateLimit)
+    else:
+        raise HTTPException(
+            status_code=503,
+            detail="user contributions unavailable",
+        )
+
+    statement = statement.values(
+        kind=kind,
+        bucket_epoch=bucket_epoch,
+        submission_count=1,
+    )
+    excluded = statement.excluded
+    claimed = db.execute(
+        statement.on_conflict_do_update(
+            index_elements=[UserContributionRateLimit.kind],
+            set_={
+                "bucket_epoch": excluded.bucket_epoch,
+                "submission_count": case(
+                    (
+                        UserContributionRateLimit.bucket_epoch
+                        == excluded.bucket_epoch,
+                        UserContributionRateLimit.submission_count + 1,
+                    ),
+                    else_=1,
+                ),
+            },
+            where=or_(
+                UserContributionRateLimit.bucket_epoch
+                < excluded.bucket_epoch,
+                and_(
+                    UserContributionRateLimit.bucket_epoch
+                    == excluded.bucket_epoch,
+                    UserContributionRateLimit.submission_count < limit,
+                ),
+            ),
+        ).returning(UserContributionRateLimit.submission_count)
+    ).scalar_one_or_none()
+    if claimed is None:
+        db.rollback()
+        raise HTTPException(
+            status_code=429,
+            detail="submission rate limit exceeded",
+        )
+    # Commit the aggregate slot separately. A later submission failure must
+    # not let an abusive caller reclaim the same capacity through rollback.
+    db.commit()
 
 
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
@@ -766,6 +840,11 @@ def report_missing_cafe(
     """Queue a missing-place claim for moderation; never edit the catalog."""
 
     _require_user_contributions()
+    _claim_user_contribution_slot(
+        db,
+        kind="place_report",
+        limit=USER_PLACE_REPORT_MAX_PER_BUCKET,
+    )
     report = CafePlaceReport(
         cafe_id=None,
         report_type="missing",
@@ -801,6 +880,11 @@ def submit_cafe_feedback(
     if row is None:
         raise HTTPException(status_code=404, detail="cafe not found")
     _, score = row
+    _claim_user_contribution_slot(
+        db,
+        kind="feedback",
+        limit=USER_FEEDBACK_MAX_PER_BUCKET,
+    )
     created_at = datetime.now(UTC)
     feedback = CafeCrowdFeedback(
         cafe_id=cafe_id,
@@ -840,6 +924,11 @@ def report_existing_cafe(
     ).scalar_one_or_none()
     if exists is None:
         raise HTTPException(status_code=404, detail="cafe not found")
+    _claim_user_contribution_slot(
+        db,
+        kind="place_report",
+        limit=USER_PLACE_REPORT_MAX_PER_BUCKET,
+    )
     created_at = datetime.now(UTC)
     report = CafePlaceReport(
         cafe_id=cafe_id,

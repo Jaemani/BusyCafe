@@ -6,12 +6,17 @@ from pathlib import Path
 from urllib.parse import quote
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.routes import _observation_age_minutes, _observation_freshness
+from app.api.routes import (
+    _claim_user_contribution_slot,
+    _observation_age_minutes,
+    _observation_freshness,
+)
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
@@ -40,6 +45,7 @@ from app.models import (
     HotspotServingState,
     HotspotSnapshot,
     IngestCycle,
+    UserContributionRateLimit,
 )
 from app.schemas import KakaoPlace
 from scripts.seed_kakao_catalog_expansion import (
@@ -990,6 +996,75 @@ def test_user_contributions_reject_read_only_runtime(
     factory = api_client.app.state.test_session_factory
     with factory() as session:
         assert session.query(CafePlaceReport).count() == 0
+
+
+def test_shared_rate_limit_is_atomic_bounded_and_rejects_older_bucket(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    minute = datetime(2026, 7, 16, 6, 30, tzinfo=UTC)
+    with factory() as session:
+        _claim_user_contribution_slot(
+            session, kind="feedback", limit=2, now=minute
+        )
+        _claim_user_contribution_slot(
+            session, kind="feedback", limit=2, now=minute
+        )
+        with pytest.raises(HTTPException) as error:
+            _claim_user_contribution_slot(
+                session, kind="feedback", limit=2, now=minute
+            )
+        assert error.value.status_code == 429
+
+        stored = session.get(UserContributionRateLimit, "feedback")
+        assert stored is not None
+        assert stored.submission_count == 2
+
+        next_minute = minute + timedelta(minutes=1)
+        _claim_user_contribution_slot(
+            session, kind="feedback", limit=2, now=next_minute
+        )
+        stored = session.get(UserContributionRateLimit, "feedback")
+        assert stored is not None
+        session.refresh(stored)
+        assert stored.submission_count == 1
+
+        with pytest.raises(HTTPException) as older_error:
+            _claim_user_contribution_slot(
+                session, kind="feedback", limit=2, now=minute
+            )
+        assert older_error.value.status_code == 429
+        assert session.query(UserContributionRateLimit).count() == 1
+
+
+def test_feedback_rate_limit_returns_no_store_without_affecting_reads(
+    api_client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.api.routes.USER_FEEDBACK_MAX_PER_BUCKET",
+        1,
+    )
+    payload = {
+        "street_feedback": "similar",
+        "seat_feedback": "not_entered",
+    }
+
+    accepted = api_client.post("/api/cafes/1/feedback", json=payload)
+    limited = api_client.post("/api/cafes/1/feedback", json=payload)
+    health = api_client.get("/api/health")
+
+    assert accepted.status_code == 202
+    assert limited.status_code == 429
+    assert limited.headers["cache-control"] == "no-store"
+    assert limited.json() == {"detail": "submission rate limit exceeded"}
+    assert health.status_code == 200
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafeCrowdFeedback).count() == 1
+        limiter = session.get(UserContributionRateLimit, "feedback")
+        assert limiter is not None
+        assert limiter.submission_count == 1
 
 
 @pytest.mark.parametrize(
