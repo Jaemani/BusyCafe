@@ -41,6 +41,7 @@ import {
   type CafeSearchController,
   type CafeSearchResult,
 } from "./cafe-search";
+import { addSeoulSubwayOverlay } from "./subway-overlay";
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const INITIAL_CENTER: [number, number] = [126.9237, 37.5563];
@@ -619,6 +620,7 @@ export async function initializeCafeMap(
       window.clearTimeout(timeoutId);
       addCafeLayers(map);
       bindInteractions(map, selectCafe);
+      void addSeoulSubwayOverlay(map, { beforeLayerId: CLUSTER_LAYER });
       void refreshRuntimeHealth()
         .then(() => refresh())
         .then(resolve, reject);
