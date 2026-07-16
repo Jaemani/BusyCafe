@@ -2042,8 +2042,9 @@ Overpass 원본을 고정해 생성했다.
 - 출구: 원본 2,138개 중 출구 번호가 없는 12개만 제외해 2,126개를 게시했다. 서울시 역명과
   원본 이름이 일치한 1,666개만 official station에 연결했다. 나머지 460개는 위치와 번호를
   보존하되 `association=unlinked`로 두어 최근접 역명을 추정하지 않았다.
-- 표시: 노선은 zoom 9, 역 점은 11.5, 역명은 13, 출구 점은 15.5, 출구 번호는 16.5부터
-  보인다. 라벨 충돌을 허용하지 않고 모든 지하철 layer를 카페 marker 아래에 둔다.
+- 표시: 노선은 zoom 9, 역 점은 11.5, 역명은 13부터 보인다. 출구 번호는 zoom 15.5부터
+  24×24px 원본 이미지의 검정 테두리·노란 배지 안에 표시하며 zoom에 따라 0.84~1.08배로
+  조절한다. 라벨과 배지 충돌을 허용하지 않고 모든 지하철 layer를 카페 marker 아래에 둔다.
 - 전송: 원본 JSON 938,066 bytes, 개별 gzip 합계 약 157KB다. `/data/*`는 브라우저 1시간,
   CDN 7일과 stale-while-revalidate 1일 정책으로 캐시한다. 파일별 로딩 실패는 해당 layer만
   생략하고 카페 지도는 유지한다.
@@ -2076,3 +2077,46 @@ Production 검증:
 위치는 OSM ODbL 파생물이다. `unlinked` 출구를 임의의 역에 귀속하지 않으며, 표본 수동 대조
 전에는 전체 출구 완전성이나 역 연결 정확도를 주장하지 않는다. 지하철 맥락은 탐색 편의
 기능이며 혼잡도 점수 입력에는 사용하지 않는다.
+
+## 2026-07-16 — 모바일 지도 UI와 카페 상세 갱신
+
+기준 구현은 출구 배지 `e600cdd`, safe-area 레이아웃 `8e38aa8`, 상세 접기와 갱신 경쟁 수정
+`101dcfa`, 모바일 상세 시트 `6575cb5`와 외부 지도 링크 보완 `fed7ac2`다. 기존 관측 정보
+축약은 `de617fa`, 출퇴근시간 안내는 `fefa9eb`, 상단 metadata 축약은 `213b2a7`에서
+도입됐다. 이번 판정은 저장소 구현과 자동 테스트에 한정하며 실제 기기나 production 배포
+확인으로 확대하지 않는다.
+
+- `frontend/index.html`의 viewport는 `viewport-fit=cover`와
+  `interactive-widget=resizes-content`를 사용한다. CSS는 지원 브라우저에서 `100dvh`를
+  적용하고, 상단 shell·카페 상세·범례·MapLibre control에 상·우·하·좌 safe-area inset을
+  반영한다. 모바일 상세는 내부 세로 스크롤을 유지한다. 상단 metadata는 서비스 안내·
+  개인정보 링크와 현재 상태를 flex-wrap 영역에 배치하고 모바일 상태 폭을 7.5rem으로
+  제한한다. 서비스 안내 링크의 fragment target은 `/about.html`의 `recent-updates`다.
+- 출구 symbol은 zoom 15.5부터 표시된다. 테스트 fixture는 24×24px 배지의 테두리 RGBA
+  `[28, 24, 17, 255]`, 중앙 RGBA `[255, 212, 0, 255]`, 검정 글자, 배지·글자 overlap 금지와
+  카페 layer 아래 순서를 확인한다.
+- 카페 상세의 관측 badge는 데이터 나이와 근거 강도 또는 지연·현재값 숨김 상태를 한 문자열로
+  만든다. 40rem 이하의 하단 시트는 처음에 최대 `54dvh`·28rem 범위의 compact 상태로 열리고,
+  손잡이 버튼으로 상단 safe area 아래 최대 `90dvh`까지 펼친다. 버튼의 `aria-expanded`와
+  접근성 이름이 상태에 맞게 바뀌며 Escape, 다른 카페 선택 또는 패널 닫기로 다시 접힌다.
+  피드백 양식도 처음에는 별도로 접혀 있고, 버튼으로 펼친 상태는 같은 카페의 현재 요약 갱신
+  뒤에도 유지되며 다른 카페를 열면 다시 접힌다. 외부 지도 링크는 compact 상태에서도
+  숨겨지는 content wrapper 밖에 둔다.
+- 출퇴근시간 안내는 서울시간의 지원 시간대·2026 비근무일 조건에서만 초기화되며 닫기 버튼을
+  누르면 현재 문서에서 숨긴다. storage에는 닫힘 상태를 쓰지 않는다. 이는 시간대별 정확도
+  실측 결과가 아니라 안내 노출 계약 검증이다.
+- 상세가 열린 동안 같은 카페의 불완전 요약이 들어와도 상세 카페명과 기존 관측 지역·거리·
+  시각을 보존한다. 기존 상세보다 관측 시각이 오래된 요약은 무시한다. 불완전하지만 최신 상태
+  요약은 level·freshness를 갱신할 수 있으므로 stale 전환 시 현재 혼잡도는 계속 숨긴다.
+
+검증:
+
+- `cd frontend && npm test -- --run`: 7 files, 31 tests passed. 출구 배지, 출퇴근 안내,
+  상세 시트·피드백 접기와 불완전/과거 요약 경쟁 회귀 테스트 포함
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, gzip CSS 14.18kB, JavaScript 299.76kB. 기존 500kB
+  chunk warning 유지
+
+판정: **PASS(code and automated UI contract), PENDING(device/production verification)**.
+safe-area 수치와 상태 갱신 계약은 코드와 테스트에서 확인했다. 노치가 있는 실제 iOS·Android
+기기의 세로·가로 회전, 가상 키보드와 production asset 배포는 이번 검증에서 측정하지 않았다.
