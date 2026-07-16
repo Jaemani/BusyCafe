@@ -2342,6 +2342,11 @@ iOS 26.5 Safari에서 닫힘·열림 상태를 비교했다.
 - `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
 - iPhone 12 Simulator screenshots: `/tmp/iphone12-brand-closed.png`,
   `/tmp/iphone12-brand-open.png`. 임시 로컬 증거이며 물리 기기 증거로 취급하지 않는다.
+- GitHub `main` 기준 구현 커밋 `dbc5a33`, CI run `29527066062`가 성공했다.
+- Vercel deployment `dpl_G7syDWss2wTjawqLgmn9wCMAPGGX`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 연결했다. immutable production의 iPhone 12 Simulator
+  화면에서 브랜드 목록이 닫힌 기본 상태, 두 하단 버튼, 데이터가 있는 지도와 범례를
+  확인했다. screenshot은 `/tmp/iphone12-brand-production-dbc5a33.png`이다.
 
-판정: **PASS(local automated contract and iPhone 12 Simulator layout),
-PENDING(production deployment and physical devices)**.
+판정: **PASS(automated contract, iPhone 12 Simulator layout and production asset),
+PENDING(physical devices)**.
