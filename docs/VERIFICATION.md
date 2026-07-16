@@ -2310,6 +2310,14 @@ PENDING(physical iPhone standalone and Galaxy)**.
   증거로 취급하지 않는다.
 - page scale 비교 screenshots: `/tmp/iphone12-scale100-over0.png`,
   `/tmp/iphone12-scale105-over0.png`, `/tmp/iphone12-scale100-over40.png`.
+- GitHub `main` 기준 구현은 상단 카드 controller `44a61c1`, 모바일 배치와 문서
+  `8b37c62`이며 CI run `29524126771`이 성공했다.
+- Vercel deployment `dpl_D1ESpwDkwwbgzLYKYyLErH8WQkpy`가 Ready인 것을 확인하고
+  `busy-cafe.vercel.app` alias를 연결했다. canonical HTML에서 두 panel toggle과
+  `data-collapsed` shell을, CSS에서 범례 `1.8rem`과 control `6.5rem` bottom을 확인했다.
+- canonical production을 iPhone 12 Simulator에서 열어 데이터가 있는 두 줄 범례 아래
+  여백이 줄었고 `+/-`가 모두 범례 위에 노출됨을 확인했다. screenshot은
+  `/tmp/iphone12-production-8b37c62.png`이며 임시 로컬 증거다.
 
-판정: **PASS(local iPhone 12 Simulator layout and scale experiment),
-PENDING(production deployment and physical devices)**.
+판정: **PASS(iPhone 12 Simulator layout, scale experiment, CI and production asset),
+PENDING(physical devices)**.
