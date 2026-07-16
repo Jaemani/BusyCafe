@@ -1,7 +1,8 @@
-"""FastAPI application for cached cafe map reads."""
+"""FastAPI application for cached map reads and bounded user submissions."""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
 from app.api.routes import VIEWPORT_TRUNCATED_HEADER, router
@@ -22,6 +23,7 @@ from app.config import (
     API_VERSIONED_MAP_EDGE_MAX_AGE_SEC,
     FRONTEND_CORS_ORIGINS,
     TAILNET_CORS_ORIGIN_REGEX,
+    USER_CONTRIBUTION_MAX_BODY_BYTES,
 )
 
 
@@ -91,14 +93,34 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def cache_read_models(request: Request, call_next):
-        """Permit short browser/CDN reuse of public cache-only read models.
+        """Set strict cache boundaries for public reads and private writes.
 
         Shared caches include the full query string in their key. Canonical tile
         bboxes therefore reuse responses; arbitrary pan coordinates do not.
         Errors and requests carrying credentials are never marked public.
         """
 
+        is_user_submission = (
+            request.method == "POST"
+            and request.url.path.startswith("/api/cafes/")
+        )
+        if is_user_submission:
+            content_length = request.headers.get("content-length")
+            try:
+                body_size = int(content_length) if content_length else 0
+            except ValueError:
+                body_size = USER_CONTRIBUTION_MAX_BODY_BYTES + 1
+            if body_size > USER_CONTRIBUTION_MAX_BODY_BYTES:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "submission payload too large"},
+                    headers={"Cache-Control": "no-store"},
+                )
+
         response = await call_next(request)
+        if is_user_submission:
+            response.headers["Cache-Control"] = "no-store"
+            return response
         cache_control = _cache_control_for_path(request.url.path)
         if (
             request.url.path == "/api/cafes/search"
@@ -125,7 +147,7 @@ def create_app() -> FastAPI:
         allow_origins=list(FRONTEND_CORS_ORIGINS),
         allow_origin_regex=TAILNET_CORS_ORIGIN_REGEX,
         allow_credentials=False,
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
         expose_headers=[VIEWPORT_TRUNCATED_HEADER],
     )

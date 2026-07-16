@@ -12,6 +12,8 @@ from app.config import SCORING_MODEL_VERSION
 from app.models import (
     Base,
     Cafe,
+    CafeCrowdFeedback,
+    CafePlaceReport,
     CafeProviderPlace,
     CafeScore,
     Hotspot,
@@ -67,6 +69,8 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     score = CafeScore.__table__.c
     cycle = IngestCycle.__table__.c
     provider_place = CafeProviderPlace.__table__.c
+    place_report = CafePlaceReport.__table__.c
+    crowd_feedback = CafeCrowdFeedback.__table__.c
 
     assert snapshot.observed_at.type.timezone is True
     assert snapshot.fetched_at.type.timezone is True
@@ -76,6 +80,9 @@ def test_schema_uses_timezone_aware_datetimes_and_postgresql_jsonb():
     assert cycle.completed_at.type.timezone is True
     assert provider_place.verified_at.type.timezone is True
     assert provider_place.last_seen_at.type.timezone is True
+    assert place_report.created_at.type.timezone is True
+    assert crowd_feedback.created_at.type.timezone is True
+    assert crowd_feedback.source_observed_at.type.timezone is True
     assert score.model_version.nullable is False
     assert isinstance(
         snapshot.forecast_json.type.dialect_impl(postgresql.dialect()),
@@ -324,6 +331,59 @@ def test_provider_identity_uniqueness_fails_closed(engine):
                 ),
             ]
         )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+@pytest.mark.parametrize(
+    "report",
+    [
+        CafePlaceReport(
+            cafe_id=None,
+            report_type="missing",
+            status="pending",
+            reported_name=None,
+            created_at=datetime(2026, 7, 16, 12, tzinfo=UTC),
+        ),
+        CafePlaceReport(
+            cafe_id=1,
+            report_type="closed",
+            status="pending",
+            reported_name="원장에 없는 설명",
+            created_at=datetime(2026, 7, 16, 12, tzinfo=UTC),
+        ),
+    ],
+)
+def test_place_report_constraints_reject_ambiguous_payloads(engine, report):
+    with Session(engine) as session:
+        session.add(cafe())
+        session.flush()
+        session.add(report)
+
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+
+def test_crowd_feedback_constraints_reject_unverified_snapshot_mismatch(engine):
+    now = datetime(2026, 7, 16, 12, tzinfo=UTC)
+    with Session(engine) as session:
+        shop = cafe()
+        session.add(shop)
+        session.flush()
+        session.add(
+            CafeCrowdFeedback(
+                cafe_id=shop.id,
+                street_feedback="similar",
+                seat_feedback="available",
+                status="unverified",
+                model_version=SCORING_MODEL_VERSION,
+                predicted_level=2,
+                coverage="covered",
+                source_observed_at=None,
+                created_at=now,
+            )
+        )
+
         with pytest.raises(IntegrityError):
             session.commit()
 

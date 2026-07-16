@@ -1,4 +1,4 @@
-"""Read-only Vercel entry point for the current cafe-crowd snapshot."""
+"""Vercel entry point for cached map reads and moderated user submissions."""
 
 from __future__ import annotations
 

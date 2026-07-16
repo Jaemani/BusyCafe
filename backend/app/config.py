@@ -400,6 +400,9 @@ CAFE_SEARCH_MIN_QUERY_LENGTH: Final = 2
 CAFE_SEARCH_MAX_QUERY_LENGTH: Final = 80
 CAFE_SEARCH_DEFAULT_LIMIT: Final = 20
 CAFE_SEARCH_MAX_LIMIT: Final = 50
+# Anonymous submissions contain only enums or one short cafe name. Reject
+# oversized bodies before JSON parsing; no IP, location, or user token is kept.
+USER_CONTRIBUTION_MAX_BODY_BYTES: Final = 2_048
 # Canonical UI labels map to provider-name aliases observed in Korean catalogs.
 # This is a product filter, not a claim that every matching row is corporate-
 # verified; place identity still comes from the cached provider catalog.
@@ -557,6 +560,7 @@ class Settings(BaseSettings):
     kakao_rest_key: SecretStr | None = None
     naver_client_id: SecretStr | None = None
     naver_client_secret: SecretStr | None = None
+    user_contributions_enabled: bool = True
     database_url: str = (
         "postgresql+psycopg://cafe_crowd:cafe_crowd_dev@localhost:5432/cafe_crowd"
     )

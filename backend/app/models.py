@@ -395,3 +395,123 @@ class CafeScore(Base):
     primary_hotspot: Mapped[Hotspot | None] = relationship(
         back_populates="primary_scores"
     )
+
+
+class CafePlaceReport(Base):
+    """Append-only moderation input; never mutates the cafe catalog directly."""
+
+    __tablename__ = "cafe_place_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "report_type IN ('missing', 'wrong_details', 'closed')",
+            name="report_type_values",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'verified', 'rejected')",
+            name="status_values",
+        ),
+        CheckConstraint(
+            "(cafe_id IS NULL AND report_type = 'missing' "
+            "AND reported_name IS NOT NULL "
+            "AND length(reported_name) BETWEEN 2 AND 80) OR "
+            "(cafe_id IS NOT NULL "
+            "AND report_type IN ('missing', 'wrong_details', 'closed') "
+            "AND reported_name IS NULL)",
+            name="cafe_matches_report_type",
+        ),
+        Index(
+            "ix_cafe_place_reports_status_created",
+            "status",
+            text("created_at DESC"),
+        ),
+        Index(
+            "ix_cafe_place_reports_cafe_created",
+            "cafe_id",
+            text("created_at DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cafe_id: Mapped[int | None] = mapped_column(ForeignKey("cafes.id"))
+    report_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    reported_name: Mapped[str | None] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+
+class CafeCrowdFeedback(Base):
+    """Unverified crowd signal with an immutable prediction snapshot."""
+
+    __tablename__ = "cafe_crowd_feedback"
+    __table_args__ = (
+        CheckConstraint(
+            "street_feedback IN ('busier', 'similar', 'quieter')",
+            name="street_feedback_values",
+        ),
+        CheckConstraint(
+            "seat_feedback IN ('available', 'limited', 'full', 'not_entered')",
+            name="seat_feedback_values",
+        ),
+        CheckConstraint(
+            "status IN ('unverified', 'verified', 'rejected')",
+            name="status_values",
+        ),
+        CheckConstraint(
+            "predicted_level IS NULL OR predicted_level BETWEEN 1 AND 4",
+            name="predicted_level_range",
+        ),
+        CheckConstraint(
+            "coverage IS NULL OR coverage IN ('covered', 'fringe', 'uncovered')",
+            name="coverage_values",
+        ),
+        CheckConstraint(
+            "(model_version IS NULL AND predicted_level IS NULL "
+            "AND coverage IS NULL AND source_observed_at IS NULL) OR "
+            "(model_version IS NOT NULL AND coverage = 'uncovered' "
+            "AND predicted_level IS NULL AND source_observed_at IS NULL) OR "
+            "(model_version IS NOT NULL AND coverage IN ('covered', 'fringe') "
+            "AND predicted_level BETWEEN 1 AND 4 "
+            "AND source_observed_at IS NOT NULL)",
+            name="prediction_snapshot_consistent",
+        ),
+        Index(
+            "ix_cafe_crowd_feedback_cafe_created",
+            "cafe_id",
+            text("created_at DESC"),
+        ),
+        Index(
+            "ix_cafe_crowd_feedback_model_created",
+            "model_version",
+            text("created_at DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cafe_id: Mapped[int] = mapped_column(
+        ForeignKey("cafes.id"), nullable=False
+    )
+    street_feedback: Mapped[str] = mapped_column(String(16), nullable=False)
+    seat_feedback: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="unverified",
+        server_default="unverified",
+    )
+    model_version: Mapped[str | None] = mapped_column(String(64))
+    predicted_level: Mapped[int | None] = mapped_column(Integer)
+    coverage: Mapped[str | None] = mapped_column(String(16))
+    source_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )

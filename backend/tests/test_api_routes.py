@@ -15,8 +15,10 @@ from app.api.routes import _observation_age_minutes, _observation_freshness
 from app.config import (
     CURRENT_DISPLAY_MAX_AGE_MIN,
     FRESHNESS_MAX_FUTURE_SKEW_MIN,
+    FRONTEND_CORS_ORIGINS,
     OVERTURE_RELEASE,
     SCORING_MODEL_VERSION,
+    get_settings,
 )
 from app.database import get_db
 from app.main import (
@@ -30,6 +32,8 @@ from app.main import (
 from app.models import (
     Base,
     Cafe,
+    CafeCrowdFeedback,
+    CafePlaceReport,
     CafeProviderPlace,
     CafeScore,
     Hotspot,
@@ -655,6 +659,337 @@ def test_cafe_search_additional_brand_aliases(
     assert alias_response.status_code == 200
     assert canonical_response.json() == alias_response.json()
     assert catalog_name in [item["name"] for item in canonical_response.json()]
+
+
+def test_cafe_feedback_persists_exact_prediction_snapshot_without_pii(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.execute(
+            select(Cafe).where(Cafe.active.is_(True))
+        ).scalar_one()
+        cafe_id = cafe.id
+        original_catalog = (cafe.name, cafe.lat, cafe.lng, cafe.active)
+        score = session.get(CafeScore, cafe_id)
+        assert score is not None
+        expected_observed_at = score.source_observed_at
+
+    response = api_client.post(
+        f"/api/cafes/{cafe_id}/feedback",
+        json={
+            "street_feedback": "busier",
+            "seat_feedback": "limited",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"accepted": True}
+    with factory() as session:
+        stored = session.execute(
+            select(CafeCrowdFeedback)
+        ).scalar_one()
+        cafe = session.get(Cafe, cafe_id)
+        assert cafe is not None
+        assert stored.cafe_id == cafe_id
+        assert stored.street_feedback == "busier"
+        assert stored.seat_feedback == "limited"
+        assert stored.status == "unverified"
+        assert stored.model_version == SCORING_MODEL_VERSION
+        assert stored.predicted_level == 2
+        assert stored.coverage == "covered"
+        assert stored.source_observed_at == expected_observed_at
+        assert (cafe.name, cafe.lat, cafe.lng, cafe.active) == original_catalog
+        assert set(CafeCrowdFeedback.__table__.columns.keys()) == {
+            "id",
+            "cafe_id",
+            "street_feedback",
+            "seat_feedback",
+            "status",
+            "model_version",
+            "predicted_level",
+            "coverage",
+            "source_observed_at",
+            "created_at",
+        }
+
+
+def test_cafe_feedback_without_score_records_empty_prediction_snapshot(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = Cafe(
+            overture_id="overture:feedback-no-score",
+            source_release="test",
+            source_confidence=1.0,
+            primary_category="cafe",
+            name="점수 없는 카페",
+            lat=37.5,
+            lng=127.0,
+        )
+        session.add(cafe)
+        session.commit()
+        cafe_id = cafe.id
+
+    response = api_client.post(
+        f"/api/cafes/{cafe_id}/feedback",
+        json={
+            "street_feedback": "similar",
+            "seat_feedback": "not_entered",
+        },
+    )
+
+    assert response.status_code == 202
+    with factory() as session:
+        stored = session.execute(
+            select(CafeCrowdFeedback).where(
+                CafeCrowdFeedback.cafe_id == cafe_id
+            )
+        ).scalar_one()
+        assert stored.model_version is None
+        assert stored.predicted_level is None
+        assert stored.coverage is None
+        assert stored.source_observed_at is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"street_feedback": "unknown", "seat_feedback": "available"},
+        {"street_feedback": "quieter", "seat_feedback": "unknown"},
+        {
+            "street_feedback": "quieter",
+            "seat_feedback": "full",
+            "latitude": 37.5,
+        },
+    ],
+)
+def test_cafe_feedback_rejects_unbounded_or_unknown_payload(
+    api_client,
+    payload,
+) -> None:
+    response = api_client.post("/api/cafes/1/feedback", json=payload)
+
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafeCrowdFeedback).count() == 0
+
+
+def test_user_submission_rejects_oversized_body_before_parsing(api_client) -> None:
+    response = api_client.post(
+        "/api/cafes/reports",
+        json={
+            "report_type": "missing",
+            "reported_name": "새 카페",
+            "padding": "x" * 3_000,
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.headers["cache-control"] == "no-store"
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafePlaceReport).count() == 0
+
+
+def test_cafe_feedback_rejects_missing_or_inactive_cafe(api_client) -> None:
+    payload = {
+        "street_feedback": "similar",
+        "seat_feedback": "not_entered",
+    }
+
+    missing = api_client.post("/api/cafes/999999/feedback", json=payload)
+    inactive = api_client.post("/api/cafes/2/feedback", json=payload)
+
+    assert missing.status_code == 404
+    assert inactive.status_code == 404
+    assert missing.headers["cache-control"] == "no-store"
+    assert inactive.headers["cache-control"] == "no-store"
+
+
+def test_place_reports_are_moderation_only_and_keep_catalog_unchanged(
+    api_client,
+) -> None:
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        cafe = session.execute(
+            select(Cafe).where(Cafe.active.is_(True))
+        ).scalar_one()
+        cafe_id = cafe.id
+        original_catalog = (cafe.name, cafe.lat, cafe.lng, cafe.active)
+
+    existing = api_client.post(
+        f"/api/cafes/{cafe_id}/report",
+        json={
+            "report_type": "wrong_details",
+        },
+    )
+    existing_missing = api_client.post(
+        f"/api/cafes/{cafe_id}/report",
+        json={"report_type": "missing"},
+    )
+    missing = api_client.post(
+        "/api/cafes/reports",
+        json={"report_type": "missing", "reported_name": "새 카페"},
+    )
+
+    assert existing.status_code == 202
+    assert existing_missing.status_code == 202
+    assert missing.status_code == 202
+    assert existing.headers["cache-control"] == "no-store"
+    assert missing.headers["cache-control"] == "no-store"
+    assert existing.json() == {"accepted": True}
+    assert existing_missing.json() == {"accepted": True}
+    assert missing.json() == {"accepted": True}
+    with factory() as session:
+        reports = session.execute(
+            select(CafePlaceReport).order_by(CafePlaceReport.id)
+        ).scalars().all()
+        cafe = session.get(Cafe, cafe_id)
+        assert cafe is not None
+        assert [report.report_type for report in reports] == [
+            "wrong_details",
+            "missing",
+            "missing",
+        ]
+        assert reports[0].cafe_id == cafe_id
+        assert reports[0].reported_name is None
+        assert reports[1].cafe_id == cafe_id
+        assert reports[1].reported_name is None
+        assert reports[2].cafe_id is None
+        assert reports[2].reported_name == "새 카페"
+        assert all(report.status == "pending" for report in reports)
+        assert (cafe.name, cafe.lat, cafe.lng, cafe.active) == original_catalog
+        assert set(CafePlaceReport.__table__.columns.keys()) == {
+            "id",
+            "cafe_id",
+            "report_type",
+            "status",
+            "reported_name",
+            "created_at",
+        }
+
+
+@pytest.mark.parametrize(
+    ("path", "payload", "expected_status"),
+    [
+        (
+            "/api/cafes/1/report",
+            {"report_type": "missing", "reported_name": "카페"},
+            422,
+        ),
+        ("/api/cafes/reports", {"report_type": "closed"}, 422),
+        ("/api/cafes/reports", {"report_type": "missing"}, 422),
+        (
+            "/api/cafes/reports",
+            {"report_type": "missing", "reported_name": "x"},
+            422,
+        ),
+        (
+            "/api/cafes/reports",
+            {"report_type": "missing", "reported_name": "x" * 81},
+            422,
+        ),
+        (
+            "/api/cafes/reports",
+            {"report_type": "missing", "longitude": 127.0},
+            422,
+        ),
+        ("/api/cafes/2/report", {"report_type": "closed"}, 404),
+    ],
+)
+def test_place_reports_reject_invalid_payload_or_inactive_cafe(
+    api_client,
+    path: str,
+    payload: dict[str, object],
+    expected_status: int,
+) -> None:
+    response = api_client.post(path, json=payload)
+
+    assert response.status_code == expected_status
+    assert response.headers["cache-control"] == "no-store"
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafePlaceReport).count() == 0
+
+
+def test_submission_cors_preflight_allows_post(api_client) -> None:
+    response = api_client.options(
+        "/api/cafes/1/feedback",
+        headers={
+            "Origin": FRONTEND_CORS_ORIGINS[0],
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "POST" in response.headers["access-control-allow-methods"]
+
+
+def test_user_contribution_kill_switch_rejects_without_writing(
+    api_client,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("USER_CONTRIBUTIONS_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        response = api_client.post(
+            "/api/cafes/1/feedback",
+            json={
+                "street_feedback": "similar",
+                "seat_feedback": "not_entered",
+            },
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafeCrowdFeedback).count() == 0
+
+
+@pytest.mark.parametrize(
+    ("database_url", "snapshot"),
+    [
+        ("sqlite+pysqlite:////tmp/preview.db", None),
+        (
+            "postgresql+psycopg://cafe:secret@example.test/cafe",
+            "1",
+        ),
+    ],
+)
+def test_user_contributions_reject_read_only_runtime(
+    api_client,
+    monkeypatch,
+    database_url: str,
+    snapshot: str | None,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", database_url)
+    if snapshot is None:
+        monkeypatch.delenv("CAFE_CROWD_SNAPSHOT", raising=False)
+    else:
+        monkeypatch.setenv("CAFE_CROWD_SNAPSHOT", snapshot)
+    get_settings.cache_clear()
+    try:
+        response = api_client.post(
+            "/api/cafes/reports",
+            json={"report_type": "missing", "reported_name": "새 카페"},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    factory = api_client.app.state.test_session_factory
+    with factory() as session:
+        assert session.query(CafePlaceReport).count() == 0
 
 
 @pytest.mark.parametrize(

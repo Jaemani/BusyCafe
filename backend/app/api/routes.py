@@ -1,4 +1,4 @@
-"""Read-only map API backed exclusively by the local PostgreSQL cache."""
+"""Cached map reads plus append-only moderated user submissions."""
 
 from __future__ import annotations
 
@@ -26,10 +26,13 @@ from app.config import (
     OVERTURE_RELEASE,
     SEOUL_BBOX,
     STALE_WARN_MIN,
+    get_settings,
 )
 from app.database import get_db
 from app.models import (
     Cafe,
+    CafeCrowdFeedback,
+    CafePlaceReport,
     CafeScore,
     Hotspot,
     HotspotServingState,
@@ -38,6 +41,7 @@ from app.models import (
 )
 from app.schemas import (
     CafeDetailResponse,
+    CafeFeedbackRequest,
     CafeMapResponse,
     CafeMapSummaryResponse,
     CafeSearchResponse,
@@ -45,10 +49,13 @@ from app.schemas import (
     DataSourceManifestItem,
     EvidenceResponse,
     ExternalLinksResponse,
+    ExistingCafePlaceReportRequest,
     HealthResponse,
     HotspotStatusResponse,
     LicenseLink,
+    MissingCafePlaceReportRequest,
     SourceManifestResponse,
+    SubmissionAcceptedResponse,
     TrendPointResponse,
 )
 
@@ -181,6 +188,22 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _require_user_contributions() -> None:
+    """Fail closed for disabled or bundled read-only deployments."""
+
+    settings = get_settings()
+    database_url = settings.database_url.strip().lower()
+    if (
+        not settings.user_contributions_enabled
+        or os.getenv("CAFE_CROWD_SNAPSHOT") == "1"
+        or not database_url.startswith(("postgresql://", "postgresql+"))
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="user contributions unavailable",
+        )
 
 
 def _parse_bbox(value: str) -> tuple[float, float, float, float]:
@@ -728,6 +751,107 @@ def search_cafes(
         _cafe_search_response(cafe, score, hotspot, now=request_time)
         for cafe, score, hotspot in db.execute(statement).all()
     ]
+
+
+@router.post(
+    "/cafes/reports",
+    response_model=SubmissionAcceptedResponse,
+    status_code=202,
+)
+def report_missing_cafe(
+    payload: MissingCafePlaceReportRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SubmissionAcceptedResponse:
+    """Queue a missing-place claim for moderation; never edit the catalog."""
+
+    _require_user_contributions()
+    report = CafePlaceReport(
+        cafe_id=None,
+        report_type="missing",
+        status="pending",
+        reported_name=payload.reported_name,
+        created_at=datetime.now(UTC),
+    )
+    db.add(report)
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return SubmissionAcceptedResponse()
+
+
+@router.post(
+    "/cafes/{cafe_id}/feedback",
+    response_model=SubmissionAcceptedResponse,
+    status_code=202,
+)
+def submit_cafe_feedback(
+    cafe_id: int,
+    payload: CafeFeedbackRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SubmissionAcceptedResponse:
+    """Store an unverified crowd signal beside the served-model snapshot."""
+
+    _require_user_contributions()
+    row = db.execute(
+        select(Cafe, CafeScore)
+        .outerjoin(CafeScore, CafeScore.cafe_id == Cafe.id)
+        .where(Cafe.id == cafe_id, Cafe.active.is_(True))
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="cafe not found")
+    _, score = row
+    created_at = datetime.now(UTC)
+    feedback = CafeCrowdFeedback(
+        cafe_id=cafe_id,
+        street_feedback=payload.street_feedback,
+        seat_feedback=payload.seat_feedback,
+        status="unverified",
+        model_version=score.model_version if score else None,
+        predicted_level=score.level if score else None,
+        coverage=score.coverage if score else None,
+        source_observed_at=(
+            _utc(score.source_observed_at) if score else None
+        ),
+        created_at=created_at,
+    )
+    db.add(feedback)
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return SubmissionAcceptedResponse()
+
+
+@router.post(
+    "/cafes/{cafe_id}/report",
+    response_model=SubmissionAcceptedResponse,
+    status_code=202,
+)
+def report_existing_cafe(
+    cafe_id: int,
+    payload: ExistingCafePlaceReportRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> SubmissionAcceptedResponse:
+    """Queue a catalog correction for moderation; never edit the cafe row."""
+
+    _require_user_contributions()
+    exists = db.execute(
+        select(Cafe.id).where(Cafe.id == cafe_id, Cafe.active.is_(True))
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(status_code=404, detail="cafe not found")
+    created_at = datetime.now(UTC)
+    report = CafePlaceReport(
+        cafe_id=cafe_id,
+        report_type=payload.report_type,
+        status="pending",
+        reported_name=None,
+        created_at=created_at,
+    )
+    db.add(report)
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return SubmissionAcceptedResponse()
 
 
 @router.get("/cafes/{cafe_id}", response_model=CafeDetailResponse)

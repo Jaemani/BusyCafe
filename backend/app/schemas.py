@@ -342,6 +342,37 @@ class CafeDetailResponse(CafeMapResponse):
     forecast_1h: dict[str, Any] | None = None
 
 
+class CafeFeedbackRequest(BaseModel):
+    """Bounded anonymous observation; unknown fields fail closed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    street_feedback: Literal["busier", "similar", "quieter"]
+    seat_feedback: Literal["available", "limited", "full", "not_entered"]
+
+
+class ExistingCafePlaceReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_type: Literal["missing", "wrong_details", "closed"]
+
+
+class MissingCafePlaceReportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    report_type: Literal["missing"] = "missing"
+    reported_name: str = Field(min_length=2, max_length=80)
+
+    @field_validator("reported_name", mode="before")
+    @classmethod
+    def normalize_reported_name(cls, value: Any) -> Any:
+        return " ".join(value.split()) if isinstance(value, str) else value
+
+
+class SubmissionAcceptedResponse(BaseModel):
+    accepted: Literal[True] = True
+
+
 class HotspotStatusResponse(BaseModel):
     id: int
     area_cd: str

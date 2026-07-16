@@ -78,6 +78,18 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
                     "hotspot_serving_states"
                 )
             }
+            place_report_columns = {
+                item["name"]: item
+                for item in inspect(connection).get_columns(
+                    "cafe_place_reports"
+                )
+            }
+            feedback_columns = {
+                item["name"]: item
+                for item in inspect(connection).get_columns(
+                    "cafe_crowd_feedback"
+                )
+            }
             snapshot_indexes = {
                 item["name"]
                 for item in inspect(connection).get_indexes(
@@ -138,6 +150,28 @@ def test_model_version_migration_backfills_existing_scores(tmp_path: Path, monke
             "trend_12h_json",
             "forecast_1h_json",
         }
+        assert set(place_report_columns) == {
+            "id",
+            "cafe_id",
+            "report_type",
+            "status",
+            "reported_name",
+            "created_at",
+        }
+        assert place_report_columns["cafe_id"]["nullable"] is True
+        assert set(feedback_columns) == {
+            "id",
+            "cafe_id",
+            "street_feedback",
+            "seat_feedback",
+            "status",
+            "model_version",
+            "predicted_level",
+            "coverage",
+            "source_observed_at",
+            "created_at",
+        }
+        assert feedback_columns["cafe_id"]["nullable"] is False
         assert provider_refs == [
             (
                 "naver",
