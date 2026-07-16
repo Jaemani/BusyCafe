@@ -79,6 +79,52 @@ let streetFeedback: StreetFeedback | null = null;
 let seatFeedback: SeatFeedback | null = null;
 let feedbackState: "idle" | "submitting" | "submitted" = "idle";
 let reportState: "idle" | "submitting" | "submitted" = "idle";
+let feedbackEligible = false;
+let feedbackExpanded = false;
+
+function ensureFeedbackDisclosure(): HTMLButtonElement {
+  const existing = document.querySelector<HTMLButtonElement>(
+    "#crowd-feedback-disclosure",
+  );
+  if (existing) return existing;
+
+  const section = requiredElement<HTMLElement>("#crowd-feedback");
+  const button = document.createElement("button");
+  button.id = "crowd-feedback-disclosure";
+  button.className = "feedback-disclosure feedback-submit";
+  button.type = "button";
+  button.textContent = "지금 상태 알려주기";
+  button.setAttribute("aria-controls", section.id);
+  button.setAttribute("aria-expanded", "false");
+  button.hidden = true;
+  button.addEventListener("click", () => {
+    if (!feedbackEligible) return;
+    feedbackExpanded = !feedbackExpanded;
+    syncFeedbackVisibility(true);
+  });
+  section.before(button);
+  return button;
+}
+
+function syncFeedbackVisibility(eligible: boolean): void {
+  feedbackEligible = eligible;
+  if (!eligible) feedbackExpanded = false;
+  const section = requiredElement<HTMLElement>("#crowd-feedback");
+  const disclosure = ensureFeedbackDisclosure();
+  const expanded = eligible && feedbackExpanded;
+  section.hidden = !expanded;
+  disclosure.hidden = !eligible;
+  disclosure.textContent = expanded ? "피드백 접기" : "지금 상태 알려주기";
+  disclosure.setAttribute("aria-expanded", String(expanded));
+
+  const panel = requiredElement<HTMLElement>("#cafe-panel");
+  panel.dataset.feedbackState = !eligible
+    ? "unavailable"
+    : expanded
+      ? "expanded"
+      : "collapsed";
+  panel.classList.toggle("feedback-expanded", expanded);
+}
 
 function setExternalLink(selector: string, href: string | null): boolean {
   const link = requiredElement<HTMLAnchorElement>(selector);
@@ -109,8 +155,9 @@ function resetCrowdFeedback(): void {
   streetFeedback = null;
   seatFeedback = null;
   feedbackState = "idle";
+  feedbackExpanded = false;
+  syncFeedbackVisibility(false);
   const section = requiredElement<HTMLElement>("#crowd-feedback");
-  section.hidden = true;
   requiredElement<HTMLElement>("#crowd-feedback-status").textContent = "";
   const submit = requiredElement<HTMLButtonElement>("#crowd-feedback-submit");
   submit.textContent = "피드백 보내기";
@@ -168,6 +215,8 @@ export function initializeCrowdFeedback(
   api: CafeContributionApi = new HttpCafeContributionApi(),
 ): void {
   const section = requiredElement<HTMLElement>("#crowd-feedback");
+  feedbackExpanded = false;
+  syncFeedbackVisibility(false);
   section.addEventListener("click", (event) => {
     const target = event.target;
     if (!(target instanceof Element) || feedbackState !== "idle") return;
@@ -313,8 +362,7 @@ function renderCafePanel(cafe: CafeProperties): void {
   const googleLink = requiredElement<HTMLAnchorElement>("#map-link-google");
   if (!googleLink.hidden) googleLink.dataset.analyticsLinkType = "direct";
   requiredElement<HTMLElement>("#external-map-links").hidden = !hasExternalLink;
-  requiredElement<HTMLElement>("#crowd-feedback").hidden =
-    cafe.level === null || cafe.freshness === "stale";
+  syncFeedbackVisibility(cafe.level !== null && cafe.freshness !== "stale");
   requiredElement<HTMLElement>("#place-report").hidden = false;
   requiredElement<HTMLElement>("#cafe-panel").hidden = false;
   document.body.classList.add("panel-open");
@@ -367,7 +415,40 @@ export function showCafePanelError(
 export function updateOpenCafePanel(cafe: CafeMapProperties): void {
   if (openCafeId !== cafe.id) return;
   if (openCafeDetail !== null) {
-    openCafeDetail = { ...openCafeDetail, ...cafe };
+    const currentObservedAt =
+      openCafeDetail.observedAt === null
+        ? null
+        : Date.parse(openCafeDetail.observedAt);
+    const incomingObservedAt =
+      cafe.observedAt === null ? null : Date.parse(cafe.observedAt);
+    const incomingIsOlder =
+      currentObservedAt !== null &&
+      Number.isFinite(currentObservedAt) &&
+      incomingObservedAt !== null &&
+      Number.isFinite(incomingObservedAt) &&
+      incomingObservedAt < currentObservedAt;
+    if (incomingIsOlder) return;
+
+    const hasCompleteIncomingEvidence =
+      cafe.hotspotName !== null &&
+      cafe.distanceM !== null &&
+      cafe.observedAt !== null;
+    openCafeDetail = {
+      ...openCafeDetail,
+      coverage: cafe.coverage,
+      level: cafe.level,
+      confidence: cafe.confidence,
+      freshness: cafe.freshness,
+      observationAgeMinutes: cafe.observationAgeMinutes,
+      observationAgeMeasuredAtMs: cafe.observationAgeMeasuredAtMs,
+      ...(hasCompleteIncomingEvidence
+        ? {
+            hotspotName: cafe.hotspotName,
+            distanceM: cafe.distanceM,
+            observedAt: cafe.observedAt,
+          }
+        : {}),
+    };
     renderCafePanel(openCafeDetail);
     return;
   }

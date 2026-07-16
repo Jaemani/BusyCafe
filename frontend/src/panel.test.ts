@@ -11,7 +11,11 @@ vi.mock("./analytics", () => ({
   trackCrowdFeedback: analyticsMocks.trackCrowdFeedback,
 }));
 
-import { initializeCrowdFeedback, showCafePanel } from "./panel";
+import {
+  initializeCrowdFeedback,
+  showCafePanel,
+  updateOpenCafePanel,
+} from "./panel";
 
 function panelMarkup(): string {
   return `
@@ -94,6 +98,9 @@ describe("crowd feedback", () => {
 
   it("requires both answers, submits once, and resets for a new cafe", async () => {
     showCafePanel(cafe("first"));
+    document.querySelector<HTMLButtonElement>(
+      "#crowd-feedback-disclosure",
+    )!.click();
     const quieter = document.querySelector<HTMLButtonElement>(
       '[data-street-feedback="quieter"]',
     )!;
@@ -163,6 +170,9 @@ describe("crowd feedback", () => {
   it("shows a feedback error and enables retry", async () => {
     contributionApi.submitCafeFeedback.mockRejectedValueOnce(new Error("offline"));
     showCafePanel(cafe("retry"));
+    document.querySelector<HTMLButtonElement>(
+      "#crowd-feedback-disclosure",
+    )!.click();
     const street = document.querySelector<HTMLButtonElement>(
       '[data-street-feedback="similar"]',
     )!;
@@ -229,5 +239,81 @@ describe("crowd feedback", () => {
     );
     expect(document.body.textContent).not.toContain("장소 원장 품질");
     expect(document.body.textContent).not.toContain("2026-07-14T12:33");
+  });
+
+  it("keeps feedback collapsed until explicit expansion", () => {
+    showCafePanel(cafe("compact"));
+
+    const panel = document.querySelector<HTMLElement>("#cafe-panel")!;
+    const disclosure = document.querySelector<HTMLButtonElement>(
+      "#crowd-feedback-disclosure",
+    )!;
+    const feedback = document.querySelector<HTMLElement>("#crowd-feedback")!;
+    expect(disclosure.hidden).toBe(false);
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(feedback.hidden).toBe(true);
+    expect(panel.dataset.feedbackState).toBe("collapsed");
+
+    disclosure.click();
+    expect(disclosure.getAttribute("aria-expanded")).toBe("true");
+    expect(feedback.hidden).toBe(false);
+    expect(panel.dataset.feedbackState).toBe("expanded");
+    expect(panel.classList.contains("feedback-expanded")).toBe(true);
+
+    updateOpenCafePanel({
+      ...cafe("compact"),
+      observationAgeMinutes: 6,
+    });
+    expect(feedback.hidden).toBe(false);
+
+    showCafePanel(cafe("next"));
+    expect(feedback.hidden).toBe(true);
+    expect(panel.dataset.feedbackState).toBe("collapsed");
+  });
+
+  it("does not let incomplete or older summaries erase current detail evidence", () => {
+    const detail = {
+      ...cafe("stable"),
+      name: "최신 상세 이름",
+      hotspotName: "최신 관측 지역",
+      distanceM: 321,
+      observedAt: "2026-07-16T10:00:00Z",
+    };
+    showCafePanel(detail);
+
+    updateOpenCafePanel({
+      ...detail,
+      name: "캐시된 요약 이름",
+      level: null,
+      confidence: null,
+      freshness: "stale",
+      hotspotName: null,
+      distanceM: null,
+      observedAt: null,
+      observationAgeMinutes: 121,
+    });
+    expect(document.querySelector("#cafe-name")?.textContent).toBe(
+      "최신 상세 이름",
+    );
+    expect(document.querySelector("#cafe-evidence")?.textContent).toBe(
+      "최신 관측 지역 관측 기준 · 321m 거리",
+    );
+    expect(document.querySelector("#cafe-level")?.textContent).toBe(
+      "현재 혼잡도를 표시하지 않아요",
+    );
+
+    updateOpenCafePanel({
+      ...detail,
+      level: 4,
+      hotspotName: "과거 관측 지역",
+      distanceM: 999,
+      observedAt: "2026-07-16T09:55:00Z",
+    });
+    expect(document.querySelector("#cafe-evidence")?.textContent).toBe(
+      "최신 관측 지역 관측 기준 · 321m 거리",
+    );
+    expect(document.querySelector("#cafe-level")?.textContent).toBe(
+      "현재 혼잡도를 표시하지 않아요",
+    );
   });
 });
