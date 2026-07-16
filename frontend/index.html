@@ -2,7 +2,10 @@
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta
       name="description"
       content="서울 주요 상권에서 상대적으로 한산할 가능성이 높은 카페를 찾는 지도"
@@ -15,85 +18,89 @@
     <main id="app">
       <div id="map" aria-label="서울 카페 지도"></div>
 
-      <header class="map-header">
-        <div class="brand">
-          <img class="brand-mark" src="/logo.png" alt="" />
-          <div>
-            <p class="eyebrow">BUSY CAFE</p>
-            <h1>지금, 어디가 덜 붐빌까?</h1>
+      <div class="map-top-shell">
+        <header class="map-header">
+          <div class="brand">
+            <img class="brand-mark" src="/logo.png" alt="" />
+            <div>
+              <p class="eyebrow">BUSY CAFE</p>
+              <h1>지금, 어디가 덜 붐빌까?</h1>
+            </div>
           </div>
-        </div>
-        <p id="search-status" class="search-status" role="status">
-          지도를 준비하고 있습니다
-        </p>
+          <div class="map-header-meta">
+            <p id="search-status" class="search-status" role="status">
+              지도를 준비하고 있습니다
+            </p>
+            <a href="/privacy.html">개인정보</a>
+          </div>
+          <section class="cafe-search" aria-label="카페 찾기">
+            <form id="cafe-search-form" class="cafe-search-form" role="search">
+              <label class="sr-only" for="cafe-search-input">카페 이름 또는 주소</label>
+              <span class="cafe-search-icon" aria-hidden="true">⌕</span>
+              <input
+                id="cafe-search-input"
+                name="q"
+                type="search"
+                inputmode="search"
+                enterkeyhint="search"
+                autocomplete="off"
+                placeholder="가려는 카페를 검색해 보세요"
+                aria-controls="cafe-search-results"
+                aria-describedby="cafe-search-message"
+                aria-expanded="false"
+              />
+              <button id="cafe-search-submit" type="submit">검색</button>
+            </form>
+            <div id="cafe-brand-filters" class="cafe-brand-filters" aria-label="프랜차이즈 필터">
+              <button type="button" data-cafe-brand="스타벅스" aria-pressed="false">스타벅스</button>
+              <button type="button" data-cafe-brand="투썸플레이스" aria-pressed="false">투썸</button>
+              <button type="button" data-cafe-brand="메가MGC커피" aria-pressed="false">메가MGC</button>
+              <button type="button" data-cafe-brand="컴포즈커피" aria-pressed="false">컴포즈</button>
+              <button type="button" data-cafe-brand="빽다방" aria-pressed="false">빽다방</button>
+              <button type="button" data-cafe-brand="이디야커피" aria-pressed="false">이디야</button>
+              <button type="button" data-cafe-brand="폴바셋" aria-pressed="false">폴바셋</button>
+              <button type="button" data-cafe-brand="더벤티" aria-pressed="false">더벤티</button>
+              <button type="button" data-cafe-brand="매머드커피" aria-pressed="false">매머드</button>
+              <button type="button" data-cafe-brand="텐퍼센트커피" aria-pressed="false">텐퍼센트</button>
+              <button type="button" data-cafe-brand="할리스" aria-pressed="false">할리스</button>
+              <button type="button" data-cafe-brand="탐앤탐스" aria-pressed="false">탐앤탐스</button>
+              <button type="button" data-cafe-brand="카페베네" aria-pressed="false">카페베네</button>
+              <button type="button" data-cafe-brand="커피빈" aria-pressed="false">커피빈</button>
+              <button type="button" data-cafe-brand="엔제리너스" aria-pressed="false">엔제리너스</button>
+            </div>
+            <div id="cafe-search-popover" class="cafe-search-popover" hidden>
+              <p id="cafe-search-message" class="cafe-search-message" role="status"></p>
+              <ul id="cafe-search-results" class="cafe-search-results" aria-label="카페 검색 결과"></ul>
+              <form id="missing-cafe-report" class="missing-cafe-report" hidden>
+                <label for="missing-cafe-name">찾는 카페가 없어요</label>
+                <p>카페 이름만 알려주시면 원장을 확인할게요.</p>
+                <div>
+                  <input
+                    id="missing-cafe-name"
+                    name="reported_name"
+                    type="text"
+                    minlength="2"
+                    maxlength="80"
+                    autocomplete="off"
+                    placeholder="카페 이름"
+                    required
+                  />
+                  <button type="submit">알려주기</button>
+                </div>
+                <p id="missing-cafe-report-status" role="status"></p>
+              </form>
+            </div>
+          </section>
+          <p class="source-line">
+            서울시 실시간 도시데이터 기반
+            · <a href="/about.html">서비스·데이터 안내</a>
+          </p>
+        </header>
         <aside id="commute-notice" class="commute-notice" role="note" hidden>
           <p>출퇴근시간에는 유동인구가 많아 정확도가 낮아질 수 있습니다.</p>
           <button id="commute-notice-close" type="button" aria-label="출퇴근시간 안내 닫기">×</button>
         </aside>
-        <section class="cafe-search" aria-label="카페 찾기">
-          <form id="cafe-search-form" class="cafe-search-form" role="search">
-            <label class="sr-only" for="cafe-search-input">카페 이름 또는 주소</label>
-            <span class="cafe-search-icon" aria-hidden="true">⌕</span>
-            <input
-              id="cafe-search-input"
-              name="q"
-              type="search"
-              inputmode="search"
-              enterkeyhint="search"
-              autocomplete="off"
-              placeholder="가려는 카페를 검색해 보세요"
-              aria-controls="cafe-search-results"
-              aria-describedby="cafe-search-message"
-              aria-expanded="false"
-            />
-            <button id="cafe-search-submit" type="submit">검색</button>
-          </form>
-          <div id="cafe-brand-filters" class="cafe-brand-filters" aria-label="프랜차이즈 필터">
-            <button type="button" data-cafe-brand="스타벅스" aria-pressed="false">스타벅스</button>
-            <button type="button" data-cafe-brand="투썸플레이스" aria-pressed="false">투썸</button>
-            <button type="button" data-cafe-brand="메가MGC커피" aria-pressed="false">메가MGC</button>
-            <button type="button" data-cafe-brand="컴포즈커피" aria-pressed="false">컴포즈</button>
-            <button type="button" data-cafe-brand="빽다방" aria-pressed="false">빽다방</button>
-            <button type="button" data-cafe-brand="이디야커피" aria-pressed="false">이디야</button>
-            <button type="button" data-cafe-brand="폴바셋" aria-pressed="false">폴바셋</button>
-            <button type="button" data-cafe-brand="더벤티" aria-pressed="false">더벤티</button>
-            <button type="button" data-cafe-brand="매머드커피" aria-pressed="false">매머드</button>
-            <button type="button" data-cafe-brand="텐퍼센트커피" aria-pressed="false">텐퍼센트</button>
-            <button type="button" data-cafe-brand="할리스" aria-pressed="false">할리스</button>
-            <button type="button" data-cafe-brand="탐앤탐스" aria-pressed="false">탐앤탐스</button>
-            <button type="button" data-cafe-brand="카페베네" aria-pressed="false">카페베네</button>
-            <button type="button" data-cafe-brand="커피빈" aria-pressed="false">커피빈</button>
-            <button type="button" data-cafe-brand="엔제리너스" aria-pressed="false">엔제리너스</button>
-          </div>
-          <div id="cafe-search-popover" class="cafe-search-popover" hidden>
-            <p id="cafe-search-message" class="cafe-search-message" role="status"></p>
-            <ul id="cafe-search-results" class="cafe-search-results" aria-label="카페 검색 결과"></ul>
-            <form id="missing-cafe-report" class="missing-cafe-report" hidden>
-              <label for="missing-cafe-name">찾는 카페가 없어요</label>
-              <p>카페 이름만 알려주시면 원장을 확인할게요.</p>
-              <div>
-                <input
-                  id="missing-cafe-name"
-                  name="reported_name"
-                  type="text"
-                  minlength="2"
-                  maxlength="80"
-                  autocomplete="off"
-                  placeholder="카페 이름"
-                  required
-                />
-                <button type="submit">알려주기</button>
-              </div>
-              <p id="missing-cafe-report-status" role="status"></p>
-            </form>
-          </div>
-        </section>
-        <p class="source-line">
-          서울시 실시간 도시데이터 기반
-          · <a href="/about.html">서비스·데이터 안내</a>
-          · <a href="/privacy.html">개인정보</a>
-        </p>
-      </header>
+      </div>
 
       <aside id="cafe-panel" class="cafe-panel" aria-live="polite" hidden>
         <button id="panel-close" class="panel-close" type="button" aria-label="닫기">×</button>
