@@ -2369,6 +2369,10 @@ PENDING(physical devices)**.
 - `cd frontend && npm test`: 11 files, 59 tests passed
 - `cd frontend && npm run typecheck`: passed
 - `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+- GitHub `main` 기준 구현 커밋 `24c3845`, CI run `29553056243`이 성공했다.
+- Vercel deployment `dpl_42ixmLWT32nkyCfqJWpPEXEhGjwG`가 Ready이고
+  `busy-cafe.vercel.app`이 해당 배포를 가리키는 것을 확인했다. immutable production CSS에서
+  모바일 검색·누락 카페 input의 `font-size:16px` 규칙을 확인했다.
 
-판정: **PASS(automated CSS contract), PENDING(physical iPhone keyboard/focus confirmation and
-production deployment)**.
+판정: **PASS(automated CSS contract, CI and production asset),
+PENDING(physical iPhone keyboard/focus confirmation)**.
