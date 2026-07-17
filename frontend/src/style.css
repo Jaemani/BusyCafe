@@ -973,6 +973,10 @@ h1 {
 }
 
 @media (max-width: 40rem) {
+  /* iOS Safari auto-zooms focused form fields below 16px. */
+  .cafe-search-form input,
+  .missing-cafe-report input { font-size: 16px; }
+
   .map-top-shell {
     top: max(0.7rem, env(safe-area-inset-top, 0px));
     right: max(0.7rem, env(safe-area-inset-right, 0px));

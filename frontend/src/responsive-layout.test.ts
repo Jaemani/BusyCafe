@@ -20,6 +20,12 @@ describe("responsive map layout", () => {
     expect(styles).toMatch(/text-size-adjust:\s*100%;/);
   });
 
+  it("prevents iOS Safari from zooming focused search fields", () => {
+    expect(styles).toMatch(
+      /@media \(max-width: 40rem\)[\s\S]*?\.cafe-search-form input,[\s\S]*?\.missing-cafe-report input\s*{\s*font-size:\s*16px;/,
+    );
+  });
+
   it("keeps the map on the large viewport and binds overlays to VisualViewport", () => {
     expect(styles).toMatch(
       /#app\s*{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0;[\s\S]*?height:\s*100lvh;/,

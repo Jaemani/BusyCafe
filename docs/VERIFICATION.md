@@ -2350,3 +2350,25 @@ iOS 26.5 Safari에서 닫힘·열림 상태를 비교했다.
 
 판정: **PASS(automated contract, iPhone 12 Simulator layout and production asset),
 PENDING(physical devices)**.
+
+### iPhone 검색 input focus 자동 확대 교정
+
+2026-07-17에 모바일 Safari에서 검색 input focus 뒤 페이지와 overlay가 함께 확대·이동하는
+사용자 관측을 CSS 계약과 대조했다.
+
+- 기존 `.cafe-search-form input`은 `0.82rem`으로 기본 16px root 기준 약 13.12px였다.
+  iPhone Safari의 16px 미만 form field focus 자동 확대 조건에 해당했다.
+- `max-width: 40rem`에서 검색 input과 누락 카페 input을 16px로 고정했다. 지도 camera나
+  `VisualViewport` controller를 보정하는 방식이 아니라 browser auto zoom 발생 조건을
+  제거하므로 focus 전후 지도·패널 좌표계를 바꾸지 않는다.
+- viewport의 user-scalable이나 maximum-scale을 제한하지 않았다. 접근성을 위한 사용자의
+  수동 pinch zoom은 유지한다.
+
+검증:
+
+- `cd frontend && npm test`: 11 files, 59 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, 기존 500kB chunk warning 유지
+
+판정: **PASS(automated CSS contract), PENDING(physical iPhone keyboard/focus confirmation and
+production deployment)**.
