@@ -2405,5 +2405,16 @@ PENDING(physical iPhone keyboard/focus confirmation)**.
   늦은 stylesheet 복구, 재시도, timeout, immutable asset header의 7개 계약 통과
 - 구현 기준 커밋 `cbbe411`
 
-판정: **PASS(local deterministic contracts), PENDING(production deployment and response
-header verification)**.
+배포 후 검증:
+
+- GitHub CI run `29731228723`: passed
+- Vercel production deployment `dpl_Af8bkGMTooPVCNXGbZPpMJLxCnnC`: Ready
+- `busy-cafe.jaemani.com`과 `busy-cafe.vercel.app` alias가 위 배포를 가리키는 것을 확인
+- canonical HTML에서 `body.app-loading`, `app-boot-overlay`, production asset
+  `index-ChdojHl-.css`, `index-BIrX74C6.js`를 확인
+- CSS와 JavaScript 모두 공개 응답에서
+  `Cache-Control: public, max-age=31536000, immutable` 확인. Vercel은 설정의 `s-maxage`를
+  공개 응답에서 제거하지만 CDN에는 적용했고, 각 asset의 첫 요청 `MISS`, 두 번째 요청
+  `HIT`와 증가한 `age`를 확인
+
+판정: **PASS(local contracts, CI, production boot gate, browser cache and CDN cache)**.
