@@ -1,4 +1,5 @@
 :root {
+  --busy-cafe-app-css-ready: 1;
   font-family: Inter, Pretendard, "Noto Sans KR", system-ui, sans-serif;
   color: #18211d;
   font-synthesis: none;

@@ -20,8 +20,56 @@
     <link rel="canonical" href="https://busy-cafe.vercel.app/" />
     <meta property="og:url" content="https://busy-cafe.vercel.app/" />
     <title>Busy Cafe</title>
+    <style id="app-boot-style">
+      html, body { margin: 0; min-height: 100%; background: #f2f3f0; }
+      body.app-loading #app { visibility: hidden; }
+      #app-boot-overlay {
+        position: fixed;
+        z-index: 9999;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem;
+        color: #254d3e;
+        background: #f2f3f0;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+      }
+      body.app-loading #app-boot-overlay { display: flex; }
+      #app-boot-overlay img { width: 4rem; height: 4rem; border-radius: 1.2rem; }
+      #app-boot-overlay p { margin: 0.85rem 0 0; font-size: 0.95rem; font-weight: 750; }
+      .app-boot-failed { display: none; }
+      body.app-load-failed .app-boot-loading { display: none; }
+      body.app-load-failed .app-boot-failed { display: block; }
+      #app-boot-retry {
+        margin-top: 0.85rem;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.65rem 1rem;
+        color: #fff;
+        background: #254d3e;
+        font: inherit;
+        font-weight: 800;
+      }
+      .app-noscript { padding: 2rem; color: #254d3e; font-family: system-ui, sans-serif; text-align: center; }
+    </style>
   </head>
-  <body>
+  <body class="app-loading">
+    <div id="app-boot-overlay" role="status" aria-live="polite">
+      <div>
+        <img src="/logo.png" alt="" />
+        <p class="app-boot-loading">지도를 준비하고 있어요</p>
+        <div class="app-boot-failed">
+          <p>화면을 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.</p>
+          <button id="app-boot-retry" type="button">다시 시도</button>
+        </div>
+      </div>
+    </div>
+    <noscript>
+      <style>#app-boot-overlay { display: none !important; }</style>
+      <div class="app-noscript">지도를 보려면 JavaScript를 켜 주세요.</div>
+    </noscript>
     <main id="app">
       <div id="map" aria-label="서울 카페 지도"></div>
 

@@ -14,7 +14,9 @@ import { initializeCafePanelSheet } from "./cafe-panel-sheet";
 import { initializeAppViewport } from "./visual-viewport";
 import { initializeTopPanel } from "./top-panel";
 import { initializeBrandFilterDisclosure } from "./brand-filter-disclosure";
+import { initializeAppBoot } from "./app-boot";
 
+initializeAppBoot();
 initializeAppViewport();
 
 const status = document.querySelector<HTMLElement>("#search-status");
