@@ -202,6 +202,11 @@
 
 ### Fixed
 
+- 새로고침 때 외부 stylesheet보다 HTML이 먼저 그려져 지도 UI가 잠시 기본 문서처럼
+  노출되던 현상을 막았다. 첫 HTML의 최소 부트 화면이 앱 본문을 가리고, 실제 앱 CSS의
+  marker가 확인된 뒤에만 본문을 공개한다. CSS가 실패하면 깨진 본문 대신 재시도 화면을
+  유지하며, content hash가 붙은 CSS·JavaScript asset은 브라우저와 CDN에 1년간 immutable
+  cache한다(`cbbe411`)
 - 모바일 검색창과 누락 카페 입력의 computed font size를 16px로 고정해 iPhone Safari가
   focus 때 페이지를 자동 확대하고 상단 UI를 밀던 동작을 막았다. 사용자의 수동 pinch zoom은
   계속 허용한다

@@ -2376,3 +2376,34 @@ PENDING(physical devices)**.
 
 판정: **PASS(automated CSS contract, CI and production asset),
 PENDING(physical iPhone keyboard/focus confirmation)**.
+
+### 초기 무스타일 화면(FOUC) 차단 검증
+
+2026-07-20에 canonical production을 반복 요청해 HTML의 Vite stylesheet·module script
+참조는 정상이나, content hash가 붙은 CSS와 JavaScript가 모두
+`Cache-Control: public, max-age=0, must-revalidate`, `x-vercel-cache: MISS`로 응답하는
+것을 확인했다. 데이터 API 실패가 아니라 외부 stylesheet 도착 전 HTML이 먼저 그려질 수
+있는 초기 렌더 경계 문제로 판정했다.
+
+- 첫 HTML에 최소 critical style과 `app-loading` gate를 넣어 실제 `#app` 본문을 숨기고,
+  로고와 준비 문구만 독립적으로 표시한다.
+- 일반 stylesheet 개수로 준비 상태를 추정하지 않는다. 앱 CSS의
+  `--busy-cafe-app-css-ready: 1` marker를 computed style로 확인한 뒤에만 gate를 해제한다.
+- window load 또는 4초 제한까지 marker가 없으면 raw 본문을 공개하지 않고 재시도 화면을
+  유지한다. 이후 stylesheet가 늦게 도착하면 정상 화면으로 자동 복구한다.
+- Vite content hash가 붙은 `/assets/*`에 browser와 Vercel CDN용 1년 immutable cache를
+  설정한다. HTML은 장기 cache하지 않아 새 배포가 이전 asset을 참조하지 않게 한다.
+- JavaScript가 비활성화된 환경에는 지도 대신 명시적인 안내를 표시한다.
+
+검증:
+
+- `cd frontend && npm test`: 12 files, 66 tests passed
+- `cd frontend && npm run typecheck`: passed
+- `cd frontend && npm run build`: passed, CSS 91.18kB(gzip 14.87kB), JavaScript
+  1,108.11kB(gzip 301.49kB), 기존 500kB chunk warning 유지
+- `frontend/src/app-boot.test.ts`: 초기 HTML gate, CSS marker, CSS 실패 시 raw 본문 비공개,
+  늦은 stylesheet 복구, 재시도, timeout, immutable asset header의 7개 계약 통과
+- 구현 기준 커밋 `cbbe411`
+
+판정: **PASS(local deterministic contracts), PENDING(production deployment and response
+header verification)**.
