@@ -24,12 +24,25 @@
   과거 PAT 만료 추정은 이번에 인증 HTTP 응답으로 확인하지 않았으며 확정 원인으로 쓰지
   않는다. 운영 복구는 단독 writer 원칙 아래 별도 진단·조치가 필요하다.
 - SSH 설정에는 기존 VM include만 있고, 승인된 새 CachyOS 접속 대상을 찾지 못했다.
-  접속 별칭/사용자@호스트를 요청했다. 대상 checkout, 설치 버전, 커널 reboot 상태,
+  이후 사용자가 접속 대상을 제공해 SSH를 시도했다. 호스트에는 도달하지만 기본 공개키가
+  거부됐고 인증 agent도 연결되지 않았다. 키 등록 또는 승인된 전용 키 경로를 요청했다.
+  서버 주소는 공개 문서에 저장하지 않는다. 대상 checkout, 설치 버전, 커널 reboot 상태,
   Docker daemon, Podman·Quadlet, 자원 사용, systemd 부팅·정상 종료 검증은 PENDING이다.
 - `.serena/`와 `._.DS_Store`는 기존 미추적 로컬 파일로 내용·소유권을 임의 판단해 삭제하거나
   커밋하지 않았다. DB·원본 데이터·환경변수·로그·계정 token을 옮기지 않았다.
 
-판정: Mac tests/build PASS, Linux 대상 호스트 PENDING, 실제 운영 전환 미실행.
+후속 Linux CI 실측:
+
+- 검증 commit `bd48e41`, 작업 브랜치에 정상 push 완료.
+- [CI 36520562213](https://github.com/Jaemani/BusyCafe/actions/runs/36520562213): success.
+- Ubuntu x86_64 Python 3.12.14: backend 1,038 tests passed, compileall passed.
+- 임시 PostgreSQL 17: migration SQL 렌더, 실제 upgrade, current head 확인, schema smoke 통과.
+- Node 22.23.2: frontend 66 tests passed, typecheck와 production build 통과.
+- 운영 systemd 후보는 이 CI에서 실제 실행하지 않았다. 네트워크 실수집, 정상 종료·부팅,
+  target CachyOS 설치는 별도 미검증 항목이다.
+
+판정: Mac tests/build 및 Ubuntu CI PASS, CachyOS 호스트 PENDING(SSH 인증),
+실제 운영 전환 미실행.
 
 ## 상태 요약
 

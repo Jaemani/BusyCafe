@@ -127,9 +127,11 @@ Safari 검색 input 확대, notch/safe-area, 지도 control, 상세 panel과 위
 
 ### 직접 참여가 필요한 항목과 완료 기준
 
-현재 승인된 SSH 설정과 인프라 문서에서 새 CachyOS 접속 대상을 찾지 못했다. 사용자는
-기존 승인된 SSH 별칭 또는 `사용자@호스트`만 전달하면 된다. 비밀번호·토큰은 전달하지
-않는다. 필요한 경우 기존 공개키 등록·GitHub SSO/MFA를 해당 서버/계정 화면에서 승인한다.
+사용자가 비공개 대화로 CachyOS 접속 대상을 제공했다. 호스트는 도달하지만 현재 Mac
+기본 공개키를 거부하므로 서버 검증이 막혀 있다. 사용자는 Mac 터미널에서
+`ssh-copy-id -i ~/.ssh/id_ed25519.pub <approved-user@host>`를 실행하고 서버 비밀번호를
+직접 입력한다. 별도 승인 키가 있다면 키 파일 경로만 제공해도 된다. 비밀번호·토큰은
+대화나 Git에 전달하지 않는다. GitHub SSO/MFA가 필요한 경우 계정 화면에서 승인한다.
 에이전트가 `ssh -o BatchMode=yes <alias> 'uname -srmo'` 성공을 확인한 뒤 독립 checkout,
 설치 버전·디스크·커널 상태, tests/build와 임시 DB smoke를 이어서 수행한다.
 
