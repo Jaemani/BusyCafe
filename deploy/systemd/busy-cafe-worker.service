@@ -1,0 +1,32 @@
+[Unit]
+Description=BusyCafe ingestion worker (manual cutover required)
+StartLimitIntervalSec=300
+StartLimitBurst=3
+ConditionPathExists=%h/.config/busy-cafe/worker-approved
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/busy-cafe/current/backend
+EnvironmentFile=%h/.config/busy-cafe/worker.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=%h/.local/share/busy-cafe/current/backend/.venv/bin/alembic -c alembic.ini current --check-heads
+ExecStart=%h/.local/share/busy-cafe/current/backend/.venv/bin/python -m app.ingest.worker
+KillSignal=SIGINT
+TimeoutStopSec=120
+Restart=on-failure
+RestartSec=30
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=1G
+CPUQuota=100%
+TasksMax=64
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=busy-cafe-worker
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100
+
+# No Install section: staging this file must not enable ingestion at boot.
+# See docs/OPERATIONS.md before installing or starting this candidate unit.
