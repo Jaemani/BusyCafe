@@ -40,6 +40,10 @@ jobs:
       - run: uv sync --frozen --extra dev
       - run: uv run pytest
       - run: uv run python -m compileall -q app scripts tests
+      - name: Verify isolated local API
+        run: uv run python scripts/verify_local_api.py
+      - name: Validate staged systemd candidate without starting it
+        run: BUSY_CAFE_CHECK_VENV="$PWD/.venv" bash ../deploy/check-worker-unit.sh
       - run: uv run alembic -c alembic.ini upgrade head --sql > /dev/null
       - run: uv run alembic -c alembic.ini upgrade head
       - run: uv run alembic -c alembic.ini current --check-heads
