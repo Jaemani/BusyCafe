@@ -1,5 +1,142 @@
 # BusyCafe 운영 Runbook
 
+## Linux 개발 및 운영 준비
+
+2026-09-29 점검 기준이다. 이 절은 개발 준비와 운영 후보를 구분하며, 아래 기존 운영
+절차의 실제 전환 승인을 대신하지 않는다. 인프라 공용 서비스, DNS, Tunnel, 호스트 재부팅은
+이번 작업 범위에서 변경하지 않는다.
+
+### 구성 요소 판정
+
+| 구성 요소 | 확인된 형태와 의존성 | 판정 | 남은 검증 |
+|---|---|---|---|
+| Vite·TypeScript·MapLibre 프론트 | Vercel 정적 asset, Node 22, 브라우저 WebGL | Linux 개발 가능 / 기존 클라우드 유지 | CachyOS 설치·빌드, 물리 모바일 UX |
+| FastAPI 제공 API | Vercel Python, SQLAlchemy·psycopg, Supabase 연결 | Linux 개발 가능 / 기존 클라우드 유지 | 대상 서버의 빈 DB·API smoke |
+| 인구 수집 worker | GitHub one-shot, Supabase cron dispatch; Python·서울 API | Linux 운영 후보 / 현재 클라우드 유지 | 단독 writer 전환, 한 시간 수집, 종료·재부팅 복구 |
+| PostgreSQL 원장·피드백 | Supabase 관리형 저장소 | 기존 클라우드 유지 | 백업 복원 훈련·최소 권한 역할 분리 |
+| Compose PostgreSQL | 로컬 개발용 설정만 존재; volume 사용 | Linux 개발 가능, Docker Compose 유지 후보 | 대상 Docker daemon·volume 권한·migration |
+| backend Dockerfile | Python 3.12 이미지용 API/worker 설정 | 설정 존재, 운영 이미지 동작 미검증 | native wheel·migration 파일 누락·이미지 고정 |
+| 평가·격자·POI·다운로드 도구 | 일회성 CLI; DuckDB·pyproj·Shapely·파일 데이터 | Linux 실행 후보, 상주 불필요 | x86_64 wheel과 대표 fixture·자원 사용 |
+| Safari·iPhone 검증 | Mac 시뮬레이터·물리 기기 | Mac 유지 | Linux 변경 커밋별 검증 결과 전달 |
+| Podman·Quadlet | 저장소에 기존 구성 없음 | 판단 보류 | 대상 설치 버전·rootless·부팅·볼륨 미검증 |
+
+프로젝트에 Rust·Flutter·Xcode 빌드 대상은 없다. 해당 도구는 BusyCafe의 개발 선행 조건이
+아니다. 소스 조사에서 macOS API, Keychain, MLX/Metal/MPS, Docker socket 의존성을 찾지
+못했다. 이것은 CachyOS에서의 실제 기능 검증 완료를 뜻하지 않는다. 파일명 대소문자와
+Python native wheel은 Linux CI와 대상 서버에서 각각 확인한다.
+
+현재 Mac의 5188/8190 포트에 listening process는 관측되지 않았다. 다른 포트나 다른
+호스트의 실행 부재까지 단정하지 않는다. 진행 중인 Codex와 타 프로젝트 프로세스는
+종료하지 않았다. 로컬 `backend/data`는 약 1.3GB였으며 cache·원본·실험 산출물이 포함될
+수 있다. 새 서버로 통째로 복사하지 않는다. 80GB 디스크에서는 프로젝트별 사용량과 남은
+공간을 먼저 확인하고 대량 생활인구 다운로드·압축 해제는 별도 용량 승인 후 수행한다.
+지속 snapshot 증가량, 메모리 peak, 로그 증가량은 아직 측정하지 않았다.
+
+### 운영 방식
+
+공개 웹·DB는 현재 관리형 서비스를 유지한다. 별도 worker가 필요해지면 native user
+systemd를 먼저 검증한다. Python virtualenv와 외부 DB만 필요하므로 컨테이너를 추가할
+근거가 아직 없다. 개발용 PostgreSQL은 기존 Compose를 유지할 수 있으나 서버의 Docker
+준비 상태를 재확인해야 한다. Podman을 선택하지 않았으므로 미검증 Quadlet을 운영 파일로
+추가하지 않는다. 향후 검토 시에는 설치 버전, rootless UID/volume mapping, 네트워크,
+포트, healthcheck와 reboot 복구를 확인해야 한다.
+
+`deploy/systemd/busy-cafe-worker.service`는 **미활성 운영 후보**다. 부팅 enable을 위한
+Install 절이 없고, 별도 `worker-approved` 파일이 없으면 시작되지 않는다. 이 파일은
+운영 승인 자체를 대체하지 않는다. 설정의 MemoryMax=1G, CPUQuota=100%, TasksMax=64는
+초기 제한 후보이며 부하 측정으로 확정해야 한다. 프로세스 생존은 수집 성공 판정이 아니다.
+health의 complete cycle, saved/failed와 관측 시각을 별도로 검사해야 한다.
+
+- 실행은 프로젝트 전용 Unix 사용자 권장. 같은 사용자 아래 서비스끼리는 강한 보안 격리가
+  되지 않으며, EnvironmentFile·다른 사용자 파일 접근 통제를 대체하지 않는다.
+- release 경로는 사용자 홈 아래 `.local/share/busy-cafe/releases/<commit>`이며
+  `current` symlink가 한 release를 가리킨다. 각 release에서 `uv sync --frozen`으로
+  Linux virtualenv를 새로 만든다. Mac virtualenv·node_modules·계정 token은 복사하지 않는다.
+- 사용자 소유 `.config/busy-cafe/worker.env`(0600, 상위 디렉터리 0700)에
+  `DATABASE_URL`, `SEOUL_API_KEY`를 넣는다. 인자는 비밀값 전달에 사용하지 않는다.
+- 네트워크는 외부 PostgreSQL과 서울 API outbound만 필요하며 worker는 inbound port를
+  열지 않는다. DB migration head가 다르면 시작 전 검사가 실패한다. unit은 migration을
+  자동 적용하지 않는다. cache 원본은 backend/data에 생성될 수 있으므로 release 교체 전
+  위치와 필요 여부를 확인한다.
+- SIGINT로 정상 종료를 요청하고 120초를 기다린다. 강제 종료가 발생하면 미완료 cycle과
+  저장 상태를 확인해야 한다. restart 한도 도달·partial cycle은 경보 대상이다.
+- journal의 rate limit은 저장량 상한이 아니다. journald 총 용량·보존기간은 인프라 담당자와
+  조율하고, 공용 설정을 이 프로젝트가 임의 변경하지 않는다.
+- user linger와 부팅 target 연결은 운영 전환 검증 뒤 인프라 담당자가 승인한다.
+  이번 작업에서는 `enable`, `start`, `loginctl enable-linger`를 실행하지 않는다.
+
+전환 순서: 백업·복구 검증 → 별도 test DB에서 fixture 검증 → 기존 scheduler의 poll 중단과
+진행 중 cycle 종료 확인 → 새 writer 단독 시작 → 최소 1시간 12회 완전 cycle 확인이다.
+rollback 시 새 writer를 먼저 정지하고 미완료 cycle·신규 snapshot·원장/피드백을 보존한다.
+코드만 이전 release로 돌릴 때도 DB migration 호환성을 확인한다. DB를 과거 dump로
+덮어쓰거나 새 관측을 삭제하지 않는다. 기존 scheduler 재개는 단독 writer 확인 후에만 한다.
+
+### Linux Codex 인수인계
+
+저장소는 README의 GitHub 저장소이며 작업 브랜치는 `chore/linux-readiness-20260929`다.
+최종 검증 SHA는 `VERIFICATION.md`에서 확인하고 다음 순서로 독립 checkout한다.
+예제의 `<verified-commit>`은 실제 검증 SHA로 바꾸어야 한다.
+
+```bash
+mkdir -p "$HOME/projects"
+git clone --branch chore/linux-readiness-20260929 git@github.com:Jaemani/BusyCafe.git "$HOME/projects/busy-cafe"
+cd "$HOME/projects/busy-cafe"
+git checkout --detach <verified-commit>
+uname -srmo
+df -h .
+free -h
+node --version
+uv --version
+python3 --version
+systemctl --version
+docker version
+docker compose version
+docker buildx version
+podman --version
+```
+
+미설치 명령의 실패도 기록하고, Docker CLI 존재만으로 daemon 정상이라 판정하지 않는다.
+호스트 reboot 전후 커널 상태·Podman 설치 여부는 인프라 기록과 실제 결과를 대조한다.
+이 프로젝트 준비를 이유로 재부팅하거나 공용 런타임을 설치·교체하지 않는다.
+
+```bash
+cd backend
+UV_PROJECT_ENVIRONMENT=.venv-linux uv sync --frozen --extra dev --python 3.12
+UV_PROJECT_ENVIRONMENT=.venv-linux uv run --frozen pytest
+UV_PROJECT_ENVIRONMENT=.venv-linux uv run --frozen python -m compileall -q app scripts tests
+cd ../frontend
+npm ci
+npm test
+npm run typecheck
+npm run build
+```
+
+fixture 테스트와 frontend build에는 운영 secret이 필요하지 않다. 테스트 뒤 API smoke는
+별도 빈 SQLite 또는 격리 PostgreSQL만 사용하고, 운영 `.env`를 가져오지 않는다. SQLite
+smoke는 PostgreSQL RLS·migration 검증을 대체하지 않는다. PostgreSQL migration 실적용은
+Ubuntu CI의 임시 PostgreSQL 17 service가 검증한다.
+
+개발 서버를 확인할 때는 README의 8190/5188 loopback 실행과 SSH port forwarding을
+사용한다. 새 호스트 주소를 소스의 allowedHosts·CORS에 무조건 추가하거나 0.0.0.0으로
+공개하지 않는다. API·Vite를 background 상주로 남기지 않는다.
+
+Mac 후속 검증은 Linux에서 확정한 커밋을 독립 worktree로 checkout해 수행한다.
+Safari 검색 input 확대, notch/safe-area, 지도 control, 상세 panel과 위치 권한을 확인하고
+커밋·기기·OS·결과를 `VERIFICATION.md`에 기록한다. Mac offline이면 해당 검증을 대기로
+표시한다. 코드 인수인계는 기존 Codex 대화의 실행 소유권·로그인 복제를 뜻하지 않는다.
+
+### 직접 참여가 필요한 항목과 완료 기준
+
+현재 승인된 SSH 설정과 인프라 문서에서 새 CachyOS 접속 대상을 찾지 못했다. 사용자는
+기존 승인된 SSH 별칭 또는 `사용자@호스트`만 전달하면 된다. 비밀번호·토큰은 전달하지
+않는다. 필요한 경우 기존 공개키 등록·GitHub SSO/MFA를 해당 서버/계정 화면에서 승인한다.
+에이전트가 `ssh -o BatchMode=yes <alias> 'uname -srmo'` 성공을 확인한 뒤 독립 checkout,
+설치 버전·디스크·커널 상태, tests/build와 임시 DB smoke를 이어서 수행한다.
+
+서버 준비 완료는 실제 CachyOS에서 위 절차와 기능 smoke가 통과했을 때만 선언한다.
+운영 이전 완료는 별도 전환 승인, 단독 writer, 복구 훈련, 한 시간 관측, 부팅·정상 종료
+검증까지 포함한다. 이번 작업의 문서·CI 통과는 이 두 조건을 대신하지 않는다.
+
 ## 목적과 현재 상태
 
 이 문서는 관리형 PostgreSQL을 사용하는 준실시간 production의 전환, 정상 운영, 비용,

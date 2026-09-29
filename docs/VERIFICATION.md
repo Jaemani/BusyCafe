@@ -2,6 +2,35 @@
 
 실측 검증 결과, 계획과 실제의 차이, Phase별 DoD 통과 여부를 누적 기록한다. 인증키와 개인정보는 기록하지 않는다.
 
+## 2026-09-29 Linux 준비 점검
+
+- 기준: `81d9f1d`, origin의 동일 main을 fetch로 확인했다. 독립 작업 브랜치
+  `chore/linux-readiness-20260929`를 만들었으며 main 운영 배포는 변경하지 않는다.
+- 구성 분류, 환경 설치, 운영 후보와 Linux Codex 인수인계 정본은
+  [OPERATIONS.md](OPERATIONS.md#linux-개발-및-운영-준비)에 통합했다.
+- 구현 `8ab1f16`: 비활성 native user systemd worker 후보, Linux 전용 virtualenv ignore,
+  Ubuntu CI frontend test 실행을 추가했다. unit은 아직 systemd-analyze·실기동 검증 전이며
+  운영 사용 승인을 뜻하지 않는다.
+- Mac의 Node v22.23.0, uv 0.11.23을 확인했다. backend `uv run --frozen --extra dev pytest`,
+  `python -m compileall -q app scripts tests`, frontend `npm test`, `npm run typecheck`,
+  `npm run build`는 성공했다. uv는 로컬 Python 3.13.14 환경을 재생성했다. 이 Mac 결과를
+  목표 Linux Python 3.12 결과로 간주하지 않는다. frontend의 기존 대형 chunk 경고와
+  backend TestClient deprecation은 남아 있다.
+- 기존 Ubuntu CI `29731379036`의 기준 `81d9f1d` 성공을 확인했다. PostgreSQL 17의 실제
+  migration·schema smoke가 포함되지만 CachyOS 호스트 검증을 대신하지 않는다.
+- 현재 공개 health는 live이고 cafe 30,792곳, 마지막 완전 cycle은
+  `2026-09-25T18:48:29.355094Z`, 최근 1시간 snapshot은 0이었다. 마지막 poll run
+  `36175606548`은 성공했다. 서비스 endpoint 응답과 수집 신선도를 구분한다.
+  과거 PAT 만료 추정은 이번에 인증 HTTP 응답으로 확인하지 않았으며 확정 원인으로 쓰지
+  않는다. 운영 복구는 단독 writer 원칙 아래 별도 진단·조치가 필요하다.
+- SSH 설정에는 기존 VM include만 있고, 승인된 새 CachyOS 접속 대상을 찾지 못했다.
+  접속 별칭/사용자@호스트를 요청했다. 대상 checkout, 설치 버전, 커널 reboot 상태,
+  Docker daemon, Podman·Quadlet, 자원 사용, systemd 부팅·정상 종료 검증은 PENDING이다.
+- `.serena/`와 `._.DS_Store`는 기존 미추적 로컬 파일로 내용·소유권을 임의 판단해 삭제하거나
+  커밋하지 않았다. DB·원본 데이터·환경변수·로그·계정 token을 옮기지 않았다.
+
+판정: Mac tests/build PASS, Linux 대상 호스트 PENDING, 실제 운영 전환 미실행.
+
 ## 상태 요약
 
 | Phase | 상태 | 완료일 | 근거 |

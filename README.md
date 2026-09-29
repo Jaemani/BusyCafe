@@ -107,6 +107,10 @@ uv run python -m app.ingest.worker
 
 ## 주요 문서
 
+Linux 개발 준비와 Mac 검증 역할, 인수인계는
+[운영 Runbook의 Linux 준비 절](docs/OPERATIONS.md#linux-개발-및-운영-준비)을 따른다.
+기존 Vercel·Supabase 운영을 자동으로 이전하거나 worker를 중복 실행하지 않는다.
+
 - [제품·구현 계획](docs/PLAN.md)
 - [실측과 DoD 기록](docs/VERIFICATION.md)
 - [변경 이력](docs/CHANGELOG.md)
