@@ -2,6 +2,31 @@
 
 실측 검증 결과, 계획과 실제의 차이, Phase별 DoD 통과 여부를 누적 기록한다. 인증키와 개인정보는 기록하지 않는다.
 
+## 2026-09-29 CachyOS 재시도 및 독립 checkout 검증
+
+이 기록은 아래 점검의 SSH 인증 대기를 해소한다. 승인된 대상에 비대화식 SSH가 성공했고
+`$HOME/projects/busy-cafe`에 독립 clone을 준비했다. 검증 코드는 `1dcb7d4`다.
+
+- Python 3.12.14 및 Linux x86_64 native wheel 설치 성공. backend 1,036 tests passed,
+  2 skipped, compileall 성공. 제외된 두 테스트는 PostgreSQL CI DB 미설정 때문에 생략됐으며
+  `tests/test_migrations.py -rs`로 확인했다. 기존 Ubuntu CI에서는 두 테스트도 통과했다.
+- mise Node 22.23.0: npm ci, frontend 66 tests, tsc와 Vite build 성공.
+- 임시 SQLite를 생성하고 실제 FastAPI 앱에 TestClient로 health와 bbox 요청을 보냈다.
+  HTTP 200, cafe count 0, 빈 카페 목록을 assert했고 임시 DB는 종료 시 제거했다.
+  운영 DB, 외부 API, 상주 worker를 사용하지 않았다.
+- source checkout은 clean. Linux virtualenv와 node_modules는 해당 서버에서 새로 생성했다.
+- Docker failed/start-limit-hit, socket permission denied; Podman 없음. 실행 커널과 설치
+  모듈 버전 불일치. 상세 버전·환경 용량은 OPERATIONS.md의 CachyOS 인수인계 절에 기록했다.
+  재부팅, daemon 재시작, 사용자 group 변경, 설치는 수행하지 않았다.
+- systemd-analyze는 실제 release 실행 파일이 없어서 실패했다. 구문·기동·정상 종료·부팅을
+  통과한 운영 배포 구성으로 취급하지 않는다.
+- npm audit 6건(critical 1/high 3/moderate 2): MapLibre, Vitest/mocker, nanoid,
+  postcss, undici. major 업데이트와 브라우저 회귀 검증을 별도 보완 작업으로 남긴다.
+
+판정: CachyOS 개발 환경·fixture 테스트·build·격리 API smoke PASS.
+대상 PostgreSQL, systemd 운영과 실제 수집, 모바일 실기기 검증 PENDING.
+Linux 운영 이전과 공개 트래픽 변경은 미실행.
+
 ## 2026-09-29 Linux 준비 점검
 
 - 기준: `81d9f1d`, origin의 동일 main을 fetch로 확인했다. 독립 작업 브랜치

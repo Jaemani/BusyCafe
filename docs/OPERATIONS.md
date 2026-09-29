@@ -127,13 +127,42 @@ Safari 검색 input 확대, notch/safe-area, 지도 control, 상세 panel과 위
 
 ### 직접 참여가 필요한 항목과 완료 기준
 
-사용자가 비공개 대화로 CachyOS 접속 대상을 제공했다. 호스트는 도달하지만 현재 Mac
-기본 공개키를 거부하므로 서버 검증이 막혀 있다. 사용자는 Mac 터미널에서
-`ssh-copy-id -i ~/.ssh/id_ed25519.pub <approved-user@host>`를 실행하고 서버 비밀번호를
-직접 입력한다. 별도 승인 키가 있다면 키 파일 경로만 제공해도 된다. 비밀번호·토큰은
-대화나 Git에 전달하지 않는다. GitHub SSO/MFA가 필요한 경우 계정 화면에서 승인한다.
-에이전트가 `ssh -o BatchMode=yes <alias> 'uname -srmo'` 성공을 확인한 뒤 독립 checkout,
-설치 버전·디스크·커널 상태, tests/build와 임시 DB smoke를 이어서 수행한다.
+사용자가 제공한 대상에 SSH 재시도가 성공하여 공개키 인증 차단은 해소됐다. 계정·주소·키를
+공개 문서에 기록하지 않는다. 추가 로그인 작업은 현재 필요하지 않다. 공용 Docker 복구와
+커널 재부팅은 인프라 담당자와 조율해야 하며 프로젝트에서 실행하지 않았다.
+
+### CachyOS 실측 후 인수인계 보충
+
+2026-09-29에 `$HOME/projects/busy-cafe`를 HTTPS clone하고 `1dcb7d4` detached checkout에서
+검증했다. Mac 작업 폴더나 운영 secret은 복사하지 않았다. public 저장소 clone에는 별도
+GitHub 로그인이 필요하지 않았다. 쓰기 push가 필요한 Linux Codex는 기존 승인 계정으로
+별도 인증해야 하며 Mac 계정 token을 복제하지 않는다.
+
+- 실행 커널은 7.2.6-1-cachyos, 설치 모듈은 7.2.8 및 6.18.52 LTS였다. 최근 boot는
+  2026-09-28이며 커널 업데이트 후 재부팅이 완료됐다고 판단할 수 없다.
+- home filesystem 76GB 중 여유 48GB, RAM 약 38GiB 중 available 34GiB였다.
+- 기본 shell은 Node 26.10.0, Python 3.14.7이었다. 프로젝트 검증은 설치된 mise
+  Node 22.23.0과 uv Python 3.12.14를 명시해 사용했다. 공용 기본 버전은 바꾸지 않았다.
+- uv 0.12.19, systemd 262; Docker는 failed/start-limit-hit이며 현재 사용자 socket 접근도
+  거부됐다. Compose 5.5.1, Buildx 0.37.1 CLI만 확인됐고 Podman은 설치되지 않았다.
+- backend 1,036 tests passed, PostgreSQL 전용 2개 skipped; frontend 66 tests,
+  typecheck를 포함한 build, compileall 통과. 임시 SQLite TestClient로 health 200·빈 카페
+  응답 200을 확인했다. 실제 운영 API·데이터 수집 검증과는 다르다.
+- `.venv-linux` 약 260MB, node_modules 약 132MB, dist 약 3MB였다. 이 값은 환경 용량이며
+  운영 peak 메모리나 데이터 증가량 측정이 아니다.
+
+이 호스트에서는 위 frontend 명령을 `mise exec node@22.23.0 -- npm ci`,
+`mise exec node@22.23.0 -- npm test`, `mise exec node@22.23.0 -- npm run build`로 실행한다.
+backend는 위의 `UV_PROJECT_ENVIRONMENT=.venv-linux` 명령을 그대로 사용한다.
+systemd candidate의 `systemd-analyze --user verify`는 미설치 release 경로의 python/alembic
+실행 파일이 없어 실패했다. unit이 운영 검증을 통과했다고 주장하지 않으며, release 구성과
+단독 writer 전환 승인이 생긴 뒤 다시 검사한다.
+
+`npm audit`은 6개 취약 dependency(critical 1, high 3, moderate 2)를 보고했다. 특히
+MapLibre `GHSA-jrc7-96c5-q579`는 npm이 major 업데이트를 해결책으로 제시했다. 앱의 실제
+공격 경로가 입증된 것은 아니지만 배포 전 별도 보안 보완 대상이다. 자동 force update는
+실행하지 않았으며 호환성·지도·attribution·모바일 검증 후 고정 버전을 갱신해야 한다.
+Vite/Vitest 개발 서버는 외부에 공개하지 않는다.
 
 서버 준비 완료는 실제 CachyOS에서 위 절차와 기능 smoke가 통과했을 때만 선언한다.
 운영 이전 완료는 별도 전환 승인, 단독 writer, 복구 훈련, 한 시간 관측, 부팅·정상 종료
