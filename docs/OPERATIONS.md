@@ -10,8 +10,8 @@
 
 | 구성 요소 | 확인된 형태와 의존성 | 판정 | 남은 검증 |
 |---|---|---|---|
-| Vite·TypeScript·MapLibre 프론트 | Vercel 정적 asset, Node 22, 브라우저 WebGL | Linux 개발 가능 / 기존 클라우드 유지 | CachyOS 설치·빌드, 물리 모바일 UX |
-| FastAPI 제공 API | Vercel Python, SQLAlchemy·psycopg, Supabase 연결 | Linux 개발 가능 / 기존 클라우드 유지 | 대상 서버의 빈 DB·API smoke |
+| Vite·TypeScript·MapLibre 프론트 | Vercel 정적 asset, Node 22, 브라우저 WebGL | CachyOS 설치·테스트·빌드 확인 / 기존 클라우드 유지 | 물리 모바일 UX, 의존성 취약점 보완 |
+| FastAPI 제공 API | Vercel Python, SQLAlchemy·psycopg, Supabase 연결 | CachyOS fixture·격리 SQLite API 확인 / 기존 클라우드 유지 | 대상 서버 PostgreSQL 운영 검증 |
 | 인구 수집 worker | GitHub one-shot, Supabase cron dispatch; Python·서울 API | Linux 운영 후보 / 현재 클라우드 유지 | 단독 writer 전환, 한 시간 수집, 종료·재부팅 복구 |
 | PostgreSQL 원장·피드백 | Supabase 관리형 저장소 | 기존 클라우드 유지 | 백업 복원 훈련·최소 권한 역할 분리 |
 | Compose PostgreSQL | 로컬 개발용 설정만 존재; volume 사용 | Linux 개발 가능, Docker Compose 유지 후보 | 대상 Docker daemon·volume 권한·migration |
@@ -154,9 +154,53 @@ GitHub 로그인이 필요하지 않았다. 쓰기 push가 필요한 Linux Codex
 이 호스트에서는 위 frontend 명령을 `mise exec node@22.23.0 -- npm ci`,
 `mise exec node@22.23.0 -- npm test`, `mise exec node@22.23.0 -- npm run build`로 실행한다.
 backend는 위의 `UV_PROJECT_ENVIRONMENT=.venv-linux` 명령을 그대로 사용한다.
-systemd candidate의 `systemd-analyze --user verify`는 미설치 release 경로의 python/alembic
-실행 파일이 없어 실패했다. unit이 운영 검증을 통과했다고 주장하지 않으며, release 구성과
-단독 writer 전환 승인이 생긴 뒤 다시 검사한다.
+systemd candidate의 첫 검사는 미설치 release 경로의 python/alembic 실행 파일이 없어
+실패했다. 이후 `bash deploy/check-worker-unit.sh`로 임시 unit의 실행 경로만 현재 checkout에
+맞춰 검사하여 통과했다. 원본 unit·서비스 등록·승인 파일은 변경하지 않았다. 이는 정적
+설정과 executable 검증이며 실제 운영 기동·종료·재부팅 검증은 전환 시 수행한다.
+
+재현 가능한 격리 API smoke는 backend에서 다음 명령으로 실행한다. 상속된 DB 환경변수는
+앱 import 전에 임시 SQLite로 덮어쓰고, 종료 시 임시 DB를 삭제한다.
+
+```bash
+UV_PROJECT_ENVIRONMENT=.venv-linux uv run --frozen python scripts/verify_local_api.py
+```
+
+Linux Codex는 설치된 `~/.local/bin/codex` 0.157.1을 확인했다. 일반 SSH PATH에서 보이지
+않으면 `mise exec node@22.23.0 -- ~/.local/bin/codex`로 실행한다. 서버 기존 GitHub 인증은
+인식되지만 push 권한은 실제 push 전 별도 확인하며, 비밀값을 출력하거나 복제하지 않는다.
+참고 공용 도구 Rust 1.97.1, Flutter 3.44.7도 확인했으며 이 프로젝트 테스트에는 사용하지
+않았다. 새 대화에서 아래 순서로 이어받는다.
+
+```bash
+cd "$HOME/projects/busy-cafe"
+git status --short --branch
+git log -1 --oneline
+mise exec node@22.23.0 -- ~/.local/bin/codex
+```
+
+최종 인수인계 checkout은 `linux/readiness-handoff` 로컬 작업 브랜치를 사용한다. 후속
+작업자는 `OPERATIONS.md`와 `VERIFICATION.md`를 먼저 읽고 변경 커밋을 새 작업 브랜치로
+push한다. 기존 대화가 Linux로 이동한 것은 아니다.
+
+### 준비 완료 범위와 전환 후속 작업
+
+코드·독립 환경·플랫폼 독립 검증·비활성 운영 후보·인수인계가 이번 준비 완료 범위다.
+다음 항목은 해결된 것으로 간주하지 않되 직접 배포하지 말라는 사용자 범위에 따라
+운영 전환 전 후속 작업으로 관리한다.
+
+| 후속 작업 | 담당 범위 | 완료 증거 |
+|---|---|---|
+| 커널/모듈 불일치와 Docker 실패 | 인프라 담당 | 승인된 재부팅·daemon 복구 후 버전/기동 확인 |
+| MapLibre 등 의존성 보완 | BusyCafe 별도 보안 변경 | 고정 버전 audit, 지도·출처표시·모바일 회귀 |
+| 실제 운영 수집 신선도 복구 | 기존 클라우드 운영 | dispatch 응답·완전 cycle·독립 경보 확인 |
+| 서버 PostgreSQL·복원·RPO/RTO | DB 이전을 선택할 때 | 격리 restore와 row/model 대조, 실측 RPO/RTO |
+| worker 단독 기동·정상 종료·부팅 | 운영 전환을 선택할 때 | 기존 writer 종료, 1시간 12회, 재시작/rollback 기록 |
+| iPhone/Safari 실기기 | Mac 검증 | 변경 SHA와 기기/OS별 결과; Mac offline이면 대기 |
+
+현재 사용자가 직접 할 로그인/MFA 작업은 없다. 이후 인프라 변경이나 실제 전환을 선택할
+때 이 표의 검증 결과를 바탕으로 해당 작업을 승인한다. 테스트 통과를 운영 전환 승인으로
+해석하지 않는다.
 
 `npm audit`은 6개 취약 dependency(critical 1, high 3, moderate 2)를 보고했다. 특히
 MapLibre `GHSA-jrc7-96c5-q579`는 npm이 major 업데이트를 해결책으로 제시했다. 앱의 실제

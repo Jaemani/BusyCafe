@@ -2,6 +2,33 @@
 
 실측 검증 결과, 계획과 실제의 차이, Phase별 DoD 통과 여부를 누적 기록한다. 인증키와 개인정보는 기록하지 않는다.
 
+## 2026-09-29 마이그레이션 준비 마감
+
+직접 배포하지 않는다는 사용자 범위를 적용했다. 아래 이전 기록의 systemd 검사 실패는
+실제 release 미설치로 인한 것이며, 이번 정적 검사 성공과 운영 기동 검증을 구분한다.
+
+- 구현 `e556b88`: `deploy/check-worker-unit.sh`는 임시 unit의 실행 경로만 검증 checkout으로
+  치환한다. CachyOS systemd 262에서 `systemd-analyze --user verify` 성공. 원본 unit,
+  service 등록, enable, writer-approved 파일, 프로세스 실행을 변경하지 않는다.
+- `backend/scripts/verify_local_api.py`: 환경변수의 DB 대상을 앱 import 전 임시 SQLite로
+  고정하고 health·bbox 응답을 검증한다. CachyOS에서 성공했고 임시 데이터는 정리된다.
+- 두 검사를 Ubuntu CI에도 추가했다. 서버용 도구 설치나 systemd service 실행은 없다.
+- `e556b88`의 [CI 36528522140](https://github.com/Jaemani/BusyCafe/actions/runs/36528522140)
+  성공: backend·frontend 전체 테스트, 격리 API, staged unit, PostgreSQL migration 실적용과
+  schema smoke, typecheck/build 통과. 검증 명령은 deploy script와 CI에 재현 가능하게 남았다.
+- Linux Codex CLI 0.157.1 실행, 서버 기존 GitHub 로그인, remote fetch를 확인했다.
+  쓰기 push 권한을 검증했다고 주장하지 않는다. 기존 token·대화는 복제하지 않았다.
+- Linux 코드 경로는 `$HOME/projects/busy-cafe`; Python 3.12.14 `.venv-linux`, mise
+  Node 22.23.0 환경을 사용한다. `linux/readiness-handoff` 작업 브랜치로 인계한다.
+- 운영 문서의 구성 분류를 실제 검증 상태로 갱신하고, 호스트 인프라·보안 의존성·운영
+  전환·Mac 실기기를 담당 범위와 완료 증거별로 정리했다. 공용 Docker 복구/재부팅과
+  실제 DB·writer 이전은 이번 준비 완료 조건에서 제외한다.
+- Mac의 기존 `.serena/`, `._.DS_Store`는 미추적 상태로 보존한다. 새로 추적하는 파일에는
+  credential, 내부 서버 주소, 사용자 절대 경로, 운영 데이터가 없다.
+
+준비 산출물은 OPERATIONS.md(분류·실행·인수인계·후속 gate), VERIFICATION.md(실측),
+비활성 systemd 후보와 검증 스크립트, 작업 브랜치의 논리별 commit이다.
+
 ## 2026-09-29 CachyOS 재시도 및 독립 checkout 검증
 
 이 기록은 아래 점검의 SSH 인증 대기를 해소한다. 승인된 대상에 비대화식 SSH가 성공했고
