@@ -20,7 +20,8 @@ with psycopg.connect(url) as conn:
     counts = {table: conn.execute(sql.SQL('SELECT count(*) FROM public.{}').format(sql.Identifier(table))).fetchone()[0] for table in tables}
     with open(out / 'public.dump', 'wb') as target:
         subprocess.run(['docker', 'run', '--rm', '-e', 'PGDATABASE', 'postgres:18',
-                        'pg_dump', '--format=custom', '--schema=public', '--no-owner',
+                        'sh', '-c', 'exec pg_dump --dbname="$PGDATABASE" "$@"', 'pg_dump',
+                        '--format=custom', '--schema=public', '--no-owner',
                         '--no-privileges', '--snapshot=' + snapshot], env=env, stdout=target, check=True)
     manifest = {'created_at': datetime.now(UTC).isoformat(), 'tables': counts,
                 'scope': 'all public application tables; excludes auth and vault schemas',
