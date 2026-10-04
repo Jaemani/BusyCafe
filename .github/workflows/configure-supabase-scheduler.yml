@@ -37,7 +37,7 @@ jobs:
         if: ${{ inputs.apply != true }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: uv run python scripts/cleanup_backed_up_history.py --expected-snapshots 1060615 --archived-max-id 1067994 --backup-sha256 b5762211333fb1e74c9255c8d9228b6e1c2ad08af791f5ea6ceeb8e9411b08d6
+        run: uv run python scripts/diagnose_db_readonly.py
       - name: Apply and verify backed-up history cleanup
         if: ${{ inputs.apply == true }}
         env:
