@@ -186,7 +186,7 @@ def run_poll_cycle(
         status = "complete"
         try:
             removed = repository.prune_snapshot_history(now=clock())
-            LOGGER.info("Snapshot retention: removed=%d keep_days=7", removed)
+            LOGGER.info("Snapshot retention: removed=%d keep_days=2", removed)
         except Exception:
             LOGGER.exception("Snapshot retention failed; current observations are saved")
     elif poll_report.saved > 0:

@@ -39,14 +39,14 @@ class SnapshotRepository:
         self._session_factory = session_factory
 
     def prune_snapshot_history(self, *, now: datetime) -> int:
-        """Keep seven days plus each hotspot's latest observation; bound each batch."""
+        """Keep two days plus each hotspot's latest observation; bound each batch."""
         if now.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         newer = aliased(HotspotSnapshot)
         with self._session_factory() as session:
             ids = list(session.scalars(
                 select(HotspotSnapshot.id).where(
-                    HotspotSnapshot.observed_at < now - timedelta(days=7),
+                    HotspotSnapshot.observed_at < now - timedelta(days=2),
                     exists(select(newer.id).where(
                         newer.hotspot_id == HotspotSnapshot.hotspot_id,
                         newer.observed_at > HotspotSnapshot.observed_at,
