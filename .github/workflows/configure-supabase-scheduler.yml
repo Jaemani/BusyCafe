@@ -37,7 +37,7 @@ jobs:
         if: ${{ inputs.apply != true }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: uv run python scripts/configure_supabase_scheduler.py
+        run: uv run python scripts/diagnose_db_readonly.py
       - name: Apply and verify scheduler
         if: ${{ inputs.apply == true }}
         env:
