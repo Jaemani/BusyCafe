@@ -50,6 +50,33 @@ def load_citydata_fixture() -> dict[str, Any]:
     )
 
 
+def test_snapshot_retention_preserves_recent_and_latest_per_hotspot(session_factory):
+    now = datetime(2026, 10, 4, tzinfo=UTC)
+    first = add_hotspot(session_factory, area_code="POI001", name="Active", is_polled=True)
+    stopped = add_hotspot(session_factory, area_code="POI002", name="Stopped", is_polled=False)
+    with session_factory() as session:
+        for hotspot_id, age in ((first, 10), (first, 7), (first, 1),
+                                (stopped, 20), (stopped, 15)):
+            session.add(HotspotSnapshot(
+                hotspot_id=hotspot_id, observed_at=now - timedelta(days=age),
+                fetched_at=now - timedelta(days=age), congest_level=1,
+                congest_label="여유",
+            ))
+        session.commit()
+    repository = SnapshotRepository(session_factory)
+    assert repository.prune_snapshot_history(now=now) == 2
+    with session_factory() as session:
+        kept = list(session.scalars(select(HotspotSnapshot).order_by(HotspotSnapshot.id)))
+        assert [(row.hotspot_id, row.observed_at.replace(tzinfo=UTC)) for row in kept] == [
+            (first, now - timedelta(days=7)),
+            (first, now - timedelta(days=1)),
+            (stopped, now - timedelta(days=15)),
+        ]
+    assert repository.prune_snapshot_history(now=now) == 0
+    with pytest.raises(ValueError, match="timezone-aware"):
+        repository.prune_snapshot_history(now=now.replace(tzinfo=None))
+
+
 def add_hotspot(
     factory: sessionmaker[Session],
     *,

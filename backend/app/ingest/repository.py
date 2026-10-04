@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, exists, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, aliased, sessionmaker
 
 from app.ingest.poller import ParseFailureRecord, PollTarget, SnapshotRecord
 from app.models import IngestCycle, Hotspot, HotspotParseFailure, HotspotSnapshot
@@ -37,6 +37,27 @@ class SnapshotRepository:
 
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
+
+    def prune_snapshot_history(self, *, now: datetime) -> int:
+        """Keep seven days plus each hotspot's latest observation; bound each batch."""
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        newer = aliased(HotspotSnapshot)
+        with self._session_factory() as session:
+            ids = list(session.scalars(
+                select(HotspotSnapshot.id).where(
+                    HotspotSnapshot.observed_at < now - timedelta(days=7),
+                    exists(select(newer.id).where(
+                        newer.hotspot_id == HotspotSnapshot.hotspot_id,
+                        newer.observed_at > HotspotSnapshot.observed_at,
+                    )),
+                ).order_by(HotspotSnapshot.id).limit(10_000)
+            ))
+            if not ids:
+                return 0
+            session.execute(delete(HotspotSnapshot).where(HotspotSnapshot.id.in_(ids)))
+            session.commit()
+            return len(ids)
 
     def load_poll_targets(self) -> list[PollTarget]:
         with self._session_factory() as session:
