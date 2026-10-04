@@ -22,6 +22,10 @@ def main():
         conn.execute("BEGIN READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '15s'")
         queries = {
+            "all_database_sizes": "SELECT datname, pg_size_pretty(pg_database_size(oid)) FROM pg_database",
+            "wal_size": "SELECT count(*), pg_size_pretty(sum(size)) FROM pg_ls_waldir()",
+            "replication_retention": "SELECT slot_type, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) FROM pg_replication_slots",
+            "readonly_file_settings": "SELECT name, setting, applied, error FROM pg_file_settings WHERE name='default_transaction_read_only'",
             "database_state": """
                 SELECT pg_size_pretty(pg_database_size(current_database())) AS size,
                        pg_database_size(current_database()) AS bytes,
