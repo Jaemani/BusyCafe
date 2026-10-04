@@ -184,6 +184,11 @@ def run_poll_cycle(
     status: CycleStatus
     if is_complete:
         status = "complete"
+        try:
+            removed = repository.prune_snapshot_history(now=clock())
+            LOGGER.info("Snapshot retention: removed=%d keep_days=2", removed)
+        except Exception:
+            LOGGER.exception("Snapshot retention failed; current observations are saved")
     elif poll_report.saved > 0:
         status = "partial"
     else:
