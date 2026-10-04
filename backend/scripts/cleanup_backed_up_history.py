@@ -6,6 +6,7 @@ import psycopg
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--expected-snapshots', type=int, required=True)
+parser.add_argument('--archived-max-id', type=int, required=True)
 parser.add_argument('--backup-sha256', required=True)
 parser.add_argument('--apply', action='store_true')
 args = parser.parse_args()
@@ -16,15 +17,16 @@ with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as conn:
     conn.execute("SET statement_timeout = '10min'")
     conn.execute("SET lock_timeout = '10s'")
     count = conn.execute('SELECT count(*) FROM public.hotspot_snapshots').fetchone()[0]
-    print(f'current_snapshots={count} expected_snapshots={args.expected_snapshots}', flush=True)
-    if count != args.expected_snapshots:
-        raise SystemExit('Snapshot count changed since backup; stop and make a new backup')
+    archived_count = conn.execute('SELECT count(*) FROM public.hotspot_snapshots WHERE id <= %s', (args.archived_max_id,)).fetchone()[0]
+    print(f'current_snapshots={count} archived_snapshots={archived_count} expected_archived={args.expected_snapshots}', flush=True)
+    if archived_count != args.expected_snapshots:
+        raise SystemExit('Archived snapshot range changed; stop and make a new backup')
     latest = [r[0] for r in conn.execute('''
         SELECT DISTINCT ON (hotspot_id) id FROM public.hotspot_snapshots
         ORDER BY hotspot_id, observed_at DESC
     ''')]
     keep = conn.execute('''SELECT count(*) FROM public.hotspot_snapshots
-        WHERE observed_at >= %s OR id = ANY(%s)''', (cutoff, latest)).fetchone()[0]
+        WHERE observed_at >= %s OR id = ANY(%s) OR id > %s''', (cutoff, latest, args.archived_max_id)).fetchone()[0]
     print(f'backup_sha256={args.backup_sha256} total={count} keep={keep} delete={count-keep}', flush=True)
     if not args.apply:
         raise SystemExit(0)
@@ -43,7 +45,7 @@ with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as conn:
             raise RuntimeError('Snapshot table has dependent foreign keys; aborting cleanup')
         conn.execute('''CREATE TEMP TABLE busycafe_keep_snapshots ON COMMIT DROP AS
             SELECT * FROM public.hotspot_snapshots
-            WHERE observed_at >= %s OR id=ANY(%s)''', (cutoff, latest))
+            WHERE observed_at >= %s OR id=ANY(%s) OR id > %s''', (cutoff, latest, args.archived_max_id))
         conn.execute('TRUNCATE public.hotspot_snapshots')
         conn.execute('INSERT INTO public.hotspot_snapshots SELECT * FROM busycafe_keep_snapshots')
         remaining = conn.execute('SELECT count(*) FROM public.hotspot_snapshots').fetchone()[0]
