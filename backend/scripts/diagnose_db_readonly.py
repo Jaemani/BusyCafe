@@ -1,11 +1,23 @@
 """Read-only incident diagnostics; never changes database settings."""
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import psycopg
 
 
+def probe_connection(_):
+    with psycopg.connect(os.environ["DATABASE_URL"]) as connection:
+        row = connection.execute("""SELECT pg_backend_pid(), current_user,
+            setting, source, reset_val FROM pg_settings
+            WHERE name='default_transaction_read_only'""").fetchone()
+        connection.execute('SELECT pg_sleep(1)')
+        return row
+
+
 def main():
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        print('connection_readonly_probe: ' + json.dumps(list(pool.map(probe_connection, range(6)))))
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
         conn.execute("BEGIN READ ONLY")
         conn.execute("SET LOCAL statement_timeout = '15s'")
