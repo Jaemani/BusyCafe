@@ -16,6 +16,7 @@ with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as conn:
     conn.execute("SET statement_timeout = '10min'")
     conn.execute("SET lock_timeout = '10s'")
     count = conn.execute('SELECT count(*) FROM public.hotspot_snapshots').fetchone()[0]
+    print(f'current_snapshots={count} expected_snapshots={args.expected_snapshots}', flush=True)
     if count != args.expected_snapshots:
         raise SystemExit('Snapshot count changed since backup; stop and make a new backup')
     latest = [r[0] for r in conn.execute('''
